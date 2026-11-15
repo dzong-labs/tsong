@@ -1935,6 +1935,7 @@ dependencies = [
  "tokio",
  "tsong-clock",
  "tsong-config",
+ "tsong-keys",
  "tsong-validate",
 ]
 

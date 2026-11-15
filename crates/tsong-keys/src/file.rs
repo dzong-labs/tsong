@@ -7,6 +7,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{self, Signature};
 use p256::pkcs8::DecodePrivateKey;
+use serde_json::Value;
 
 use crate::{KeyError, SignFuture, SigningAlgorithm, SigningKey};
 
@@ -14,6 +15,7 @@ use crate::{KeyError, SignFuture, SigningAlgorithm, SigningKey};
 pub struct FileKey {
     kid: String,
     key: ecdsa::SigningKey,
+    jwk: Value,
 }
 
 impl FileKey {
@@ -28,12 +30,27 @@ impl FileKey {
 
     /// Parses a PKCS#8 PEM P-256 private key.
     pub fn from_pem(kid: &str, pem: &str) -> Result<Self, KeyError> {
-        let key = ecdsa::SigningKey::from_pkcs8_pem(pem).map_err(|_| KeyError::Decode {
+        let decode = || KeyError::Decode {
             kid: kid.to_owned(),
-        })?;
+        };
+        let key = ecdsa::SigningKey::from_pkcs8_pem(pem).map_err(|_| decode())?;
+        let point = key.verifying_key().to_sec1_point(false);
+        let (Some(x), Some(y)) = (point.x(), point.y()) else {
+            return Err(decode());
+        };
+        let jwk = serde_json::json!({
+            "kty": "EC",
+            "crv": "P-256",
+            "x": URL_SAFE_NO_PAD.encode(x),
+            "y": URL_SAFE_NO_PAD.encode(y),
+            "kid": kid,
+            "use": "sig",
+            "alg": "ES256",
+        });
         Ok(Self {
             kid: kid.to_owned(),
             key,
+            jwk,
         })
     }
 }
@@ -55,18 +72,8 @@ impl SigningKey for FileKey {
         SigningAlgorithm::ES256
     }
 
-    fn public_jwk(&self) -> serde_json::Value {
-        let point = self.key.verifying_key().to_sec1_point(false);
-        let encode = |bytes: Option<&_>| URL_SAFE_NO_PAD.encode(bytes.expect("uncompressed point"));
-        serde_json::json!({
-            "kty": "EC",
-            "crv": "P-256",
-            "x": encode(point.x()),
-            "y": encode(point.y()),
-            "kid": self.kid,
-            "use": "sig",
-            "alg": "ES256",
-        })
+    fn public_jwk(&self) -> Value {
+        self.jwk.clone()
     }
 
     fn sign<'a>(&'a self, message: &'a [u8]) -> SignFuture<'a> {
