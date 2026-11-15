@@ -50,10 +50,7 @@ fn check_reports_a_good_config() {
     let path = write_config(dir.path(), true);
     assert_eq!(
         tsong::run(args(&path)).unwrap(),
-        format!(
-            "{}: ok, 0 routes, 0 trusted issuers, signing with k1",
-            path.display()
-        )
+        format!("{}: ok, signing with k1", path.display())
     );
 }
 

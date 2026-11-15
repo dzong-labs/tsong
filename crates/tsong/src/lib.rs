@@ -35,10 +35,8 @@ pub fn check(path: &Path) -> Result<String, Error> {
     let config = Config::load(path)?;
     let keys = KeySet::from_config(&config.issuer.signing)?;
     Ok(format!(
-        "{}: ok, {} routes, {} trusted issuers, signing with {}",
+        "{}: ok, signing with {}",
         path.display(),
-        config.routes.len(),
-        config.trusted_issuers.len(),
         keys.active().kid(),
     ))
 }
