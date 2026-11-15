@@ -64,7 +64,7 @@ impl KeySet {
             .map(Arc::as_ref)
     }
 
-    /// The JWKS document upstreams fetch to validate Tsong's tokens.
+    /// The JWKS document downstream services fetch to validate Tsong's tokens.
     pub fn jwks(&self) -> serde_json::Value {
         let keys: Vec<_> = self.keys().map(SigningKey::public_jwk).collect();
         serde_json::json!({ "keys": keys })

@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use tsong_config::{
-    Config, ConfigError, InboundAlgorithm, KeyProvider, KeyState, SigningAlgorithm, Validation,
+    Config, ConfigError, ConfigStore, FileStore, InboundAlgorithm, KeyProvider, KeyState,
+    SigningAlgorithm, Validation,
 };
 
 const SAMPLE: &str = include_str!("../../../examples/tsong.toml");
@@ -9,6 +10,7 @@ const SAMPLE: &str = include_str!("../../../examples/tsong.toml");
 const ISSUER: &str = r#"
 [issuer]
 url = "https://tsong.example.com"
+listen = "127.0.0.1:8444"
 token_lifetime = "15m"
 clock_skew = "30s"
 
@@ -64,7 +66,7 @@ fn sample_loads() {
     assert_eq!(config.issuer.clock_skew, Duration::from_secs(30));
     assert_eq!(config.issuer.signing.provider, KeyProvider::File);
     assert_eq!(config.issuer.signing.algorithm, SigningAlgorithm::ES256);
-    assert_eq!(config.active_key().kid, "2026-11");
+    assert_eq!(config.active_key().unwrap().kid, "2026-11");
     assert_eq!(config.issuer.signing.keys[1].state, KeyState::Retiring);
     assert_eq!(config.gateway.cache.max_entries, 100_000);
     assert_eq!(config.gateway.trusted_proxies.len(), 1);
@@ -85,6 +87,12 @@ fn sample_loads() {
         Some("api.example.com")
     );
     assert_eq!(config.routes[1].allow.len(), 1);
+    assert_eq!(config.routes[0].required_scopes, ["orders"]);
+    assert_eq!(
+        config.trusted_issuers["okta"].jwks_refetch,
+        Duration::from_secs(30)
+    );
+    assert!(config.trusted_issuers["okta"].jwks_url.is_none());
 }
 
 #[test]
@@ -108,7 +116,7 @@ fn load_takes_relative_key_paths_from_the_config_directory() {
     std::fs::write(&path, minimal()).unwrap();
     let config = Config::load(&path).unwrap();
     assert_eq!(
-        config.active_key().path.as_deref(),
+        config.active_key().unwrap().path.as_deref(),
         Some(&*dir.path().join("k1.pem"))
     );
 }
@@ -244,6 +252,91 @@ algorithms"
 }
 
 #[test]
+fn jwks_urls_are_https() {
+    let text = format!(
+        "{}{}",
+        minimal(),
+        OKTA.replace(
+            "algorithms",
+            "jwks_url = \"http://okta.example.com/keys\"
+algorithms"
+        )
+    );
+    assert_eq!(
+        problems(&text),
+        ["trusted_issuers.okta.jwks_url must be https"]
+    );
+    let https = text.replace(
+        "http://okta.example.com/keys",
+        "https://okta.example.com/keys",
+    );
+    let config = Config::from_toml(&https).unwrap();
+    assert_eq!(
+        config.trusted_issuers["okta"]
+            .jwks_url
+            .as_ref()
+            .unwrap()
+            .as_str(),
+        "https://okta.example.com/keys"
+    );
+}
+
+#[test]
+fn issuers_are_kept_exactly_as_written() {
+    let text = format!("{}{OKTA}", minimal());
+    let config = Config::from_toml(&text).unwrap();
+    assert_eq!(config.issuer.url, "https://tsong.example.com");
+    assert_eq!(
+        config.trusted_issuers["okta"].issuer,
+        "https://okta.example.com"
+    );
+}
+
+#[test]
+fn issuer_urls_must_parse() {
+    let text = minimal().replace("https://tsong.example.com", "not a url");
+    assert_eq!(problems(&text), ["issuer.url must be https"]);
+}
+
+#[test]
+fn jwks_refetch_is_configurable() {
+    let text = format!(
+        "{}{}",
+        minimal(),
+        OKTA.replace(
+            "algorithms",
+            "jwks_refetch = \"5m\"
+algorithms"
+        )
+    );
+    let config = Config::from_toml(&text).unwrap();
+    assert_eq!(
+        config.trusted_issuers["okta"].jwks_refetch,
+        Duration::from_secs(300)
+    );
+}
+
+#[test]
+fn claim_mapping_may_not_write_reserved_claims() {
+    let text = format!(
+        "{}{OKTA}[claims]
+copy = [\"email\", \"aud\"]
+[claims.rename.okta]
+uid = \"sub\"
+x = \"exp\"
+",
+        minimal()
+    );
+    assert_eq!(
+        problems(&text),
+        [
+            r#"claims.copy may not copy reserved claim "aud""#,
+            r#"claims.rename.okta may not write reserved claim "exp""#,
+        ]
+    );
+}
+
+#[test]
 fn trusted_issuers_need_audiences() {
     let text = format!("{}{}", minimal(), OKTA.replace(r#"["api"]"#, "[]"));
     assert_eq!(problems(&text), ["trusted_issuers.okta.audiences is empty"]);
@@ -288,7 +381,7 @@ const ROUTE: &str = r#"
 [[routes]]
 name = "orders"
 match = { path_prefix = "/orders" }
-upstream = "https://orders.example.com"
+downstream = "https://orders.example.com"
 trusted_issuers = ["okta"]
 audience = "orders-api"
 "#;
@@ -302,6 +395,29 @@ fn a_valid_route_loads() {
     let config = Config::from_toml(&with_route(ROUTE)).unwrap();
     assert_eq!(config.routes[0].audience, "orders-api");
     assert!(config.routes[0].scopes.is_empty());
+    assert!(config.routes[0].required_scopes.is_empty());
+}
+
+#[test]
+fn a_config_without_an_active_key_has_none() {
+    let mut config = Config::from_toml(&minimal()).unwrap();
+    config.issuer.signing.keys.clear();
+    assert!(config.active_key().is_none());
+}
+
+#[tokio::test]
+async fn a_file_store_loads_its_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tsong.toml");
+    std::fs::write(&path, minimal()).unwrap();
+    let store: Box<dyn ConfigStore> = Box::new(FileStore::new(&path));
+    let config = store.load().await.unwrap();
+    assert_eq!(config.issuer.listen.port(), 8444);
+    let missing = FileStore::new(dir.path().join("missing.toml"));
+    assert!(matches!(
+        missing.load().await,
+        Err(ConfigError::Read { .. })
+    ));
 }
 
 #[test]
@@ -332,11 +448,11 @@ fn path_prefixes_are_absolute() {
 }
 
 #[test]
-fn upstreams_are_http() {
+fn downstreams_are_http() {
     let text = with_route(&ROUTE.replace("https://orders", "ftp://orders"));
     assert_eq!(
         problems(&text),
-        [r#"route "orders" upstream must be http or https"#]
+        [r#"route "orders" downstream must be http or https"#]
     );
     let plain = with_route(&ROUTE.replace("https://orders", "http://orders"));
     Config::from_toml(&plain).unwrap();

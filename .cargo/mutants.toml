@@ -10,3 +10,8 @@ profile = "mutants"
 # it unviable, untested. Capping lints keeps those mutants tested; the lint
 # job still denies warnings in the real code.
 cap_lints = true
+
+# Test doubles: test code, not code under test.
+exclude_globs = [
+    "crates/tsong-validate/src/testkit.rs",
+]

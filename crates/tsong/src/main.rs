@@ -1,7 +1,8 @@
 use std::process::ExitCode;
 
-fn main() -> ExitCode {
-    match tsong::run(std::env::args().skip(1)) {
+#[tokio::main]
+async fn main() -> ExitCode {
+    match tsong::run(std::env::args().skip(1)).await {
         Ok(report) => {
             println!("{report}");
             ExitCode::SUCCESS

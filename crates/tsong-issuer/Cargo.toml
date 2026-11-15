@@ -5,3 +5,22 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+axum = { workspace = true, features = ["form", "json"] }
+base64.workspace = true
+getrandom.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tsong-clock.workspace = true
+tsong-config.workspace = true
+tsong-keys.workspace = true
+tsong-validate.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+jsonwebtoken = { workspace = true, features = ["use_pem"] }
+p256.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
+tower = { workspace = true, features = ["util"] }
+tsong-clock = { workspace = true, features = ["test-util"] }
+tsong-validate = { workspace = true, features = ["test-util"] }

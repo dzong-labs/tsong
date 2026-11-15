@@ -7,6 +7,7 @@
 //! must not fall back to its default.
 
 mod duration;
+mod store;
 mod validate;
 
 use std::collections::BTreeMap;
@@ -18,7 +19,8 @@ use ipnet::IpNet;
 use serde::Deserialize;
 use url::Url;
 
-pub use validate::Problems;
+pub use store::{ConfigStore, FileStore, LoadFuture};
+pub use validate::{Problems, RESERVED_CLAIMS};
 
 /// A whole Tsong configuration.
 #[derive(Debug, Clone, Deserialize)]
@@ -38,13 +40,16 @@ pub struct Config {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Issuer {
-    /// The `iss` of every token Tsong signs, and the base of its discovery
-    /// document.
-    pub url: Url,
+    /// The `iss` of every token Tsong signs, exactly as written, and the
+    /// base of its discovery document. An https URL.
+    pub url: String,
+    /// Where the issuer serves the token endpoint, JWKS and discovery.
+    pub listen: SocketAddr,
     /// The longest lifetime of a token Tsong signs.
     #[serde(with = "duration")]
     pub token_lifetime: Duration,
-    /// Allowance for clocks that disagree, taken off every cache lifetime.
+    /// Allowance for clocks that disagree: added to inbound `exp` and taken
+    /// off inbound `nbf`, and taken off every cache lifetime.
     #[serde(with = "duration")]
     pub clock_skew: Duration,
     pub signing: Signing,
@@ -118,8 +123,8 @@ pub struct Cache {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustedIssuer {
-    /// The `iss` its tokens carry.
-    pub issuer: Url,
+    /// The `iss` its tokens carry, compared exactly. An https URL.
+    pub issuer: String,
     /// The `aud` values Tsong accepts from it.
     pub audiences: Vec<String>,
     #[serde(default)]
@@ -127,10 +132,21 @@ pub struct TrustedIssuer {
     /// The algorithms its JWTs may be signed with.
     #[serde(default)]
     pub algorithms: Vec<InboundAlgorithm>,
+    /// Where its JWKS is. Unset, it is found through the issuer's OIDC
+    /// discovery document.
+    pub jwks_url: Option<Url>,
+    /// The shortest time between JWKS fetches. A token with an unknown key
+    /// ID refetches the JWKS, but no sooner than this.
+    #[serde(default = "default_jwks_refetch", with = "duration")]
+    pub jwks_refetch: Duration,
     pub introspection_url: Option<Url>,
     pub client_id: Option<String>,
     /// The environment variable holding the introspection client secret.
     pub client_secret_env: Option<String>,
+}
+
+fn default_jwks_refetch() -> Duration {
+    Duration::from_secs(30)
 }
 
 /// How an inbound token is validated.
@@ -171,20 +187,26 @@ pub struct Claims {
     pub rename: BTreeMap<String, BTreeMap<String, String>>,
 }
 
-/// A path or host mapped to an upstream.
+/// A path or host mapped to a downstream service. The upstream is the
+/// caller; the downstream is where the request goes.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Route {
     pub name: String,
     #[serde(rename = "match")]
     pub matcher: Match,
-    pub upstream: Url,
+    pub downstream: Url,
     /// Names from `trusted_issuers` whose tokens this route exchanges.
     pub trusted_issuers: Vec<String>,
-    /// The `aud` of the tokens exchanged for this route.
+    /// The `aud` of the tokens exchanged for this route. The downstream's
+    /// host is added as a second audience.
     pub audience: String,
+    /// The scopes exchanged tokens may carry.
     #[serde(default)]
     pub scopes: Vec<String>,
+    /// The scopes an inbound token must carry to be exchanged.
+    #[serde(default)]
+    pub required_scopes: Vec<String>,
     /// Narrows the gateway's allow list for this route.
     #[serde(default)]
     pub allow: Vec<IpNet>,
@@ -237,13 +259,12 @@ impl Config {
         Ok(config)
     }
 
-    /// The active signing key. Validation guarantees exactly one.
-    pub fn active_key(&self) -> &KeyEntry {
+    /// The active signing key: always one, in a validated config.
+    pub fn active_key(&self) -> Option<&KeyEntry> {
         self.issuer
             .signing
             .keys
             .iter()
             .find(|key| key.state == KeyState::Active)
-            .expect("a validated config has an active key")
     }
 }
