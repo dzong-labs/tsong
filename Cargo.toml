@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+base64 = "0.23.1"
+humantime = "2.4.0"
+ipnet = { version = "2.12.2", features = ["serde"] }
+p256 = { version = "0.14.0", features = ["ecdsa", "pem"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tempfile = "3.27.0"
+thiserror = "2.0.21"
+tokio = "1.54.1"
+toml = "1.2.1"
+tsong-config = { version = "0.1.0", path = "crates/tsong-config" }
+tsong-gateway = { version = "0.1.0", path = "crates/tsong-gateway" }
+tsong-issuer = { version = "0.1.0", path = "crates/tsong-issuer" }
+tsong-keys = { version = "0.1.0", path = "crates/tsong-keys" }
+url = { version = "2.5.8", features = ["serde"] }
+
+# cargo-mutants builds every mutant; debug info only slows those builds.
+# Line numbers in backtraces, without full debug info, and no incremental
+# state: both keep target/ small.
+[profile.dev]
+debug = "line-tables-only"
+incremental = false
+
+[profile.mutants]
+inherits = "test"
+debug = "none"

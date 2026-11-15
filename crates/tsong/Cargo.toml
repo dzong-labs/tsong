@@ -1,0 +1,14 @@
+[package]
+name = "tsong"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tsong-config.workspace = true
+tsong-keys.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+p256.workspace = true
