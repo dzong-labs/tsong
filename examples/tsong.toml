@@ -4,6 +4,7 @@
 # ── token exchange issuer ─────────────────────────────
 [issuer]
 url = "https://tsong.internal.example.com"
+listen = "0.0.0.0:8444"
 token_lifetime = "15m"          # longest lifetime of a minted token
 clock_skew = "30s"
 
@@ -60,15 +61,16 @@ oid = "sub"
 [[routes]]
 name = "orders"
 match = { host = "api.example.com", path_prefix = "/orders" }
-upstream = "https://orders.internal.example.com"
+downstream = "https://orders.internal.example.com"
 trusted_issuers = ["okta", "entra"]
 audience = "orders-api"
 scopes = ["orders.read", "orders.write"]
+required_scopes = ["orders"]
 
 [[routes]]
 name = "builds"
 match = { path_prefix = "/builds" }
-upstream = "https://ci.internal.example.com"
+downstream = "https://ci.internal.example.com"
 trusted_issuers = ["gitlab"]
 audience = "ci-api"
 allow = ["10.20.0.0/16"]

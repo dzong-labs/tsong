@@ -4,7 +4,20 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
+use url::Url;
+
 use crate::{Config, KeyProvider, KeyState, Validation};
+
+/// Claims Tsong sets on every token it issues, which claim mapping may not
+/// write.
+pub const RESERVED_CLAIMS: [&str; 9] = [
+    "iss", "aud", "exp", "iat", "nbf", "jti", "scope", "act", "cnf",
+];
+
+/// Whether `text` is an https URL.
+fn is_https(text: &str) -> bool {
+    Url::parse(text).is_ok_and(|url| url.scheme() == "https")
+}
 
 /// Every problem a config has, one per line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +52,7 @@ impl Config {
 
     fn check_issuer(&self, problems: &mut Vec<String>) {
         let issuer = &self.issuer;
-        if issuer.url.scheme() != "https" {
+        if !is_https(&issuer.url) {
             problems.push("issuer.url must be https".into());
         }
         if issuer.clock_skew >= issuer.token_lifetime {
@@ -77,8 +90,13 @@ impl Config {
 
     fn check_trusted_issuers(&self, problems: &mut Vec<String>) {
         for (name, trusted) in &self.trusted_issuers {
-            if trusted.issuer.scheme() != "https" {
+            if !is_https(&trusted.issuer) {
                 problems.push(format!("trusted_issuers.{name}.issuer must be https"));
+            }
+            if let Some(url) = &trusted.jwks_url
+                && url.scheme() != "https"
+            {
+                problems.push(format!("trusted_issuers.{name}.jwks_url must be https"));
             }
             if let Some(url) = &trusted.introspection_url
                 && url.scheme() != "https"
@@ -116,6 +134,20 @@ impl Config {
     }
 
     fn check_claims(&self, problems: &mut Vec<String>) {
+        for claim in &self.claims.copy {
+            if RESERVED_CLAIMS.contains(&claim.as_str()) {
+                problems.push(format!("claims.copy may not copy reserved claim {claim:?}"));
+            }
+        }
+        for (name, renames) in &self.claims.rename {
+            for target in renames.values() {
+                if RESERVED_CLAIMS.contains(&target.as_str()) {
+                    problems.push(format!(
+                        "claims.rename.{name} may not write reserved claim {target:?}"
+                    ));
+                }
+            }
+        }
         for name in self.claims.rename.keys() {
             if !self.trusted_issuers.contains_key(name) {
                 problems.push(format!("claims.rename.{name} names no trusted issuer"));
@@ -141,8 +173,8 @@ impl Config {
             {
                 problems.push(format!("route {name:?} path_prefix must start with /"));
             }
-            if !matches!(route.upstream.scheme(), "http" | "https") {
-                problems.push(format!("route {name:?} upstream must be http or https"));
+            if !matches!(route.downstream.scheme(), "http" | "https") {
+                problems.push(format!("route {name:?} downstream must be http or https"));
             }
             if route.trusted_issuers.is_empty() {
                 problems.push(format!("route {name:?} trusts no issuer"));

@@ -5,10 +5,18 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-tsong-config.workspace = true
-tsong-keys.workspace = true
+axum.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal"] }
+tsong-clock.workspace = true
+tsong-config.workspace = true
+tsong-issuer.workspace = true
+tsong-keys.workspace = true
+tsong-validate.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
 p256.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }

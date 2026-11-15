@@ -1,0 +1,310 @@
+//! Inbound token validation, shared by the issuer and the gateway.
+//!
+//! [`Validator::validate`] accepts a JWT only when every check passes: the
+//! issuer is trusted, the algorithm is one the issuer is allowed, the
+//! signature verifies against the issuer's JWKS, the audience is accepted,
+//! and the token is inside its `nbf`..`exp` window, give or take the clock
+//! skew. The config sets the values each check compares against; no check
+//! can be turned off.
+//!
+//! Opaque tokens need introspection, which isn't built yet: they fail with
+//! [`ValidateError::Unsupported`].
+
+mod claims;
+mod jwks;
+#[cfg(feature = "test-util")]
+pub mod testkit;
+
+use std::collections::BTreeSet;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::SystemTime;
+
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use jsonwebtoken::jwk::{Jwk, KeyAlgorithm, PublicKeyUse};
+use jsonwebtoken::{Algorithm, DecodingKey};
+use serde_json::{Map, Value};
+use tokio::sync::Mutex;
+use tsong_clock::Clock;
+use tsong_config::{Config, InboundAlgorithm, TrustedIssuer, Validation};
+
+pub use claims::Validated;
+pub use jwks::{FetchError, FetchFuture, HttpFetcher, JwksFetcher};
+
+/// Why a token was refused.
+#[derive(Debug, thiserror::Error)]
+pub enum ValidateError {
+    #[error("the token is not a well-formed JWT")]
+    Malformed,
+    #[error("the token has no {0} claim")]
+    MissingClaim(&'static str),
+    #[error("the token's {0} claim is not valid")]
+    InvalidClaim(&'static str),
+    #[error("issuer {0:?} is not trusted")]
+    UntrustedIssuer(String),
+    #[error("{0} is not supported yet")]
+    Unsupported(&'static str),
+    #[error("algorithm {0} is not allowed for this issuer")]
+    Algorithm(String),
+    #[error("the token has no kid")]
+    MissingKid,
+    #[error("no key {0:?} in the issuer's JWKS")]
+    UnknownKey(String),
+    #[error("the signature is not valid")]
+    Signature,
+    #[error("no audience in the token is accepted")]
+    Audience,
+    #[error("the token has expired")]
+    Expired,
+    #[error("the token is not valid yet")]
+    NotYetValid,
+    #[error("fetching the issuer's JWKS: {0}")]
+    Jwks(#[from] FetchError),
+}
+
+/// Validates inbound tokens against the trusted issuers of one config.
+pub struct Validator {
+    issuers: Vec<Issuer>,
+    fetcher: Arc<dyn JwksFetcher>,
+    clock: Arc<dyn Clock>,
+    skew: u64,
+}
+
+/// A trusted issuer and its cached keys.
+struct Issuer {
+    name: String,
+    trusted: TrustedIssuer,
+    keys: Mutex<Keys>,
+}
+
+#[derive(Default)]
+struct Keys {
+    by_kid: HashMap<String, Jwk>,
+    fetched_at: Option<SystemTime>,
+}
+
+impl Validator {
+    pub fn new(config: &Config, fetcher: Arc<dyn JwksFetcher>, clock: Arc<dyn Clock>) -> Self {
+        let issuers = config
+            .trusted_issuers
+            .iter()
+            .map(|(name, trusted)| Issuer {
+                name: name.clone(),
+                trusted: trusted.clone(),
+                keys: Mutex::default(),
+            })
+            .collect();
+        Self {
+            issuers,
+            fetcher,
+            clock,
+            skew: config.issuer.clock_skew.as_secs(),
+        }
+    }
+
+    /// Validates `token`, returning its claims and the name of the trusted
+    /// issuer that signed it.
+    pub async fn validate(&self, token: &str) -> Result<Validated, ValidateError> {
+        let Some((header, payload)) = split(token) else {
+            return Err(self.not_a_jwt());
+        };
+        let iss = match payload.get("iss") {
+            Some(Value::String(iss)) => iss,
+            Some(_) => return Err(ValidateError::InvalidClaim("iss")),
+            None => return Err(ValidateError::MissingClaim("iss")),
+        };
+        let issuer = self
+            .issuers
+            .iter()
+            .find(|issuer| issuer.trusted.issuer == *iss)
+            .ok_or_else(|| ValidateError::UntrustedIssuer(iss.clone()))?;
+        if issuer.trusted.validation == Validation::Introspection {
+            return Err(ValidateError::Unsupported("introspection"));
+        }
+        let algorithm = allowed_algorithm(&issuer.trusted, header.alg)?;
+        let kid = header.kid.ok_or(ValidateError::MissingKid)?;
+        let jwk = self.key(issuer, &kid).await?;
+        if let Some(key_algorithm) = jwk.common.key_algorithm
+            && key_algorithm != algorithm.1
+        {
+            return Err(ValidateError::Algorithm(format!("{:?}", header.alg)));
+        }
+        verify(token, &jwk, algorithm.0)?;
+        self.check_audience(&issuer.trusted, &payload)?;
+        self.check_times(&payload)?;
+        Ok(Validated::new(issuer.name.clone(), payload))
+    }
+
+    /// Why a token that isn't a JWT was refused: it may be opaque, which
+    /// needs introspection.
+    fn not_a_jwt(&self) -> ValidateError {
+        if self
+            .issuers
+            .iter()
+            .any(|issuer| issuer.trusted.validation == Validation::Introspection)
+        {
+            ValidateError::Unsupported("introspection")
+        } else {
+            ValidateError::Malformed
+        }
+    }
+
+    /// The key `kid` names, refetching the issuer's JWKS when the key is
+    /// unknown and the last fetch is old enough.
+    async fn key(&self, issuer: &Issuer, kid: &str) -> Result<Jwk, ValidateError> {
+        let mut keys = issuer.keys.lock().await;
+        if let Some(jwk) = keys.by_kid.get(kid) {
+            return Ok(jwk.clone());
+        }
+        let now = self.clock.now();
+        let due = keys.fetched_at.is_none_or(|fetched_at| {
+            now.duration_since(fetched_at)
+                .is_ok_and(|age| age >= issuer.trusted.jwks_refetch)
+        });
+        if due {
+            let set = self.fetcher.fetch(&issuer.trusted).await?;
+            keys.by_kid = set
+                .keys
+                .into_iter()
+                .filter(|jwk| {
+                    matches!(
+                        jwk.common.public_key_use,
+                        None | Some(PublicKeyUse::Signature)
+                    )
+                })
+                .filter_map(|jwk| Some((jwk.common.key_id.clone()?, jwk)))
+                .collect();
+            keys.fetched_at = Some(now);
+        }
+        keys.by_kid
+            .get(kid)
+            .cloned()
+            .ok_or_else(|| ValidateError::UnknownKey(kid.to_owned()))
+    }
+
+    fn check_audience(
+        &self,
+        trusted: &TrustedIssuer,
+        payload: &Map<String, Value>,
+    ) -> Result<(), ValidateError> {
+        let accepted = |aud: &str| trusted.audiences.iter().any(|a| a == aud);
+        let matched = match payload.get("aud") {
+            None => return Err(ValidateError::MissingClaim("aud")),
+            Some(Value::String(aud)) => accepted(aud),
+            Some(Value::Array(auds)) => {
+                let mut any = false;
+                for aud in auds {
+                    let Value::String(aud) = aud else {
+                        return Err(ValidateError::InvalidClaim("aud"));
+                    };
+                    any |= accepted(aud);
+                }
+                any
+            }
+            Some(_) => return Err(ValidateError::InvalidClaim("aud")),
+        };
+        if matched {
+            Ok(())
+        } else {
+            Err(ValidateError::Audience)
+        }
+    }
+
+    fn check_times(&self, payload: &Map<String, Value>) -> Result<(), ValidateError> {
+        let now = self.clock.unix_seconds();
+        let exp = time_claim(payload, "exp")?.ok_or(ValidateError::MissingClaim("exp"))?;
+        if now >= exp.saturating_add(self.skew) {
+            return Err(ValidateError::Expired);
+        }
+        if let Some(nbf) = time_claim(payload, "nbf")?
+            && now.saturating_add(self.skew) < nbf
+        {
+            return Err(ValidateError::NotYetValid);
+        }
+        Ok(())
+    }
+}
+
+/// A JWT's header and its payload, read without verifying anything.
+fn split(token: &str) -> Option<(jsonwebtoken::Header, Map<String, Value>)> {
+    let header = jsonwebtoken::decode_header(token).ok()?;
+    let mut parts = token.split('.');
+    let payload = parts.nth(1)?;
+    let bytes = URL_SAFE_NO_PAD.decode(payload).ok()?;
+    let payload = serde_json::from_slice(&bytes).ok()?;
+    Some((header, payload))
+}
+
+/// The header's algorithm, when the issuer allows it, with the JWK
+/// algorithm a key for it declares.
+fn allowed_algorithm(
+    trusted: &TrustedIssuer,
+    alg: Algorithm,
+) -> Result<(Algorithm, KeyAlgorithm), ValidateError> {
+    trusted
+        .algorithms
+        .iter()
+        .map(|&allowed| algorithms(allowed))
+        .find(|(algorithm, _)| *algorithm == alg)
+        .ok_or_else(|| ValidateError::Algorithm(format!("{alg:?}")))
+}
+
+fn algorithms(allowed: InboundAlgorithm) -> (Algorithm, KeyAlgorithm) {
+    match allowed {
+        InboundAlgorithm::RS256 => (Algorithm::RS256, KeyAlgorithm::RS256),
+        InboundAlgorithm::RS384 => (Algorithm::RS384, KeyAlgorithm::RS384),
+        InboundAlgorithm::RS512 => (Algorithm::RS512, KeyAlgorithm::RS512),
+        InboundAlgorithm::PS256 => (Algorithm::PS256, KeyAlgorithm::PS256),
+        InboundAlgorithm::PS384 => (Algorithm::PS384, KeyAlgorithm::PS384),
+        InboundAlgorithm::PS512 => (Algorithm::PS512, KeyAlgorithm::PS512),
+        InboundAlgorithm::ES256 => (Algorithm::ES256, KeyAlgorithm::ES256),
+        InboundAlgorithm::ES384 => (Algorithm::ES384, KeyAlgorithm::ES384),
+        InboundAlgorithm::EdDSA => (Algorithm::EdDSA, KeyAlgorithm::EdDSA),
+    }
+}
+
+/// Checks the signature alone; the claims are checked against the config
+/// and the injected clock.
+fn verify(token: &str, jwk: &Jwk, algorithm: Algorithm) -> Result<(), ValidateError> {
+    let key = DecodingKey::from_jwk(jwk).map_err(|_| ValidateError::Signature)?;
+    let mut validation = jsonwebtoken::Validation::new(algorithm);
+    validation.validate_exp = false;
+    validation.validate_nbf = false;
+    validation.validate_aud = false;
+    validation.required_spec_claims.clear();
+    jsonwebtoken::decode::<Map<String, Value>>(token, &key, &validation)
+        .map(|_| ())
+        .map_err(|_| ValidateError::Signature)
+}
+
+/// A NumericDate claim, in whole seconds.
+fn time_claim(
+    payload: &Map<String, Value>,
+    name: &'static str,
+) -> Result<Option<u64>, ValidateError> {
+    let Some(value) = payload.get(name) else {
+        return Ok(None);
+    };
+    if let Some(seconds) = value.as_u64() {
+        return Ok(Some(seconds));
+    }
+    match value.as_f64() {
+        Some(seconds) if seconds.is_finite() && seconds >= 0.0 => Ok(Some(seconds as u64)),
+        _ => Err(ValidateError::InvalidClaim(name)),
+    }
+}
+
+/// The scopes a token grants: its `scope` claim, space-separated, and its
+/// `scp` claim, a string or an array, as Entra issues it.
+pub fn scopes(claims: &Map<String, Value>) -> BTreeSet<&str> {
+    let mut scopes = BTreeSet::new();
+    for name in ["scope", "scp"] {
+        match claims.get(name) {
+            Some(Value::String(text)) => scopes.extend(text.split_whitespace()),
+            Some(Value::Array(items)) => scopes.extend(items.iter().filter_map(Value::as_str)),
+            _ => {}
+        }
+    }
+    scopes
+}

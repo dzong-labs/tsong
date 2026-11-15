@@ -1,0 +1,28 @@
+[package]
+name = "tsong-validate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# The testkit: a test signing key and a fake JWKS source.
+test-util = ["dep:p256", "jsonwebtoken/use_pem"]
+
+[dependencies]
+base64.workspace = true
+jsonwebtoken.workspace = true
+p256 = { workspace = true, optional = true }
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tsong-clock.workspace = true
+tsong-config.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+reqwest.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "net"] }
+tsong-clock = { workspace = true, features = ["test-util"] }
+tsong-validate = { path = ".", features = ["test-util"] }
