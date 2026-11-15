@@ -3,18 +3,27 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
-use p256::ecdsa::SigningKey;
+use p256::ecdsa::SigningKey as EcKey;
 use p256::pkcs8::{EncodePrivateKey, LineEnding};
 use serde_json::{Value, json};
 use tsong_config::TrustedIssuer;
+use tsong_keys::{FileKey, SigningKey};
 
 use crate::{FetchError, FetchFuture, JwksFetcher};
 
-/// An ES256 key for a fixed seed, so tests need no randomness.
+/// Why a test double couldn't be built or used.
+pub type TestKitError = Box<dyn std::error::Error + Send + Sync>;
+
+/// A PKCS#8 PEM P-256 private key for a fixed seed, so tests need no
+/// randomness.
+pub fn pem(seed: u8) -> Result<String, TestKitError> {
+    let key = EcKey::from_slice(&[seed; 32])?;
+    Ok(key.to_pkcs8_pem(LineEnding::LF)?.to_string())
+}
+
+/// An ES256 key for a fixed seed.
 pub struct TestKey {
     kid: String,
     encoding: EncodingKey,
@@ -22,25 +31,13 @@ pub struct TestKey {
 }
 
 impl TestKey {
-    pub fn new(kid: &str, seed: u8) -> Self {
-        let key = SigningKey::from_slice(&[seed; 32]).expect("a valid scalar");
-        let pem = key.to_pkcs8_pem(LineEnding::LF).expect("encodable");
-        let point = key.verifying_key().to_sec1_point(false);
-        let coordinate = |bytes: Option<&_>| URL_SAFE_NO_PAD.encode(bytes.expect("uncompressed"));
-        let jwk = json!({
-            "kty": "EC",
-            "crv": "P-256",
-            "x": coordinate(point.x()),
-            "y": coordinate(point.y()),
-            "kid": kid,
-            "use": "sig",
-            "alg": "ES256",
-        });
-        Self {
+    pub fn new(kid: &str, seed: u8) -> Result<Self, TestKitError> {
+        let pem = pem(seed)?;
+        Ok(Self {
             kid: kid.into(),
-            encoding: EncodingKey::from_ec_pem(pem.as_bytes()).expect("a P-256 PEM"),
-            jwk,
-        }
+            encoding: EncodingKey::from_ec_pem(pem.as_bytes())?,
+            jwk: FileKey::from_pem(kid, &pem)?.public_jwk(),
+        })
     }
 
     /// The public key as a JWK.
@@ -54,10 +51,10 @@ impl TestKey {
     }
 
     /// An ES256 JWT of `claims`, naming this key.
-    pub fn sign(&self, claims: &Value) -> String {
+    pub fn sign(&self, claims: &Value) -> Result<String, TestKitError> {
         let mut header = Header::new(Algorithm::ES256);
         header.kid = Some(self.kid.clone());
-        jsonwebtoken::encode(&header, claims, &self.encoding).expect("signable")
+        Ok(jsonwebtoken::encode(&header, claims, &self.encoding)?)
     }
 }
 
