@@ -211,6 +211,39 @@ fn cache_needs_room() {
 }
 
 #[test]
+fn trusted_issuers_are_https() {
+    let text = format!(
+        "{}{}",
+        minimal(),
+        OKTA.replace("https://okta", "http://okta")
+    );
+    assert_eq!(
+        problems(&text),
+        ["trusted_issuers.okta.issuer must be https"]
+    );
+}
+
+#[test]
+fn introspection_urls_are_https() {
+    let text = format!(
+        "{}{}",
+        minimal(),
+        OKTA.replace(
+            "algorithms",
+            "validation = \"introspection\"
+introspection_url = \"http://okta.example.com/introspect\"
+client_id = \"tsong\"
+client_secret_env = \"SECRET\"
+algorithms"
+        )
+    );
+    assert_eq!(
+        problems(&text),
+        ["trusted_issuers.okta.introspection_url must be https"]
+    );
+}
+
+#[test]
 fn trusted_issuers_need_audiences() {
     let text = format!("{}{}", minimal(), OKTA.replace(r#"["api"]"#, "[]"));
     assert_eq!(problems(&text), ["trusted_issuers.okta.audiences is empty"]);

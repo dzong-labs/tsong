@@ -77,6 +77,16 @@ impl Config {
 
     fn check_trusted_issuers(&self, problems: &mut Vec<String>) {
         for (name, trusted) in &self.trusted_issuers {
+            if trusted.issuer.scheme() != "https" {
+                problems.push(format!("trusted_issuers.{name}.issuer must be https"));
+            }
+            if let Some(url) = &trusted.introspection_url
+                && url.scheme() != "https"
+            {
+                problems.push(format!(
+                    "trusted_issuers.{name}.introspection_url must be https"
+                ));
+            }
             if trusted.audiences.is_empty() {
                 problems.push(format!("trusted_issuers.{name}.audiences is empty"));
             }
