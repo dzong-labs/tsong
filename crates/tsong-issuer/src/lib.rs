@@ -5,8 +5,10 @@
 //! that route. The route filters the subject token: it must carry one of the
 //! route's allowed audiences, and only scopes the route allows. The minted
 //! token keeps the subject token's audiences and scopes, and adds the
-//! route's `append_audience`. [`router`] serves the token endpoint, the JWKS
-//! and the discovery document over HTTP.
+//! route's `append_audience`. Its `sub` is the trusted issuer's
+//! `sub_prefix`, a `:`, and the subject, and its RFC 9493 `sub_id` keeps the
+//! subject token's own `iss` and `sub`. [`router`] serves the token
+//! endpoint, the JWKS and the discovery document over HTTP.
 
 mod context;
 mod error;
@@ -164,11 +166,21 @@ impl Issuer {
             )));
         }
         let granted = granted_scopes(route, &validated, request.scope.as_deref())?;
-        let subject = self
-            .renamed_sub(&validated)
-            .or_else(|| validated.subject())
-            .ok_or_else(|| ExchangeError::InvalidGrant("the subject token has no sub".into()))?
-            .to_owned();
+        let original_sub = validated
+            .subject()
+            .filter(|sub| !sub.is_empty())
+            .ok_or_else(|| ExchangeError::InvalidRequest("the subject token has no sub".into()))?;
+        let trusted = self
+            .config
+            .trusted_issuers
+            .get(validated.issuer())
+            .ok_or_else(|| {
+                ExchangeError::Server(format!(
+                    "trusted issuer {:?} is not configured",
+                    validated.issuer()
+                ))
+            })?;
+        let subject = self.subject(&validated, original_sub)?;
 
         let now = self.clock.unix_seconds();
         let lifetime = self.config.issuer.token_lifetime.as_secs();
@@ -177,13 +189,20 @@ impl Issuer {
             .unwrap_or(0)
             .min(now.saturating_add(lifetime));
         if exp <= now {
-            return Err(ExchangeError::InvalidGrant(
+            return Err(ExchangeError::InvalidRequest(
                 "the subject token has expired".into(),
             ));
         }
 
         let mut claims = self.mapped_claims(&validated);
-        claims.insert("sub".into(), json!(subject));
+        claims.insert(
+            "sub".into(),
+            json!(format!("{}:{subject}", trusted.sub_prefix)),
+        );
+        claims.insert(
+            "sub_id".into(),
+            json!({ "format": "iss_sub", "iss": trusted.issuer, "sub": original_sub }),
+        );
         claims.insert("iss".into(), json!(self.config.issuer.url));
         claims.insert(
             "aud".into(),
@@ -231,12 +250,34 @@ impl Issuer {
         claims
     }
 
-    /// The `sub` a rename gives the token, such as Entra's `oid`, when the
-    /// inbound token has that claim as a string.
-    fn renamed_sub<'a>(&self, validated: &'a Validated) -> Option<&'a str> {
-        let renames = self.config.claims.rename.get(validated.issuer())?;
-        let (from, _) = renames.iter().find(|(_, to)| *to == "sub")?;
-        validated.claims().get(from)?.as_str()
+    /// The subject the minted `sub` is made from: the claim a rename maps to
+    /// `sub`, such as Entra's `oid`, or else `original_sub`. A token without
+    /// the renamed claim as a non-empty string is refused rather than falling
+    /// back, so one prefix never mixes two kinds of identifier.
+    fn subject<'a>(
+        &self,
+        validated: &'a Validated,
+        original_sub: &'a str,
+    ) -> Result<&'a str, ExchangeError> {
+        let renamed = self
+            .config
+            .claims
+            .rename
+            .get(validated.issuer())
+            .and_then(|renames| renames.iter().find(|(_, to)| *to == "sub"));
+        match renamed {
+            None => Ok(original_sub),
+            Some((from, _)) => validated
+                .claims()
+                .get(from)
+                .and_then(Value::as_str)
+                .filter(|subject| !subject.is_empty())
+                .ok_or_else(|| {
+                    ExchangeError::InvalidRequest(format!(
+                        "the subject token has no {from}, which supplies its subject"
+                    ))
+                }),
+        }
     }
 
     /// Whether a token request from the connection's `peer`, with these

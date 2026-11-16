@@ -90,7 +90,7 @@ async fn failed_jwks_fetches_are_counted_by_issuer() -> TestResult {
     let dir = tempfile::tempdir()?;
     let key = write_key(dir.path())?;
     let text = format!(
-        "{}\n[trusted_issuers.okta]\nissuer = \"https://okta.test\"\naudiences = [\"tsong\"]\nalgorithms = [\"ES256\"]\n",
+        "{}\n[trusted_issuers.okta]\nsub_prefix = \"okta\"\nissuer = \"https://okta.test\"\naudiences = [\"tsong\"]\nalgorithms = [\"ES256\"]\n",
         config_text(&key, "https://one.test", 8444, "")
     );
     let config = Config::from_toml(&text)?;

@@ -41,11 +41,13 @@ allow = ["127.0.0.0/8", "10.0.0.0/8"]
 max_entries = 10
 
 [trusted_issuers.test]
+sub_prefix = "test"
 issuer = "https://issuer.test"
 audiences = ["tsong", "api"]
 algorithms = ["ES256"]
 
 [trusted_issuers.other]
+sub_prefix = "other"
 issuer = "https://other.test"
 audiences = ["tsong"]
 algorithms = ["ES256"]
@@ -54,8 +56,10 @@ algorithms = ["ES256"]
 copy = ["email", "groups"]
 
 [claims.rename.test]
-oid = "sub"
 uid = "user"
+
+[claims.rename.other]
+oid = "sub"
 
 [[routes]]
 name = "orders"

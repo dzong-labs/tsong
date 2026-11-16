@@ -84,7 +84,11 @@ async fn a_subject_token_is_exchanged_for_the_route() -> TestResult {
     assert_eq!(header.typ.as_deref(), Some("at+jwt"));
     for (name, value) in [
         ("iss", json!("https://tsong.test")),
-        ("sub", json!("alice")),
+        ("sub", json!("test:alice")),
+        (
+            "sub_id",
+            json!({ "format": "iss_sub", "iss": "https://issuer.test", "sub": "alice" }),
+        ),
         ("aud", json!(["tsong", "orders.test"])),
         ("iat", json!(NOW)),
         ("exp", json!(NOW + 900)),
@@ -102,7 +106,7 @@ async fn a_subject_token_is_exchanged_for_the_route() -> TestResult {
         claims.get("jti").and_then(Value::as_str).map(str::len),
         Some(22)
     );
-    assert_eq!(claims.len(), 10);
+    assert_eq!(claims.len(), 11);
     Ok(())
 }
 
@@ -145,7 +149,7 @@ async fn a_subject_inside_its_skew_but_expired_is_refused() -> TestResult {
                 request(&h, "orders.test", subject(json!({ "exp": exp })))
             )
             .await?,
-            ("invalid_grant", "the subject token has expired".into())
+            ("invalid_request", "the subject token has expired".into())
         );
     }
     Ok(())
@@ -281,22 +285,48 @@ async fn the_audience_names_a_route_host_without_regard_to_case() -> TestResult 
 #[tokio::test]
 async fn every_trusted_issuer_may_exchange_for_every_route() -> TestResult {
     let h = harness()?;
-    let other = subject(json!({ "iss": "https://other.test" }));
+    let other = subject(json!({ "iss": "https://other.test", "oid": "object-7" }));
     let (_, claims) = exchanged(&h, request(&h, "orders.test", other)).await?;
     assert_eq!(claims.get("aud"), Some(&json!(["tsong", "orders.test"])));
     Ok(())
 }
 
 #[tokio::test]
-async fn a_renamed_claim_can_supply_the_subject() -> TestResult {
+async fn each_issuer_prefixes_its_own_subjects() -> TestResult {
     let h = harness()?;
-    for (changes, sub) in [
-        (json!({ "oid": "object-7" }), "object-7"),
-        (json!({ "oid": 7 }), "alice"),
-        (json!({ "oid": "object-7", "sub": null }), "object-7"),
-    ] {
-        let (_, claims) = exchanged(&h, request(&h, "orders.test", subject(changes))).await?;
-        assert_eq!(claims.get("sub"), Some(&json!(sub)));
+    let (_, claims) = exchanged(&h, request(&h, "orders.test", subject(json!({})))).await?;
+    assert_eq!(claims.get("sub"), Some(&json!("test:alice")));
+    let other = subject(json!({ "iss": "https://other.test", "oid": "object-7" }));
+    let (_, claims) = exchanged(&h, request(&h, "orders.test", other)).await?;
+    assert_eq!(claims.get("sub"), Some(&json!("other:object-7")));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_renamed_claim_supplies_the_subject_and_sub_id_keeps_the_original() -> TestResult {
+    let h = harness()?;
+    let other = subject(json!({ "iss": "https://other.test", "oid": "object-7" }));
+    let (_, claims) = exchanged(&h, request(&h, "orders.test", other)).await?;
+    assert_eq!(claims.get("sub"), Some(&json!("other:object-7")));
+    assert_eq!(
+        claims.get("sub_id"),
+        Some(&json!({ "format": "iss_sub", "iss": "https://other.test", "sub": "alice" }))
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_token_without_its_renamed_subject_is_refused() -> TestResult {
+    let h = harness()?;
+    for oid in [Value::Null, json!(7), json!("")] {
+        let other = subject(json!({ "iss": "https://other.test", "oid": oid }));
+        assert_eq!(
+            refused(&h, request(&h, "orders.test", other)).await?,
+            (
+                "invalid_request",
+                "the subject token has no oid, which supplies its subject".into()
+            )
+        );
     }
     Ok(())
 }
@@ -304,25 +334,32 @@ async fn a_renamed_claim_can_supply_the_subject() -> TestResult {
 #[tokio::test]
 async fn renames_apply_only_to_their_issuer() -> TestResult {
     let h = harness()?;
-    let claims = subject(json!({ "iss": "https://other.test", "oid": "object-7" }));
-    let (_, claims) = exchanged(&h, request(&h, "orders.test", claims)).await?;
-    assert_eq!(claims.get("sub"), Some(&json!("alice")));
+    let (_, claims) = exchanged(
+        &h,
+        request(&h, "orders.test", subject(json!({ "oid": "object-7" }))),
+    )
+    .await?;
+    assert_eq!(claims.get("sub"), Some(&json!("test:alice")));
+    let other = subject(json!({ "iss": "https://other.test", "oid": "object-7" }));
+    let (_, claims) = exchanged(&h, request(&h, "orders.test", other)).await?;
     assert!(!claims.contains_key("user"));
-    assert_eq!(claims.get("aud"), Some(&json!(["tsong", "orders.test"])));
     Ok(())
 }
 
 #[tokio::test]
 async fn a_subject_is_required() -> TestResult {
     let h = harness()?;
-    assert_eq!(
-        refused(
-            &h,
-            request(&h, "orders.test", subject(json!({ "sub": null })))
-        )
-        .await?,
-        ("invalid_grant", "the subject token has no sub".into())
-    );
+    for changes in [
+        json!({ "sub": null }),
+        json!({ "sub": 7 }),
+        json!({ "sub": "" }),
+        json!({ "iss": "https://other.test", "oid": "object-7", "sub": null }),
+    ] {
+        assert_eq!(
+            refused(&h, request(&h, "orders.test", subject(changes))).await?,
+            ("invalid_request", "the subject token has no sub".into())
+        );
+    }
     Ok(())
 }
 
@@ -409,13 +446,13 @@ async fn validation_failures_map_to_oauth_errors() -> TestResult {
     let expired = subject(json!({ "exp": NOW - 3600 }));
     assert_eq!(
         refused(&h, request(&h, "orders.test", expired)).await?,
-        ("invalid_grant", "the token has expired".into())
+        ("invalid_request", "the token has expired".into())
     );
 
     let opaque = changed(request(&h, "orders.test", subject(json!({}))), |r| {
         r.subject_token = Some("opaque".into());
     });
-    assert_eq!(refused(&h, opaque).await?.0, "invalid_grant");
+    assert_eq!(refused(&h, opaque).await?.0, "invalid_request");
 
     // A fresh issuer, with no keys cached yet.
     let h = harness()?;
@@ -473,11 +510,6 @@ fn error_codes_and_statuses() {
         (
             ExchangeError::InvalidRequest(String::new()),
             "invalid_request",
-            400,
-        ),
-        (
-            ExchangeError::InvalidGrant(String::new()),
-            "invalid_grant",
             400,
         ),
         (

@@ -141,6 +141,11 @@ pub struct Cache {
 pub struct TrustedIssuer {
     /// The `iss` its tokens carry, compared exactly. An https URL.
     pub issuer: String,
+    /// Put before its subjects in the tokens Tsong signs, as
+    /// `<sub_prefix>:<sub>`, so two issuers' subjects never collide.
+    /// Lowercase letters, digits and `-`, unique among trusted issuers.
+    /// Changing it changes the identity of every subject from this issuer.
+    pub sub_prefix: String,
     /// The `aud` values Tsong accepts from it.
     pub audiences: Vec<String>,
     #[serde(default)]

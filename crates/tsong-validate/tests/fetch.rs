@@ -47,6 +47,7 @@ async fn issuer(discovery: impl Fn(&str) -> Value + Send + 'static) -> TestResul
 fn trusted(issuer: &str, jwks_url: Option<&str>) -> TestResult<TrustedIssuer> {
     Ok(TrustedIssuer {
         issuer: issuer.into(),
+        sub_prefix: "test".into(),
         audiences: vec!["tsong".into()],
         validation: Validation::Jwt,
         algorithms: vec![],

@@ -115,7 +115,7 @@ async fn a_refusal_is_observed_with_what_was_known() -> TestResult {
     })?;
     assert!(h.issuer.exchange(unsigned).await.is_err());
     let event = h.events.last()?;
-    assert_eq!(event.error, Some("invalid_grant"));
+    assert_eq!(event.error, Some("invalid_request"));
     assert_eq!(
         (event.trusted_issuer, event.iss, event.sub),
         (None, None, None)

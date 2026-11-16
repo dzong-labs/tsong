@@ -42,6 +42,7 @@ max_entries = 10
 
 const OKTA: &str = r#"
 [trusted_issuers.okta]
+sub_prefix = "okta"
 issuer = "https://okta.example.com"
 audiences = ["api"]
 algorithms = ["RS256"]
@@ -372,6 +373,7 @@ copy = [\"email\", \"aud\"]
 [claims.rename.okta]
 uid = \"sub\"
 x = \"exp\"
+y = \"sub_id\"
 ",
         minimal()
     );
@@ -380,7 +382,77 @@ x = \"exp\"
         [
             r#"claims.copy may not copy reserved claim "aud""#,
             r#"claims.rename.okta may not write reserved claim "exp""#,
+            r#"claims.rename.okta may not write reserved claim "sub_id""#,
         ]
+    );
+    Ok(())
+}
+
+#[test]
+fn a_rename_writes_each_claim_from_one_claim() -> TestResult {
+    let text = format!(
+        "{}{OKTA}[claims.rename.okta]
+oid = \"sub\"
+upn = \"sub\"
+uid = \"user\"
+",
+        minimal()
+    );
+    assert_eq!(
+        problems(&text)?,
+        [r#"claims.rename.okta writes claim "sub" from more than one claim"#]
+    );
+    Ok(())
+}
+
+#[test]
+fn a_sub_prefix_is_required() -> TestResult {
+    let text = format!(
+        "{}{}",
+        minimal(),
+        OKTA.replace("sub_prefix = \"okta\"\n", "")
+    );
+    assert!(parse_error(&text)?.contains("missing field `sub_prefix`"));
+    Ok(())
+}
+
+#[test]
+fn sub_prefixes_are_lowercase_letters_digits_and_dashes() -> TestResult {
+    for good in ["okta", "okta-2", "0"] {
+        let text = format!(
+            "{}{}",
+            minimal(),
+            OKTA.replace("\"okta\"\n", &format!("{good:?}\n"))
+        );
+        Config::from_toml(&text)?;
+    }
+    for bad in [
+        "", "Okta", "ok:ta", "ok ta", "ok_ta", "ok.ta", "okta/", "ökta",
+    ] {
+        let text = format!(
+            "{}{}",
+            minimal(),
+            OKTA.replace("\"okta\"\n", &format!("{bad:?}\n"))
+        );
+        assert_eq!(
+            problems(&text)?,
+            [format!(
+                "trusted_issuers.okta.sub_prefix must be lowercase letters, digits and -, not {bad:?}"
+            )]
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn sub_prefixes_are_unique() -> TestResult {
+    let other = OKTA
+        .replace("trusted_issuers.okta", "trusted_issuers.other")
+        .replace("okta.example.com", "other.example.com");
+    let text = format!("{}{OKTA}{other}", minimal());
+    assert_eq!(
+        problems(&text)?,
+        [r#"trusted_issuers.other.sub_prefix "okta" is used by another trusted issuer"#]
     );
     Ok(())
 }

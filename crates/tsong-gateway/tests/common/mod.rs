@@ -51,6 +51,7 @@ allow = ["10.0.0.0/8", "::1/128"]
 max_entries = 100
 
 [trusted_issuers.test]
+sub_prefix = "test"
 issuer = "https://issuer.test"
 audiences = ["tsong"]
 algorithms = ["ES256"]
@@ -119,7 +120,7 @@ impl FakeExchanger {
         };
         let server = |error: Box<dyn Error + Send + Sync>| ExchangeError::Server(error.to_string());
         match token {
-            "invalid" => Err(ExchangeError::InvalidGrant("bad signature".into())),
+            "invalid" => Err(ExchangeError::InvalidRequest("bad signature".into())),
             "untargeted" => Err(ExchangeError::InvalidTarget("audience not allowed".into())),
             "unscoped" => Err(ExchangeError::InvalidScope("scope not allowed".into())),
             "unavailable" => Err(ExchangeError::Unavailable("jwks down".into())),
