@@ -20,12 +20,18 @@ poll = "5m"                               # fetch this often when no webhook arr
 # path = "tsong.toml"
 
 # ── admin listener ────────────────────────────────────
-# GET /status, and the push webhook at POST /hooks/config. Only clients in
-# the config's gateway.allow get in, so it must include the Git host's
-# webhook delivery addresses.
+# GET /status. Only clients in the served config's gateway.allow get in.
 [admin]
 listen = "0.0.0.0:8445"
 
-[admin.webhook]
+# ── webhook listener ──────────────────────────────────
+# POST /hooks/config, on its own listener. Its allow list is deployed here,
+# never loaded from Git, and holds only the Git host's delivery addresses
+# (GitHub publishes them as "hooks" at api.github.com/meta). It is checked
+# against each connection's own address; nothing should proxy this listener.
+[webhook]
+listen = "0.0.0.0:8446"
+# An example; take the current list from api.github.com/meta.
+allow = ["192.30.252.0/22", "185.199.108.0/22", "140.82.112.0/20", "143.55.64.0/20"]
 host = "github"                           # or "gitlab"
 secret_env = "TSONG_WEBHOOK_SECRET"       # the variable holding the webhook secret

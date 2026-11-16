@@ -198,6 +198,7 @@ async fn a_failed_load_keeps_the_old_state() -> TestResult {
             "event": "config_reload",
             "at": NOW + 5,
             "outcome": "rejected",
+            "reason": "fetch_failed",
             "revision": null,
             "serving": "r1",
             "error": "fetching: offline",
@@ -207,7 +208,7 @@ async fn a_failed_load_keeps_the_old_state() -> TestResult {
     assert_eq!(status.revision, "r1");
     assert_eq!(status.reloads, 1);
     assert_eq!(status.failed_reloads, 1);
-    assert_eq!(status.last_failure.as_deref(), Some("fetching: offline"));
+    assert_eq!(status.last_failure.as_deref(), Some("fetch_failed"));
     assert_eq!(reloader.subscribe().borrow().revision, "r1");
     Ok(())
 }
@@ -226,8 +227,46 @@ async fn a_config_whose_state_fails_to_build_is_rejected() -> TestResult {
     let line = f.lines.parsed()?.get(1).cloned().ok_or("no second line")?;
     assert_eq!(line.get("revision"), Some(&json!("r2")));
     assert_eq!(line.get("outcome"), Some(&json!("rejected")));
+    assert_eq!(line.get("reason"), Some(&json!("build_failed")));
     assert_eq!(reloader.subscribe().borrow().revision, "r1");
-    assert_eq!(status(&reloader).failed_reloads, 1);
+    let status = status(&reloader);
+    assert_eq!(status.failed_reloads, 1);
+    assert_eq!(status.last_failure.as_deref(), Some("build_failed"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn each_failure_has_a_short_reason_and_the_detail_only_in_the_log() -> TestResult {
+    let f = Fixture::new()?;
+    let reloader = f.reloader(&f.text("https://one.test", 8444, ""))?;
+    let invalid = tsong_config::Config::from_toml("max_entries = [").err();
+    let parse = match invalid {
+        Some(error @ ConfigError::Parse(_)) => error,
+        other => return Err(format!("expected a parse error, got {other:?}").into()),
+    };
+    let missing = std::path::PathBuf::from("missing.toml");
+    for (error, reason) in [
+        (parse, "invalid_config"),
+        (
+            ConfigError::Invalid(tsong_config::Problems(vec!["a problem".into()])),
+            "invalid_config",
+        ),
+        (
+            ConfigError::Read {
+                path: missing,
+                source: std::io::Error::other("gone"),
+            },
+            "fetch_failed",
+        ),
+    ] {
+        let detail = error.to_string();
+        f.store.push(Err(error));
+        assert_eq!(reloader.reload().await, Outcome::Rejected(detail.clone()));
+        let line = f.lines.parsed()?.last().cloned().ok_or("no line")?;
+        assert_eq!(line.get("reason"), Some(&json!(reason)), "{detail}");
+        assert_eq!(line.get("error"), Some(&json!(detail)));
+        assert_eq!(status(&reloader).last_failure.as_deref(), Some(reason));
+    }
     Ok(())
 }
 

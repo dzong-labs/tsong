@@ -1,4 +1,5 @@
-//! The admin listener: the Git host's push webhook, and the reload status.
+//! The admin listener's reload status, and the webhook listener's push
+//! deliveries. Each runs on its own listener with its own allow list.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -22,41 +23,43 @@ pub struct Hook {
     pub branch: String,
 }
 
-struct Admin {
-    hook: Option<Hook>,
-    reload: Arc<Notify>,
-    status: Arc<Mutex<Status>>,
-}
-
-/// `POST /hooks/config` and `GET /status`. A verified push to the watched
-/// branch wakes `reload`; without a hook, the webhook answers 404.
-pub fn router(hook: Option<Hook>, reload: Arc<Notify>, status: Arc<Mutex<Status>>) -> Router {
+/// `GET /status`.
+pub fn status_router(status: Arc<Mutex<Status>>) -> Router {
     Router::new()
         .route("/status", get(status_handler))
-        .route("/hooks/config", post(webhook))
-        .with_state(Arc::new(Admin {
-            hook,
-            reload,
-            status,
-        }))
+        .with_state(status)
 }
 
-async fn status_handler(State(admin): State<Arc<Admin>>) -> Response {
-    let status = admin
-        .status
+async fn status_handler(State(status): State<Arc<Mutex<Status>>>) -> Response {
+    let status = status
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
     axum::Json(status).into_response()
 }
 
+struct Deliveries {
+    hook: Hook,
+    reload: Arc<Notify>,
+}
+
+/// `POST /hooks/config`. A verified push to the watched branch wakes
+/// `reload`.
+pub fn webhook_router(hook: Hook, reload: Arc<Notify>) -> Router {
+    Router::new()
+        .route("/hooks/config", post(webhook))
+        .with_state(Arc::new(Deliveries { hook, reload }))
+}
+
 /// 401 for a delivery that fails verification. 202 for a push to the
 /// watched branch, which triggers a reload. 204 for anything else verified,
 /// such as a ping or a push to another branch.
-async fn webhook(State(admin): State<Arc<Admin>>, headers: HeaderMap, body: Bytes) -> Response {
-    let Some(hook) = &admin.hook else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
+async fn webhook(
+    State(deliveries): State<Arc<Deliveries>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let hook = &deliveries.hook;
     let signature = headers
         .get(signature_header(hook.host))
         .map(|value| value.as_bytes());
@@ -64,7 +67,7 @@ async fn webhook(State(admin): State<Arc<Admin>>, headers: HeaderMap, body: Byte
         return StatusCode::UNAUTHORIZED.into_response();
     }
     if pushed_branch(&body).as_deref() == Some(hook.branch.as_str()) {
-        admin.reload.notify_one();
+        deliveries.reload.notify_one();
         StatusCode::ACCEPTED.into_response()
     } else {
         StatusCode::NO_CONTENT.into_response()

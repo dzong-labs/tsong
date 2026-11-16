@@ -5,8 +5,14 @@ use tsong_git::webhook::{GITHUB_SIGNATURE, GITLAB_TOKEN, pushed_branch, signatur
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
-const SECRET: &[u8] = b"It's a Secret to Everybody";
 const BODY: &[u8] = b"Hello, World!";
+
+/// A fresh secret: 32 random bytes as hex text, as a Git host would hold it.
+fn secret() -> TestResult<Vec<u8>> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
+    Ok(hex(&bytes).into_bytes())
+}
 
 /// GitHub's signature header for `body` under `secret`.
 fn github_signature(secret: &[u8], body: &[u8]) -> TestResult<String> {
@@ -17,28 +23,25 @@ fn github_signature(secret: &[u8], body: &[u8]) -> TestResult<String> {
 
 #[test]
 fn github_deliveries_are_verified_by_hmac() -> TestResult {
-    // GitHub's documented example delivery.
-    let documented = "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17";
-    assert_eq!(github_signature(SECRET, BODY)?, documented);
+    let secret = secret()?;
+    let signed = github_signature(&secret, BODY)?;
     let verify_github =
-        |signature: &[u8], body: &[u8]| verify(GitHost::GitHub, SECRET, Some(signature), body);
-    assert!(verify_github(documented.as_bytes(), BODY));
-    assert!(verify_github(
-        documented
-            .to_uppercase()
-            .replace("SHA256=", "sha256=")
-            .as_bytes(),
-        BODY
-    ));
-    assert!(!verify_github(documented.as_bytes(), b"Hello, World?"));
-    let other = github_signature(b"another secret", BODY)?;
+        |signature: &[u8], body: &[u8]| verify(GitHost::GitHub, &secret, Some(signature), body);
+    assert!(verify_github(signed.as_bytes(), BODY));
+    let digest = signed.strip_prefix("sha256=").ok_or("no prefix")?;
+    let shouted = format!("sha256={}", digest.to_uppercase());
+    assert!(verify_github(shouted.as_bytes(), BODY));
+    assert!(!verify_github(signed.as_bytes(), b"Hello, World?"));
+    let other = github_signature(&self::secret()?, BODY)?;
     assert!(!verify_github(other.as_bytes(), BODY));
+    let short = digest.get(1..).ok_or("short digest")?;
+    let tail = digest.get(2..).ok_or("short digest")?;
     for malformed in [
-        &documented["sha256=".len()..],
-        "sha1=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17",
-        "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e1",
-        "sha256=zz7107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17",
-        "sha256=",
+        digest.to_owned(),
+        format!("sha1={digest}"),
+        format!("sha256={short}"),
+        format!("sha256=zz{tail}"),
+        "sha256=".to_owned(),
     ] {
         assert!(!verify_github(malformed.as_bytes(), BODY), "{malformed}");
     }
@@ -47,22 +50,39 @@ fn github_deliveries_are_verified_by_hmac() -> TestResult {
 }
 
 #[test]
-fn gitlab_deliveries_carry_the_secret() {
-    let verify_gitlab = |token: &[u8]| verify(GitHost::GitLab, SECRET, Some(token), BODY);
-    assert!(verify_gitlab(SECRET));
-    assert!(!verify_gitlab(b"It's a Secret to Everybodx"));
-    // Two differences whose bits would cancel under XOR.
-    assert!(!verify_gitlab(b"It's a Secret to Everbyody"));
-    assert!(!verify_gitlab(b"It's a Secret to Everybody!"));
+fn gitlab_deliveries_carry_the_secret() -> TestResult {
+    let secret = secret()?;
+    let verify_gitlab = |token: &[u8]| verify(GitHost::GitLab, &secret, Some(token), BODY);
+    assert!(verify_gitlab(&secret));
+    let mut changed = secret.clone();
+    if let Some(last) = changed.last_mut() {
+        *last = if *last == b'0' { b'1' } else { b'0' };
+    }
+    assert!(!verify_gitlab(&changed));
+    // Two differences whose bits would cancel under XOR: two unequal
+    // neighbours swapped.
+    let mut swapped = secret.clone();
+    let at = swapped
+        .windows(2)
+        .position(|pair| pair.first() != pair.get(1))
+        .ok_or("the secret repeats one character")?;
+    swapped.swap(at, at + 1);
+    assert!(!verify_gitlab(&swapped));
+    let mut longer = secret.clone();
+    longer.push(b'0');
+    assert!(!verify_gitlab(&longer));
     assert!(!verify_gitlab(b""));
+    Ok(())
 }
 
 #[test]
-fn a_missing_header_or_secret_fails() {
+fn a_missing_header_or_secret_fails() -> TestResult {
+    let secret = secret()?;
     for host in [GitHost::GitHub, GitHost::GitLab] {
-        assert!(!verify(host, SECRET, None, BODY));
+        assert!(!verify(host, &secret, None, BODY));
         assert!(!verify(host, b"", Some(b""), BODY));
     }
+    Ok(())
 }
 
 #[test]

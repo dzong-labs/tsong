@@ -19,7 +19,9 @@ known_hosts = "/etc/tsong/known_hosts"
 [admin]
 listen = "127.0.0.1:8445"
 
-[admin.webhook]
+[webhook]
+listen = "127.0.0.1:8446"
+allow = ["192.30.252.0/22", "2a0a:a440::/29"]
 host = "github"
 secret_env = "TSONG_WEBHOOK_SECRET"
 "#;
@@ -64,7 +66,9 @@ fn a_git_bootstrap_loads() -> TestResult {
     assert_eq!(*poll, Duration::from_secs(300));
     let admin = bootstrap.admin.ok_or("no admin")?;
     assert_eq!(admin.listen.port(), 8445);
-    let webhook = admin.webhook.ok_or("no webhook")?;
+    let webhook = bootstrap.webhook.ok_or("no webhook")?;
+    assert_eq!(webhook.listen.port(), 8446);
+    assert_eq!(webhook.allow.len(), 2);
     assert_eq!(webhook.host, GitHost::GitHub);
     assert_eq!(webhook.secret_env, "TSONG_WEBHOOK_SECRET");
     assert_eq!(CONFIG_FILE, "tsong.toml");
@@ -81,10 +85,7 @@ fn the_poll_and_host_are_configurable() -> TestResult {
         return Err("expected a git source".into());
     };
     assert_eq!(poll, Duration::from_secs(30));
-    let host = bootstrap
-        .admin
-        .and_then(|admin| admin.webhook)
-        .map(|webhook| webhook.host);
+    let host = bootstrap.webhook.map(|webhook| webhook.host);
     assert_eq!(host, Some(GitHost::GitLab));
     Ok(())
 }
@@ -122,7 +123,7 @@ fn unknown_fields_and_stores_are_rejected() -> TestResult {
     assert!(
         parse_error(&GIT.replace(r#"host = "github""#, r#"host = "gitea""#))?.contains("gitea")
     );
-    assert!(parse_error(&GIT.replace("[admin.webhook]", "[admin.hook]"))?.contains("hook"));
+    assert!(parse_error(&GIT.replace("[webhook]", "[hook]"))?.contains("hook"));
     Ok(())
 }
 
@@ -234,29 +235,48 @@ path = "tsong.toml"
 [admin]
 listen = "127.0.0.1:8445"
 
-[admin.webhook]
+[webhook]
+listen = "127.0.0.1:8446"
+allow = []
 host = "gitlab"
 secret_env = ""
 "#;
     assert_eq!(
         problems(text)?,
         [
-            "admin.webhook needs a git source",
-            "admin.webhook.secret_env is empty",
+            "webhook needs a git source",
+            "webhook.allow is empty, so no delivery can arrive",
+            "webhook.secret_env is empty",
         ]
     );
     let message = Bootstrap::from_toml(text).map_err(|error| error.to_string());
     assert_eq!(
         message.err().as_deref(),
         Some(
-            "invalid bootstrap file:\n- admin.webhook needs a git source\n- admin.webhook.secret_env is empty\n"
+            "invalid bootstrap file:\n- webhook needs a git source\n- webhook.allow is empty, so no delivery can arrive\n- webhook.secret_env is empty\n"
         )
     );
     let without = text.replace(
-        "\n[admin.webhook]\nhost = \"gitlab\"\nsecret_env = \"\"\n",
+        "\n[webhook]\nlisten = \"127.0.0.1:8446\"\nallow = []\nhost = \"gitlab\"\nsecret_env = \"\"\n",
         "",
     );
     Bootstrap::from_toml(&without)?;
+    Ok(())
+}
+
+#[test]
+fn the_webhook_and_admin_listeners_are_independent() -> TestResult {
+    let no_admin = GIT.replace("[admin]\nlisten = \"127.0.0.1:8445\"\n", "");
+    let bootstrap = Bootstrap::from_toml(&no_admin)?;
+    assert!(bootstrap.admin.is_none());
+    assert!(bootstrap.webhook.is_some());
+    let no_webhook = GIT.replace(
+        "[webhook]\nlisten = \"127.0.0.1:8446\"\nallow = [\"192.30.252.0/22\", \"2a0a:a440::/29\"]\nhost = \"github\"\nsecret_env = \"TSONG_WEBHOOK_SECRET\"\n",
+        "",
+    );
+    let bootstrap = Bootstrap::from_toml(&no_webhook)?;
+    assert!(bootstrap.admin.is_some());
+    assert!(bootstrap.webhook.is_none());
     Ok(())
 }
 
@@ -265,10 +285,7 @@ fn the_sample_bootstrap_loads() -> TestResult {
     let sample = include_str!("../../../examples/bootstrap.toml");
     let bootstrap = Bootstrap::from_toml(sample)?;
     assert!(matches!(bootstrap.source, Source::Git(_)));
-    let host = bootstrap
-        .admin
-        .and_then(|admin| admin.webhook)
-        .map(|webhook| webhook.host);
+    let host = bootstrap.webhook.map(|webhook| webhook.host);
     assert_eq!(host, Some(GitHost::GitHub));
     Ok(())
 }

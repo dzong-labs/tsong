@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use ipnet::IpNet;
 use serde::Deserialize;
 
 use crate::{Problems, duration};
@@ -15,9 +16,12 @@ use crate::{Problems, duration};
 #[serde(deny_unknown_fields)]
 pub struct Bootstrap {
     pub source: Source,
-    /// The admin listener: the webhook and the status endpoint. Unset,
-    /// there is none.
+    /// The admin listener, which serves the status endpoint. Unset, there
+    /// is none.
     pub admin: Option<Admin>,
+    /// The Git host's push webhook, on its own listener. Unset, only
+    /// polling reloads.
+    pub webhook: Option<Webhook>,
 }
 
 /// Where the config comes from.
@@ -90,19 +94,23 @@ fn default_poll() -> Duration {
     Duration::from_secs(5 * 60)
 }
 
-/// The admin listener.
+/// The admin listener. It admits the clients in the served config's
+/// `gateway.allow`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Admin {
     pub listen: SocketAddr,
-    /// The Git host's push webhook. Unset, only polling reloads.
-    pub webhook: Option<Webhook>,
 }
 
-/// A Git host's push webhook.
+/// A Git host's push webhook, on its own listener.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Webhook {
+    pub listen: SocketAddr,
+    /// The addresses the Git host delivers from. Each connection's peer
+    /// address must be in it; no `X-Forwarded-For` is read, since nothing
+    /// should proxy this listener.
+    pub allow: Vec<IpNet>,
     pub host: GitHost,
     /// The environment variable holding the webhook secret.
     pub secret_env: String,
@@ -200,13 +208,15 @@ impl Bootstrap {
                 problems.push("source.poll must be above zero".into());
             }
         }
-        let webhook = self.admin.as_ref().and_then(|admin| admin.webhook.as_ref());
-        if let Some(webhook) = webhook {
+        if let Some(webhook) = &self.webhook {
             if !matches!(self.source, Source::Git(_)) {
-                problems.push("admin.webhook needs a git source".into());
+                problems.push("webhook needs a git source".into());
+            }
+            if webhook.allow.is_empty() {
+                problems.push("webhook.allow is empty, so no delivery can arrive".into());
             }
             if webhook.secret_env.is_empty() {
-                problems.push("admin.webhook.secret_env is empty".into());
+                problems.push("webhook.secret_env is empty".into());
             }
         }
         if problems.is_empty() {

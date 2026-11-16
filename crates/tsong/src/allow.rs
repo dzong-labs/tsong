@@ -8,6 +8,7 @@ use axum::extract::{ConnectInfo, Request, State as Extract};
 use axum::http::{HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use ipnet::IpNet;
 use tokio::sync::watch;
 use tsong_config::{allowed, client_ip};
 
@@ -33,6 +34,21 @@ pub async fn admit(
         return (StatusCode::BAD_REQUEST, "malformed X-Forwarded-For\n").into_response();
     };
     if !allowed(client, &config.gateway.allow, None) {
+        return (StatusCode::FORBIDDEN, "client address not allowed\n").into_response();
+    }
+    next.run(request).await
+}
+
+/// Lets a request through only when the connection's peer address is in
+/// the list: 403 otherwise. No `X-Forwarded-For` is read, for a listener
+/// nothing should proxy, such as the webhook's.
+pub async fn admit_peer(
+    Extract(allow): Extract<Arc<Vec<IpNet>>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !allowed(peer.ip().to_canonical(), &allow, None) {
         return (StatusCode::FORBIDDEN, "client address not allowed\n").into_response();
     }
     next.run(request).await

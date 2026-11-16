@@ -10,7 +10,15 @@ use serde::Serialize;
 use serde_json::json;
 use tokio::sync::watch;
 use tsong_clock::Clock;
-use tsong_config::{Config, ConfigStore};
+use tsong_config::{Config, ConfigError, ConfigStore};
+
+/// The store couldn't produce the config, such as a failed fetch.
+pub const FETCH_FAILED: &str = "fetch_failed";
+/// The config didn't parse or validate.
+pub const INVALID_CONFIG: &str = "invalid_config";
+/// The config was valid, but its state didn't build, such as a missing key
+/// file.
+pub const BUILD_FAILED: &str = "build_failed";
 
 use crate::state::{State, listen_addresses};
 
@@ -53,7 +61,8 @@ pub struct Status {
     pub reloads: u64,
     /// Reloads that kept the old state.
     pub failed_reloads: u64,
-    /// Why the last failed reload failed.
+    /// Why the last failed reload failed, in short: `fetch_failed`,
+    /// `invalid_config` or `build_failed`. The audit log has the detail.
     pub last_failure: Option<String>,
 }
 
@@ -118,7 +127,13 @@ impl Reloader {
         let current = self.state.borrow().clone();
         let snapshot = match self.store.load().await {
             Ok(snapshot) => snapshot,
-            Err(error) => return self.reject(&current, None, error.to_string()),
+            Err(error) => {
+                let reason = match error {
+                    ConfigError::Parse(_) | ConfigError::Invalid(_) => INVALID_CONFIG,
+                    ConfigError::Read { .. } | ConfigError::Store(_) => FETCH_FAILED,
+                };
+                return self.reject(&current, None, reason, error.to_string());
+            }
         };
         if snapshot.revision == current.revision {
             return Outcome::Unchanged;
@@ -126,7 +141,9 @@ impl Reloader {
         let revision = snapshot.revision.clone();
         let next = match State::build(snapshot, self.clock.clone()) {
             Ok(next) => next,
-            Err(error) => return self.reject(&current, Some(&revision), error.to_string()),
+            Err(error) => {
+                return self.reject(&current, Some(&revision), BUILD_FAILED, error.to_string());
+            }
         };
         let line = {
             let mut status = self.lock();
@@ -140,16 +157,23 @@ impl Reloader {
         Outcome::Applied
     }
 
-    fn reject(&self, current: &State, revision: Option<&str>, error: String) -> Outcome {
+    fn reject(
+        &self,
+        current: &State,
+        revision: Option<&str>,
+        reason: &str,
+        error: String,
+    ) -> Outcome {
         {
             let mut status = self.lock();
             status.failed_reloads += 1;
-            status.last_failure = Some(error.clone());
+            status.last_failure = Some(reason.to_owned());
         }
         let line = json!({
             "event": "config_reload",
             "at": self.clock.unix_seconds(),
             "outcome": "rejected",
+            "reason": reason,
             "revision": revision,
             "serving": current.revision,
             "error": error,

@@ -3150,8 +3150,10 @@ name = "tsong"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "getrandom 0.4.3",
  "hmac",
  "http-body-util",
+ "ipnet",
  "p256",
  "reqwest",
  "serde",
@@ -3219,6 +3221,7 @@ dependencies = [
 name = "tsong-git"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.4.3",
  "gix",
  "hmac",
  "serde_json",

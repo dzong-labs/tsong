@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 axum.workspace = true
+ipnet.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -23,6 +24,7 @@ tsong-validate.workspace = true
 tower = { workspace = true, features = ["util"] }
 
 [dev-dependencies]
+getrandom.workspace = true
 hmac.workspace = true
 http-body-util.workspace = true
 sha2.workspace = true

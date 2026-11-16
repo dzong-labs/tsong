@@ -27,9 +27,11 @@ known_hosts = "/etc/tsong/known_hosts"
 poll = "5m"
 
 [admin]
-listen = "0.0.0.0:8445"
+listen = "0.0.0.0:8445"                   # GET /status
 
-[admin.webhook]
+[webhook]
+listen = "0.0.0.0:8446"                   # POST /hooks/config
+allow = ["192.30.252.0/22"]               # the Git host's delivery addresses
 host = "github"                           # or "gitlab"
 secret_env = "TSONG_WEBHOOK_SECRET"
 ```
@@ -50,10 +52,10 @@ Private keys never live in Git. The config refers to a key by a pointer, a file 
 
 ## Triggers
 
-- A webhook on its own listener, `admin.listen`, at `POST /hooks/config`. The secret is read from the environment variable `admin.webhook.secret_env` at start; Tsong refuses to start without it. GitHub requests are verified by the HMAC-SHA256 in `X-Hub-Signature-256`, GitLab requests by the shared token in `X-Gitlab-Token`, both compared in constant time. A verified push to the watched branch triggers a fetch and answers 202. Any other verified delivery, such as a ping or a push to another branch, answers 204, and an unverified one 401. The payload's commit ID is not trusted; the fetch decides what changed.
+- A webhook on its own listener, `webhook.listen`, at `POST /hooks/config`. The secret is read from the environment variable `webhook.secret_env` at start; Tsong refuses to start without it. GitHub requests are verified by the HMAC-SHA256 in `X-Hub-Signature-256`, GitLab requests by the shared token in `X-Gitlab-Token`, both compared in constant time. A verified push to the watched branch triggers a fetch and answers 202. Any other verified delivery, such as a ping or a push to another branch, answers 204, and an unverified one 401. The payload's commit ID is not trusted; the fetch decides what changed.
 - A poll every `poll` interval, in case a webhook is missed.
 
-The admin listener admits only clients in `gateway.allow` of the config being served, found through `gateway.trusted_proxies` like every other listener. So the Git host's webhook delivery addresses, published by GitHub at `api.github.com/meta`, belong in `gateway.allow`.
+Each listener has its own allow list. The webhook listener admits only peers in `webhook.allow`, which holds the Git host's delivery addresses (GitHub publishes them at `api.github.com/meta`). That list is deployed in the bootstrap file, never loaded from Git, and is checked against each connection's own address, since nothing should proxy the webhook. The admin listener admits clients in `gateway.allow` of the config being served, found through `gateway.trusted_proxies` like the gateway and the issuer.
 
 ## Reload
 
@@ -69,7 +71,7 @@ Rebuilding the state clears the exchange cache, drops cached JWKS, picks up new 
 Eight things react to a reload. Four are part of the state, so rebuilding it handles them: the exchange cache is cleared, cached JWKS are dropped, new signing keys are loaded, and clients for new read timeouts are built. The reloader (`crates/tsong/src/reload.rs`) handles the other four, because a failed reload produces no new state for a watcher to see:
 
 - The audit log writes one JSON line to stdout for each new revision and each failure: the time, commit, author, outcome, and the routes added, removed and changed, keyed by host. A fetch that finds the revision being served writes nothing. Collecting stdout belongs to the platform.
-- `GET /status` on the admin listener reports the revision being served, when it loaded, the count of reloads and failed reloads, and the last failure.
+- `GET /status` on the admin listener reports the revision being served, when it loaded, the count of reloads and failed reloads, and the last failure as a short reason: `fetch_failed`, `invalid_config` or `build_failed`. The detail stays in the audit log.
 - The reload counts in `/status` stand in for metrics until observability, roadmap item 9.
 - A change to `issuer.listen` or `gateway.listen` is named in the audit line's `restart_required`. The old addresses stay bound until a restart.
 

@@ -107,3 +107,42 @@ async fn a_reload_changes_who_gets_through() -> TestResult {
     assert_eq!(status(&router, "10.9.0.1:1", None).await?, StatusCode::OK);
     Ok(())
 }
+
+/// A router admitting only peers in `allow`.
+fn peer_guarded(allow: &[&str]) -> TestResult<Router> {
+    let allow: Vec<ipnet::IpNet> = allow
+        .iter()
+        .map(|net| net.parse())
+        .collect::<Result<_, _>>()?;
+    Ok(Router::new().route("/", get(|| async { "inside" })).layer(
+        axum::middleware::from_fn_with_state(Arc::new(allow), tsong::allow::admit_peer),
+    ))
+}
+
+#[tokio::test]
+async fn the_webhook_admits_only_peers_in_its_own_list() -> TestResult {
+    let router = peer_guarded(&["192.30.252.0/22"])?;
+    assert_eq!(
+        status(&router, "192.30.252.10:1", None).await?,
+        StatusCode::OK
+    );
+    assert_eq!(
+        status(&router, "[::ffff:192.30.252.10]:1", None).await?,
+        StatusCode::OK
+    );
+    assert_eq!(
+        status(&router, "10.1.2.3:1", None).await?,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        status(&router, "10.1.2.3:1", Some("192.30.252.10")).await?,
+        StatusCode::FORBIDDEN,
+        "X-Forwarded-For is never read"
+    );
+    let closed = peer_guarded(&[])?;
+    assert_eq!(
+        status(&closed, "192.30.252.10:1", None).await?,
+        StatusCode::FORBIDDEN
+    );
+    Ok(())
+}

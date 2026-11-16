@@ -112,13 +112,29 @@ pub async fn serve_until(
     let trigger = Arc::new(Notify::new());
     let admin = match &bootstrap.admin {
         Some(admin) => {
-            let hook = hook(&bootstrap, admin.webhook.as_ref())?;
-            let router = admin::router(hook, trigger.clone(), reloader.status()).layer(
+            let router = admin::status_router(reloader.status()).layer(
                 axum::middleware::from_fn_with_state(reloader.subscribe(), allow::admit),
             );
             Some((TcpListener::bind(admin.listen).await?, router))
         }
         None => None,
+    };
+    let webhook = match (&bootstrap.webhook, &bootstrap.source) {
+        (Some(webhook), Source::Git(git)) => {
+            let hook = Hook {
+                host: webhook.host,
+                secret: secret(&webhook.secret_env)?,
+                branch: git.branch.clone(),
+            };
+            let router = admin::webhook_router(hook, trigger.clone()).layer(
+                axum::middleware::from_fn_with_state(
+                    Arc::new(webhook.allow.clone()),
+                    allow::admit_peer,
+                ),
+            );
+            Some((TcpListener::bind(webhook.listen).await?, router))
+        }
+        _ => None,
     };
     let issuer_listener = TcpListener::bind(issuer_address).await?;
     let gateway_listener = TcpListener::bind(gateway_address).await?;
@@ -145,22 +161,8 @@ pub async fn serve_until(
             .into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(stopped(stopping.clone()));
-    let admin_server = {
-        let stopping = stopping.clone();
-        async move {
-            match admin {
-                Some((listener, router)) => {
-                    axum::serve(
-                        listener,
-                        router.into_make_service_with_connect_info::<SocketAddr>(),
-                    )
-                    .with_graceful_shutdown(stopped(stopping))
-                    .await
-                }
-                None => Ok(()),
-            }
-        }
-    };
+    let admin_server = optional(admin, stopped(stopping.clone()));
+    let webhook_server = optional(webhook, stopped(stopping.clone()));
     let reloads = async move {
         if let Some(poll) = poll {
             reload_loop(&reloader, &trigger, poll, stopped(stopping)).await;
@@ -172,6 +174,7 @@ pub async fn serve_until(
         async { issuer_server.await },
         async { gateway_server.await },
         admin_server,
+        webhook_server,
         reloads,
     )?;
     Ok(())
@@ -185,23 +188,31 @@ fn store(source: &Source) -> (Box<dyn ConfigStore>, Option<Duration>) {
     }
 }
 
-/// The webhook's verification, with its secret read from the environment.
-fn hook(
-    bootstrap: &Bootstrap,
-    webhook: Option<&tsong_config::Webhook>,
-) -> Result<Option<Hook>, Error> {
-    let (Some(webhook), Source::Git(git)) = (webhook, &bootstrap.source) else {
-        return Ok(None);
-    };
-    let secret = std::env::var(&webhook.secret_env)
+/// The secret in the environment variable `name`.
+fn secret(name: &str) -> Result<Vec<u8>, Error> {
+    std::env::var(name)
         .ok()
         .filter(|secret| !secret.is_empty())
-        .ok_or_else(|| Error::Secret(webhook.secret_env.clone()))?;
-    Ok(Some(Hook {
-        host: webhook.host,
-        secret: secret.into_bytes(),
-        branch: git.branch.clone(),
-    }))
+        .map(String::into_bytes)
+        .ok_or_else(|| Error::Secret(name.to_owned()))
+}
+
+/// Serves `router` on `listener`, when there is one, until `stopped`.
+async fn optional(
+    server: Option<(TcpListener, axum::Router)>,
+    stopped: impl Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
+    match server {
+        Some((listener, router)) => {
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(stopped)
+            .await
+        }
+        None => Ok(()),
+    }
 }
 
 /// Reloads on each trigger and each poll until `stopped` completes.

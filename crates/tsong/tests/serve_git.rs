@@ -147,7 +147,9 @@ async fn a_webhook_secret_must_be_in_the_environment() -> TestResult {
     git(&origin, &["init", "-q"])?;
     commit(&origin, &config_text(&key, "https://one.test", 0, ""))?;
     let unset = "TSONG_TEST_SECRET_THAT_IS_NEVER_SET";
-    let webhook = format!("\n[admin.webhook]\nhost = \"github\"\nsecret_env = \"{unset}\"\n");
+    let webhook = format!(
+        "\n[webhook]\nlisten = \"127.0.0.1:0\"\nallow = [\"127.0.0.0/8\"]\nhost = \"github\"\nsecret_env = \"{unset}\"\n"
+    );
     let path = bootstrap(dir.path(), &origin, 0, &webhook)?;
     match tsong::serve_until(&path, async {}).await {
         Err(tsong::Error::Secret(name)) => assert_eq!(name, unset),
@@ -167,10 +169,13 @@ async fn a_signed_webhook_reloads_without_waiting_for_the_poll() -> TestResult {
     git(&origin, &["init", "-q"])?;
     let port = free_port()?;
     let admin = free_port()?;
+    let hooks = free_port()?;
     let first = commit(&origin, &config_text(&key, "https://one.test", port, ""))?;
     // PATH is always set, so it stands in for the secret's variable.
-    let webhook = "\n[admin.webhook]\nhost = \"github\"\nsecret_env = \"PATH\"\n";
-    let path = bootstrap(dir.path(), &origin, admin, webhook)?;
+    let webhook = format!(
+        "\n[webhook]\nlisten = \"127.0.0.1:{hooks}\"\nallow = [\"127.0.0.0/8\"]\nhost = \"github\"\nsecret_env = \"PATH\"\n"
+    );
+    let path = bootstrap(dir.path(), &origin, admin, &webhook)?;
     let text = std::fs::read_to_string(&path)?.replace(r#"poll = "50ms""#, r#"poll = "1h""#);
     std::fs::write(&path, text)?;
 
@@ -189,8 +194,20 @@ async fn a_signed_webhook_reloads_without_waiting_for_the_poll() -> TestResult {
     let mut mac = Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes())?;
     mac.update(body.as_bytes());
     let signature = format!("sha256={}", tsong_config::hex(&mac.finalize().into_bytes()));
-    let delivered = reqwest::Client::new()
+    let client = reqwest::Client::new();
+    let on_admin = client
         .post(format!("http://127.0.0.1:{admin}/hooks/config"))
+        .header("x-hub-signature-256", signature.clone())
+        .body(body)
+        .send()
+        .await?;
+    assert_eq!(
+        on_admin.status().as_u16(),
+        404,
+        "the webhook has its own listener"
+    );
+    let delivered = client
+        .post(format!("http://127.0.0.1:{hooks}/hooks/config"))
         .header("x-hub-signature-256", signature)
         .body(body)
         .send()

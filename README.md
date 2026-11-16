@@ -24,7 +24,7 @@ In Tsong's terms the upstream is the caller and the downstream is the service a 
 11. Signing keys. Behind the `SigningKey` trait, with PEM files today. One key is active, and retiring keys stay published in the JWKS.
 12. Config. One TOML file, read through the `ConfigStore` trait from disk or from a folder on a Git branch. Unknown fields are errors, and every problem is reported at once.
 13. Reload from Git. A signed push webhook from GitHub or GitLab, or a poll, fetches the branch over SSH with a deploy key. A new config is validated and its state built in full before it is swapped in; a config that fails keeps the old one serving. Each reload is audited as a JSON line on stdout, and `GET /status` on the admin listener reports the revision being served.
-14. CLI. `tsong check` validates a config and loads its keys, and warns on empty or accept-anything lists; `--deny-warnings` fails on warnings in CI. `tsong serve` reads a bootstrap file, deployed with Tsong, that names the config source and the admin listener, then runs the gateway and the issuer.
+14. CLI. `tsong check` validates a config and loads its keys, and warns on empty or accept-anything lists; `--deny-warnings` fails on warnings in CI. `tsong serve` reads a bootstrap file, deployed with Tsong, that names the config source and the admin and webhook listeners, then runs the gateway and the issuer.
 
 ## Usage
 
@@ -44,7 +44,7 @@ tsong serve <bootstrap.toml>
 - `tsong-issuer`: the RFC 8693 token endpoint, JWKS and discovery.
 - `tsong-gateway`: the reverse proxy and the exchange cache.
 - `tsong-git`: the Git config store and webhook verification.
-- `tsong`: the command, the reloader and the admin listener.
+- `tsong`: the command, the reloader, and the admin and webhook listeners.
 
 ## Development
 
