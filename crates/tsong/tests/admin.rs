@@ -69,6 +69,7 @@ async fn status_reports_the_reloads() -> TestResult {
         reloads: 3,
         failed_reloads: 1,
         last_failure: Some("fetch_failed".into()),
+        tip_rejected: false,
     }));
     let response = status_router(status, Arc::default())
         .oneshot(Request::get("/status").body(Body::empty())?)
@@ -84,6 +85,7 @@ async fn status_reports_the_reloads() -> TestResult {
             "reloads": 3,
             "failed_reloads": 1,
             "last_failure": "fetch_failed",
+            "tip_rejected": false,
         })
     );
     Ok(())

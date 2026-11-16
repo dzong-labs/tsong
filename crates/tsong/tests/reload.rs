@@ -85,6 +85,7 @@ async fn the_first_load_is_audited_and_counted() -> TestResult {
             reloads: 1,
             failed_reloads: 0,
             last_failure: None,
+            tip_rejected: false,
         }
     );
     assert_eq!(reloader.subscribe().borrow().revision, "r1");
