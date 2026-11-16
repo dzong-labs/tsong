@@ -176,7 +176,8 @@ pub async fn serve_until(
         let _ = stopping.wait_for(|stop| *stop).await;
     };
     // On shutdown, readiness goes first, so the load balancer drains
-    // Tsong before its listeners close.
+    // Tsong before its listeners close. A second Ctrl+C or SIGTERM ends
+    // the drain at once.
     let drain = bootstrap
         .health
         .as_ref()
@@ -184,7 +185,10 @@ pub async fn serve_until(
     let signal = async move {
         shutdown.await;
         ready.store(false, Ordering::Release);
-        tokio::time::sleep(drain).await;
+        tokio::select! {
+            () = tokio::time::sleep(drain) => {}
+            () = shutdown_signal() => {}
+        }
         let _ = stop.send(true);
         Ok::<(), std::io::Error>(())
     };

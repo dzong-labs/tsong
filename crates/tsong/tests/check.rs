@@ -224,6 +224,7 @@ async fn sigterm_stops_the_server() -> TestResult {
     let child = tokio::process::Command::new(env!("CARGO_BIN_EXE_tsong"))
         .args(args("serve", &boot(&path)))
         .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
         .spawn()?;
     discovery(port).await?;
     let pid = child.id().ok_or("the server already exited")?;

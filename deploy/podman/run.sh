@@ -10,7 +10,9 @@
 #
 # The container runs with a read-only root filesystem. The bootstrap file,
 # the config and the signing key are mounted read-only; the volume
-# tsong-state is mounted at /var/lib/tsong for a Git source's clone.
+# tsong-state is mounted at /var/lib/tsong for a Git source's clone. The
+# ports are published on 127.0.0.1 only, because the stub's allow lists
+# are open.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -28,11 +30,16 @@ stop_timeout=15
 signing_key() {
   local key="$here/keys/signing.pem"
   if [ ! -f "$key" ]; then
-    mkdir -p "$here/keys"
-    openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$key"
+    # Readable by its owner alone; userns below maps the owner to uid 10001.
+    (umask 077 && mkdir -p "$here/keys" \
+      && openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$key")
     echo "generated $key"
   fi
 }
+
+# The container's user, uid 10001, runs as the host user, so it can read
+# the key and the files mounted from this folder, which the host user owns.
+userns=(--userns=keep-id:uid=10001,gid=10001)
 
 mounts=(
   -v "$mount_dir/bootstrap.toml:/etc/tsong/bootstrap.toml:ro"
@@ -48,11 +55,12 @@ case "${1:-}" in
   start)
     signing_key
     MSYS_NO_PATHCONV=1 podman run -d --name "$name" --replace \
-      --read-only --tmpfs /tmp \
+      "${userns[@]}" --read-only --tmpfs /tmp \
       "${mounts[@]}" \
       -v tsong-state:/var/lib/tsong \
       --stop-timeout "$stop_timeout" \
-      -p 8443:8443 -p 8444:8444 -p 8445:8445 -p 8447:8447 \
+      -p 127.0.0.1:8443:8443 -p 127.0.0.1:8444:8444 \
+      -p 127.0.0.1:8445:8445 -p 127.0.0.1:8447:8447 \
       "$image"
     echo "gateway http://localhost:8443  issuer http://localhost:8444"
     echo "admin   http://localhost:8445  health http://localhost:8447/health/ready"
@@ -65,11 +73,11 @@ case "${1:-}" in
     ;;
   check)
     signing_key
-    MSYS_NO_PATHCONV=1 podman run --rm --read-only "${mounts[@]}" "$image" \
+    MSYS_NO_PATHCONV=1 podman run --rm "${userns[@]}" --read-only "${mounts[@]}" "$image" \
       check /etc/tsong/tsong.toml
     ;;
   *)
-    sed -n '2,13p' "$0" >&2
+    sed -n '2,15p' "$0" >&2
     exit 2
     ;;
 esac

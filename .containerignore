@@ -4,4 +4,5 @@ target
 mutants.out*
 deploy/podman/keys
 deploy/podman/ssh
-*.secret
+**/*.secret
+tmp
