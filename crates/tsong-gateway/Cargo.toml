@@ -8,3 +8,23 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+axum.workspace = true
+base64.workspace = true
+ipnet.workspace = true
+moka.workspace = true
+reqwest = { workspace = true, features = ["stream"] }
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tsong-clock.workspace = true
+tsong-config.workspace = true
+tsong-issuer.workspace = true
+
+[dev-dependencies]
+futures-util.workspace = true
+http-body-util.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync"] }
+tower = { workspace = true, features = ["util"] }
+tsong-clock = { workspace = true, features = ["test-util"] }
+tsong-keys.workspace = true
+tsong-validate = { workspace = true, features = ["test-util"] }

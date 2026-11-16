@@ -157,38 +157,45 @@ impl Config {
 
     fn check_routes(&self, problems: &mut Vec<String>) {
         let mut names = BTreeSet::new();
+        let mut hosts = BTreeSet::new();
         for route in &self.routes {
             let name = &route.name;
             if !names.insert(name.as_str()) {
                 problems.push(format!("routes repeats name {name:?}"));
             }
-            let matcher = &route.matcher;
-            if matcher.host.is_none() && matcher.path_prefix.is_none() {
+            if !is_host(&route.host) {
                 problems.push(format!(
-                    "route {name:?} must match a host, a path_prefix or both"
+                    "route {name:?} host must be a host name, without a scheme, port or path"
                 ));
+            } else if !hosts.insert(route.host.to_ascii_lowercase()) {
+                problems.push(format!("routes repeats host {:?}", route.host));
             }
-            if let Some(prefix) = &matcher.path_prefix
-                && !prefix.starts_with('/')
-            {
-                problems.push(format!("route {name:?} path_prefix must start with /"));
-            }
-            if !matches!(route.downstream.scheme(), "http" | "https") {
-                problems.push(format!("route {name:?} downstream must be http or https"));
-            }
-            if route.trusted_issuers.is_empty() {
-                problems.push(format!("route {name:?} trusts no issuer"));
-            }
-            for issuer in &route.trusted_issuers {
-                if !self.trusted_issuers.contains_key(issuer) {
-                    problems.push(format!(
-                        "route {name:?} trusts {issuer:?}, which is not in trusted_issuers"
-                    ));
-                }
-            }
-            if route.audience.is_empty() {
-                problems.push(format!("route {name:?} has an empty audience"));
+            if !is_origin(&route.downstream) {
+                problems.push(format!(
+                    "route {name:?} downstream must be an https origin, without a path, query or credentials"
+                ));
             }
         }
     }
+}
+
+/// Whether `text` is a bare host name: no scheme, port, path or
+/// credentials.
+fn is_host(text: &str) -> bool {
+    !text.is_empty()
+        && Url::parse(&format!("https://{text}")).is_ok_and(|url| {
+            url.host_str()
+                .is_some_and(|host| host.eq_ignore_ascii_case(text))
+        })
+}
+
+/// Whether `url` is an https origin: scheme, host and port only.
+fn is_origin(url: &Url) -> bool {
+    url.scheme() == "https"
+        && url.host_str().is_some()
+        && url.path() == "/"
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
 }

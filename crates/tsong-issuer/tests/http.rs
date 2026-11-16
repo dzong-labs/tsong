@@ -24,7 +24,12 @@ fn form(body: &str) -> TestResult<Request<Body>> {
 }
 
 fn exchange_form(h: &Harness, audience: &str) -> TestResult<Request<Body>> {
-    let token = h.inbound.sign(&subject(json!({}))?)?;
+    exchange_form_with(h, audience, json!({}))
+}
+
+/// A token exchange form for a subject token with `changes`.
+fn exchange_form_with(h: &Harness, audience: &str, changes: Value) -> TestResult<Request<Body>> {
+    let token = h.inbound.sign(&subject(changes)?)?;
     form(&format!(
         "grant_type={}&subject_token={token}&subject_token_type={}&audience={audience}",
         TOKEN_EXCHANGE.replace(':', "%3A"),
@@ -48,7 +53,7 @@ fn assert_not_cached(headers: &HeaderMap) {
 #[tokio::test]
 async fn the_token_endpoint_exchanges_a_form() -> TestResult {
     let h = harness()?;
-    let (status, headers, body) = send(&h, exchange_form(&h, "orders-api")?).await?;
+    let (status, headers, body) = send(&h, exchange_form(&h, "orders.test")?).await?;
     assert_eq!(status, StatusCode::OK);
     assert_not_cached(&headers);
     for (name, value) in [
@@ -68,9 +73,10 @@ async fn the_token_endpoint_exchanges_a_form() -> TestResult {
 }
 
 #[tokio::test]
-async fn a_route_without_scopes_omits_the_scope_field() -> TestResult {
+async fn a_token_without_scopes_omits_the_scope_field() -> TestResult {
     let h = harness()?;
-    let (status, _, body) = send(&h, exchange_form(&h, "plain.test")?).await?;
+    let form = exchange_form_with(&h, "orders.test", json!({ "scope": null }))?;
+    let (status, _, body) = send(&h, form).await?;
     assert_eq!(status, StatusCode::OK);
     assert!(body.get("scope").is_none());
     Ok(())
@@ -86,7 +92,7 @@ async fn errors_are_oauth_json() -> TestResult {
         body,
         json!({
             "error": "invalid_target",
-            "error_description": r#"no route has audience "nowhere""#,
+            "error_description": r#"no route has host "nowhere""#,
         })
     );
     Ok(())
@@ -96,7 +102,7 @@ async fn errors_are_oauth_json() -> TestResult {
 async fn an_unavailable_jwks_is_a_503() -> TestResult {
     let h = harness()?;
     h.fetcher.fail(true);
-    let (status, _, body) = send(&h, exchange_form(&h, "orders-api")?).await?;
+    let (status, _, body) = send(&h, exchange_form(&h, "orders.test")?).await?;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(body.get("error"), Some(&json!("temporarily_unavailable")));
     Ok(())

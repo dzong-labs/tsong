@@ -33,6 +33,7 @@ state = "active"
 
 [gateway]
 listen = "127.0.0.1:0"
+allow = ["127.0.0.0/8"]
 
 [gateway.cache]
 max_entries = 10

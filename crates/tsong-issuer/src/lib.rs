@@ -1,24 +1,23 @@
 //! The RFC 8693 token exchange issuer.
 //!
-//! [`Issuer::exchange`] takes a subject token from a trusted issuer and an
-//! audience, and returns a token Tsong signs for the route with that
-//! audience. The policy is the routes' own: the subject token's issuer must
-//! be trusted on a route with the requested audience, the token must carry
-//! the route's required scopes, and the scopes granted are the route's.
-//! [`router`] serves the token endpoint, the JWKS and the discovery
-//! document over HTTP.
+//! [`Issuer::exchange`] takes a subject token from any trusted issuer and
+//! an audience naming a route's host, and returns a token Tsong signs for
+//! that route. The route filters the subject token: it must carry one of the
+//! route's allowed audiences, and only scopes the route allows. The minted
+//! token keeps the subject token's audiences and scopes, and adds the
+//! route's `append_audience`. [`router`] serves the token endpoint, the JWKS
+//! and the discovery document over HTTP.
 
 mod error;
 mod http;
 mod mint;
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tsong_clock::Clock;
-use tsong_config::{Config, Route};
+use tsong_config::{Config, Route, RouteTable};
 use tsong_keys::KeySet;
 use tsong_validate::{Validated, Validator, scopes};
 
@@ -60,6 +59,7 @@ pub struct TokenResponse {
 /// The token exchange issuer for one config.
 pub struct Issuer {
     config: Arc<Config>,
+    routes: RouteTable,
     keys: KeySet,
     validator: Validator,
     clock: Arc<dyn Clock>,
@@ -73,6 +73,7 @@ impl Issuer {
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
+            routes: RouteTable::new(&config.routes),
             config,
             keys,
             validator,
@@ -84,9 +85,16 @@ impl Issuer {
     pub async fn exchange(&self, request: TokenRequest) -> Result<TokenResponse, ExchangeError> {
         let (subject_token, audience) = check_request(&request)?;
         let validated = self.validator.validate(subject_token).await?;
-        let route = self.route(audience, validated.issuer())?;
-        check_required_scopes(route, &validated)?;
-        let granted = granted_scopes(route, request.scope.as_deref())?;
+        let route = self.routes.get(audience).ok_or_else(|| {
+            ExchangeError::InvalidTarget(format!("no route has host {audience:?}"))
+        })?;
+        let inbound_audiences = audiences(&validated);
+        if !route.accepts_audiences(inbound_audiences.iter().copied()) {
+            return Err(ExchangeError::InvalidTarget(format!(
+                "the subject token's audience is not allowed for {audience:?}"
+            )));
+        }
+        let granted = granted_scopes(route, &validated, request.scope.as_deref())?;
         let subject = self
             .renamed_sub(&validated)
             .or_else(|| validated.subject())
@@ -108,7 +116,10 @@ impl Issuer {
         let mut claims = self.mapped_claims(&validated);
         claims.insert("sub".into(), json!(subject));
         claims.insert("iss".into(), json!(self.config.issuer.url));
-        claims.insert("aud".into(), json!(audiences(route)));
+        claims.insert(
+            "aud".into(),
+            json!(minted_audiences(inbound_audiences, route)),
+        );
         claims.insert("iat".into(), json!(now));
         claims.insert("exp".into(), json!(exp));
         claims.insert("jti".into(), json!(mint::jti()?));
@@ -125,29 +136,6 @@ impl Issuer {
             expires_in: exp - now,
             scope,
         })
-    }
-
-    /// The first route, in config order, with `audience` that trusts
-    /// `issuer`.
-    fn route(&self, audience: &str, issuer: &str) -> Result<&Route, ExchangeError> {
-        let mut routes = self
-            .config
-            .routes
-            .iter()
-            .filter(|route| route.audience == audience)
-            .peekable();
-        if routes.peek().is_none() {
-            return Err(ExchangeError::InvalidTarget(format!(
-                "no route has audience {audience:?}"
-            )));
-        }
-        routes
-            .find(|route| route.trusted_issuers.iter().any(|name| name == issuer))
-            .ok_or_else(|| {
-                ExchangeError::InvalidTarget(format!(
-                    "issuer {issuer:?} may not exchange for audience {audience:?}"
-                ))
-            })
     }
 
     /// The inbound claims the config carries over: copied by name, then
@@ -231,46 +219,65 @@ fn check_request(request: &TokenRequest) -> Result<(&str, &str), ExchangeError> 
     Ok((subject_token, audience))
 }
 
-fn check_required_scopes(route: &Route, validated: &Validated) -> Result<(), ExchangeError> {
+/// The subject token's `aud`: a string or an array of strings.
+fn audiences(validated: &Validated) -> Vec<&str> {
+    match validated.claims().get("aud") {
+        Some(Value::String(aud)) => vec![aud.as_str()],
+        Some(Value::Array(items)) => items.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The subject token's scopes, once the route allows them all, narrowed to
+/// the scopes requested when there is a request.
+fn granted_scopes(
+    route: &Route,
+    validated: &Validated,
+    requested: Option<&str>,
+) -> Result<Vec<String>, ExchangeError> {
     let held = scopes(validated.claims());
-    match route
-        .required_scopes
-        .iter()
-        .find(|scope| !held.contains(scope.as_str()))
-    {
-        Some(missing) => Err(ExchangeError::InvalidGrant(format!(
-            "the subject token lacks scope {missing:?}"
-        ))),
-        None => Ok(()),
+    match route.refused_scope(held.iter().copied()) {
+        Ok(()) => {}
+        Err(None) => {
+            return Err(ExchangeError::InvalidScope(format!(
+                "route {:?} allows no scopes",
+                route.name
+            )));
+        }
+        Err(Some(refused)) => {
+            return Err(ExchangeError::InvalidScope(format!(
+                "scope {refused:?} is not allowed for route {:?}",
+                route.name
+            )));
+        }
     }
-}
-
-/// The scopes requested, when the route allows them all, or the route's
-/// scopes when none are requested.
-fn granted_scopes(route: &Route, requested: Option<&str>) -> Result<Vec<String>, ExchangeError> {
     let Some(requested) = requested else {
-        return Ok(route.scopes.clone());
+        return Ok(held.into_iter().map(str::to_owned).collect());
     };
-    let requested: BTreeSet<&str> = requested.split_whitespace().collect();
-    if let Some(refused) = requested
-        .iter()
-        .find(|scope| !route.scopes.iter().any(|allowed| allowed == *scope))
-    {
-        return Err(ExchangeError::InvalidScope(format!(
-            "scope {refused:?} is not allowed for audience {:?}",
-            route.audience
-        )));
+    let mut granted = Vec::new();
+    for scope in requested.split_whitespace() {
+        if !held.contains(scope) {
+            return Err(ExchangeError::InvalidScope(format!(
+                "the subject token lacks scope {scope:?}"
+            )));
+        }
+        if !granted.iter().any(|kept| kept == scope) {
+            granted.push(scope.to_owned());
+        }
     }
-    Ok(requested.into_iter().map(str::to_owned).collect())
+    granted.sort();
+    Ok(granted)
 }
 
-/// The route's audience and its downstream's host.
-fn audiences(route: &Route) -> Vec<&str> {
-    let mut audiences = vec![route.audience.as_str()];
-    if let Some(host) = route.downstream.host_str()
-        && host != route.audience
-    {
-        audiences.push(host);
+/// The subject token's audiences, then the route's `append_audience` when
+/// it is set, without repeats.
+fn minted_audiences<'a>(inbound: Vec<&'a str>, route: &'a Route) -> Vec<&'a str> {
+    let mut minted: Vec<&str> = Vec::with_capacity(inbound.len() + 1);
+    let appended = (!route.append_audience.is_empty()).then_some(route.append_audience.as_str());
+    for aud in inbound.into_iter().chain(appended) {
+        if !minted.contains(&aud) {
+            minted.push(aud);
+        }
     }
-    audiences
+    minted
 }

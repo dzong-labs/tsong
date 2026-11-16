@@ -26,7 +26,7 @@ state = "retiring"              # still published in JWKS, never signs
 [gateway]
 listen = "0.0.0.0:8443"
 trusted_proxies = ["10.0.0.0/8"]
-allow = ["10.0.0.0/8", "172.16.0.0/12"]
+allow = ["10.0.0.0/8", "172.16.0.0/12"]  # empty denies all; ["0.0.0.0/0", "::/0"] allows all
 
 [gateway.cache]
 max_entries = 100_000
@@ -58,19 +58,21 @@ copy = ["sub", "email", "groups"]
 oid = "sub"
 
 # ── routes ────────────────────────────────────────────
+# One route per host. The request's path and query go to the downstream
+# unchanged. Empty allowed_* lists deny every request; "*" accepts any value.
 [[routes]]
 name = "orders"
-match = { host = "api.example.com", path_prefix = "/orders" }
-downstream = "https://orders.internal.example.com"
-trusted_issuers = ["okta", "entra"]
-audience = "orders-api"
-scopes = ["orders.read", "orders.write"]
-required_scopes = ["orders"]
+host = "orders.example.com"
+downstream = "https://orders-lb.internal.example.com"
+append_audience = "orders.example.com"      # added to the minted aud; "" adds nothing
+allowed_audiences = ["api://default", "api://tsong"]
+allowed_scopes = ["orders.read", "orders.write"]
 
 [[routes]]
 name = "builds"
-match = { path_prefix = "/builds" }
-downstream = "https://ci.internal.example.com"
-trusted_issuers = ["gitlab"]
-audience = "ci-api"
-allow = ["10.20.0.0/16"]
+host = "builds.example.com"
+downstream = "https://builds-lb.internal.example.com"
+append_audience = "builds.example.com"
+allowed_audiences = ["tsong"]
+allowed_scopes = ["api", "read_api"]
+allow = ["10.20.0.0/16"]                     # narrows gateway.allow for this route

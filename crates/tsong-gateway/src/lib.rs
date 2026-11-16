@@ -1,2 +1,170 @@
-//! The reverse proxy: routes, inbound token validation, the exchange cache
-//! and header rewriting. Not built yet.
+//! The reverse proxy. For each request it looks up the route by host,
+//! checks the client's address against the allow lists, exchanges the
+//! bearer token for one Tsong signs, and streams the request to the
+//! route's downstream with the exchanged token in its place. The upstream
+//! is the caller; the downstream is where the request goes.
+//!
+//! It fails closed: a request that can't be authenticated or exchanged is
+//! answered by the gateway and never forwarded, and the inbound token is
+//! never sent downstream.
+
+mod cache;
+mod client_ip;
+mod exchange;
+mod forward;
+
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::Router;
+use axum::extract::{ConnectInfo, Request, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use ipnet::IpNet;
+use tsong_clock::Clock;
+use tsong_config::{Config, RouteTable};
+use tsong_issuer::ExchangeError;
+
+pub use cache::{ExchangeCache, lifetime};
+pub use client_ip::{allowed, client_ip};
+pub use exchange::{ExchangeFuture, Exchanger};
+
+/// How long the gateway waits to connect to a downstream.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Why the gateway couldn't start.
+#[derive(Debug, thiserror::Error)]
+pub enum GatewayError {
+    #[error("building the downstream client: {0}")]
+    Client(#[from] reqwest::Error),
+}
+
+/// The reverse proxy for one config.
+pub struct Gateway {
+    routes: RouteTable,
+    allow: Vec<IpNet>,
+    trusted_proxies: Vec<IpNet>,
+    cache: ExchangeCache,
+    client: reqwest::Client,
+}
+
+impl Gateway {
+    pub fn new(
+        config: &Config,
+        exchanger: Arc<dyn Exchanger>,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self, GatewayError> {
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .build()?;
+        Ok(Self {
+            routes: RouteTable::new(&config.routes),
+            allow: config.gateway.allow.clone(),
+            trusted_proxies: config.gateway.trusted_proxies.clone(),
+            cache: ExchangeCache::new(
+                exchanger,
+                clock,
+                config.gateway.cache.max_entries,
+                config.issuer.clock_skew,
+            ),
+            client,
+        })
+    }
+
+    async fn handle(&self, peer: SocketAddr, request: Request) -> Response {
+        let Some(host) = forward::request_host(&request) else {
+            return refuse(StatusCode::NOT_FOUND, "no route for this host");
+        };
+        let Some(route) = self.routes.get(&host) else {
+            return refuse(StatusCode::NOT_FOUND, "no route for this host");
+        };
+        let peer = peer.ip().to_canonical();
+        let Some(client) = client_ip(
+            peer,
+            request.headers().get_all(forward::X_FORWARDED_FOR),
+            &self.trusted_proxies,
+        ) else {
+            return refuse(StatusCode::BAD_REQUEST, "malformed X-Forwarded-For");
+        };
+        if !allowed(client, &self.allow, route.allow.as_deref()) {
+            return refuse(StatusCode::FORBIDDEN, "client address not allowed");
+        }
+        let Some(token) = bearer(request.headers()) else {
+            return unauthorized("a bearer token is required", None);
+        };
+        let minted = match self.cache.token(token, &host).await {
+            Ok(minted) => minted,
+            Err(error) => return exchange_failure(&error),
+        };
+        let trusted_peer = self.trusted_proxies.iter().any(|net| net.contains(&peer));
+        forward::forward(&self.client, route, request, &minted, peer, trusted_peer).await
+    }
+}
+
+/// The gateway's routes: every method and path, dispatched by host. Serve
+/// it with `into_make_service_with_connect_info::<SocketAddr>()`, so the
+/// gateway knows each connection's peer.
+pub fn router(gateway: Arc<Gateway>) -> Router {
+    Router::new().fallback(proxy).with_state(gateway)
+}
+
+async fn proxy(
+    State(gateway): State<Arc<Gateway>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    request: Request,
+) -> Response {
+    gateway.handle(peer, request).await
+}
+
+/// The token in the request's one `Authorization: Bearer` header.
+fn bearer(headers: &HeaderMap) -> Option<&str> {
+    let mut values = headers.get_all(header::AUTHORIZATION).iter();
+    let value = values.next()?;
+    if values.next().is_some() {
+        return None;
+    }
+    let (scheme, token) = value.to_str().ok()?.split_once(' ')?;
+    let token = token.trim();
+    (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty() && !token.contains(' '))
+        .then_some(token)
+}
+
+/// The response to an exchange that failed.
+fn exchange_failure(error: &ExchangeError) -> Response {
+    let message = error.to_string();
+    match error {
+        ExchangeError::InvalidGrant(_) | ExchangeError::InvalidRequest(_) => {
+            unauthorized(&message, Some("invalid_token"))
+        }
+        ExchangeError::InvalidTarget(_) | ExchangeError::InvalidScope(_) => {
+            refuse(StatusCode::FORBIDDEN, &message)
+        }
+        ExchangeError::Unavailable(_) => refuse(StatusCode::SERVICE_UNAVAILABLE, &message),
+        ExchangeError::Server(_) | ExchangeError::UnsupportedGrantType => {
+            refuse(StatusCode::INTERNAL_SERVER_ERROR, &message)
+        }
+    }
+}
+
+/// A 401 with the `WWW-Authenticate` challenge RFC 6750 defines.
+fn unauthorized(message: &str, error: Option<&str>) -> Response {
+    let challenge = match error {
+        Some(error) => format!("Bearer error=\"{error}\""),
+        None => "Bearer".to_owned(),
+    };
+    let mut response = refuse(StatusCode::UNAUTHORIZED, message);
+    if let Ok(value) = HeaderValue::from_str(&challenge) {
+        response
+            .headers_mut()
+            .insert(header::WWW_AUTHENTICATE, value);
+    }
+    response
+}
+
+/// A response the gateway answers itself, with a plain-text reason.
+fn refuse(status: StatusCode, message: &str) -> Response {
+    (status, format!("{message}\n")).into_response()
+}

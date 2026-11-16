@@ -11,7 +11,7 @@ Configuration lives in Git and reloads on merge to main.
 
 ## Status
 
-The issuer works: `tsong serve <config.toml>` runs the RFC 8693 token endpoint, the JWKS and the discovery document. It validates subject tokens against each trusted issuer's JWKS and mints ES256 tokens for the route with the requested audience. `tsong check <config.toml>` validates a config and loads its keys. The gateway comes next; [docs/notes/roadmap.md](docs/notes/roadmap.md) lists the order. [examples/tsong.toml](examples/tsong.toml) is a sample config.
+`tsong serve <config.toml>` runs the gateway and the issuer. The gateway looks up each request's route by host, checks the client against the IP allow lists, exchanges the bearer token through a read-through cache, and streams the request to the route's downstream with the exchanged token. The issuer serves the RFC 8693 token endpoint, the JWKS and the discovery document, and mints ES256 tokens. `tsong check [--deny-warnings] <config.toml>` validates a config, loads its keys and reports its warnings. [docs/notes/gateway-plan.md](docs/notes/gateway-plan.md) describes the gateway, and [docs/notes/roadmap.md](docs/notes/roadmap.md) lists what comes next. [examples/tsong.toml](examples/tsong.toml) is a sample config.
 
 In Tsong's terms the upstream is the caller and the downstream is the service a route forwards to.
 
