@@ -23,7 +23,7 @@ tsong-issuer.workspace = true
 [dev-dependencies]
 futures-util.workspace = true
 http-body-util.workspace = true
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 tower = { workspace = true, features = ["util"] }
 tsong-clock = { workspace = true, features = ["test-util"] }
 tsong-keys.workspace = true

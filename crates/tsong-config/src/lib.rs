@@ -8,6 +8,7 @@
 
 mod duration;
 mod lint;
+mod network;
 mod store;
 mod validate;
 
@@ -21,6 +22,7 @@ use serde::Deserialize;
 use url::Url;
 
 pub use lint::Warnings;
+pub use network::{allowed, client_ip};
 pub use store::{ConfigStore, FileStore, LoadFuture};
 pub use validate::{Problems, RESERVED_CLAIMS};
 
@@ -111,7 +113,15 @@ pub struct Gateway {
     /// Client ranges allowed through. Empty denies every client;
     /// `["0.0.0.0/0", "::/0"]` allows every client.
     pub allow: Vec<IpNet>,
+    /// The longest the gateway waits on a downstream between reads, before
+    /// answering 504. A route may set its own.
+    #[serde(default = "default_read_timeout", with = "duration")]
+    pub read_timeout: Duration,
     pub cache: Cache,
+}
+
+fn default_read_timeout() -> Duration {
+    Duration::from_secs(60)
 }
 
 /// The exchanged-token cache.
@@ -214,6 +224,17 @@ pub struct Route {
     /// `allow`. Unset, the gateway's list alone applies. Empty denies
     /// every client.
     pub allow: Option<Vec<IpNet>>,
+    /// Overrides `gateway.read_timeout` for this route.
+    #[serde(default, with = "duration::option")]
+    pub read_timeout: Option<Duration>,
+}
+
+impl Route {
+    /// The longest the gateway waits on this route's downstream between
+    /// reads.
+    pub fn read_timeout(&self, gateway: &Gateway) -> Duration {
+        self.read_timeout.unwrap_or(gateway.read_timeout)
+    }
 }
 
 /// The entry in `allowed_audiences` or `allowed_scopes` that accepts any

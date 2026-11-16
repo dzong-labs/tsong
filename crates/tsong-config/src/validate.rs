@@ -40,6 +40,9 @@ impl Config {
         self.check_trusted_issuers(&mut problems);
         self.check_claims(&mut problems);
         self.check_routes(&mut problems);
+        if self.gateway.read_timeout.is_zero() {
+            problems.push("gateway.read_timeout must be above zero".into());
+        }
         if self.gateway.cache.max_entries == 0 {
             problems.push("gateway.cache.max_entries must be above zero".into());
         }
@@ -169,6 +172,9 @@ impl Config {
                 ));
             } else if !hosts.insert(route.host.to_ascii_lowercase()) {
                 problems.push(format!("routes repeats host {:?}", route.host));
+            }
+            if route.read_timeout.is_some_and(|timeout| timeout.is_zero()) {
+                problems.push(format!("route {name:?} read_timeout must be above zero"));
             }
             if !is_origin(&route.downstream) {
                 problems.push(format!(

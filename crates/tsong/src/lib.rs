@@ -99,8 +99,11 @@ pub async fn serve_until(
         let _ = stop.send(true);
         Ok::<(), std::io::Error>(())
     };
-    let issuer_server = axum::serve(issuer_listener, tsong_issuer::router(issuer))
-        .with_graceful_shutdown(stopped(stopping.clone()));
+    let issuer_server = axum::serve(
+        issuer_listener,
+        tsong_issuer::router(issuer).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(stopped(stopping.clone()));
     let gateway_server = axum::serve(
         gateway_listener,
         tsong_gateway::router(gateway).into_make_service_with_connect_info::<SocketAddr>(),

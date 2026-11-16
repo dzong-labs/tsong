@@ -27,6 +27,7 @@ state = "retiring"              # still published in JWKS, never signs
 listen = "0.0.0.0:8443"
 trusted_proxies = ["10.0.0.0/8"]
 allow = ["10.0.0.0/8", "172.16.0.0/12"]  # empty denies all; ["0.0.0.0/0", "::/0"] allows all
+read_timeout = "60s"            # longest wait on a downstream between reads; a route may override
 
 [gateway.cache]
 max_entries = 100_000
@@ -76,3 +77,4 @@ append_audience = "builds.example.com"
 allowed_audiences = ["tsong"]
 allowed_scopes = ["api", "read_api"]
 allow = ["10.20.0.0/16"]                     # narrows gateway.allow for this route
+read_timeout = "5m"                          # long-running builds

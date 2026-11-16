@@ -9,10 +9,11 @@
 //! never sent downstream.
 
 mod cache;
-mod client_ip;
 mod exchange;
 mod forward;
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,11 +24,10 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use ipnet::IpNet;
 use tsong_clock::Clock;
-use tsong_config::{Config, RouteTable};
+use tsong_config::{Config, RouteTable, allowed, client_ip};
 use tsong_issuer::ExchangeError;
 
 pub use cache::{ExchangeCache, lifetime};
-pub use client_ip::{allowed, client_ip};
 pub use exchange::{ExchangeFuture, Exchanger};
 
 /// How long the gateway waits to connect to a downstream.
@@ -45,8 +45,10 @@ pub struct Gateway {
     routes: RouteTable,
     allow: Vec<IpNet>,
     trusted_proxies: Vec<IpNet>,
+    read_timeout: Duration,
     cache: ExchangeCache,
-    client: reqwest::Client,
+    /// One downstream client per read timeout in the config.
+    clients: HashMap<Duration, reqwest::Client>,
 }
 
 impl Gateway {
@@ -55,22 +57,29 @@ impl Gateway {
         exchanger: Arc<dyn Exchanger>,
         clock: Arc<dyn Clock>,
     ) -> Result<Self, GatewayError> {
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .no_proxy()
-            .connect_timeout(CONNECT_TIMEOUT)
-            .build()?;
+        let mut clients = HashMap::new();
+        let timeouts = config
+            .routes
+            .iter()
+            .map(|route| route.read_timeout(&config.gateway))
+            .chain([config.gateway.read_timeout]);
+        for timeout in timeouts {
+            if let Entry::Vacant(entry) = clients.entry(timeout) {
+                entry.insert(client(timeout)?);
+            }
+        }
         Ok(Self {
             routes: RouteTable::new(&config.routes),
             allow: config.gateway.allow.clone(),
             trusted_proxies: config.gateway.trusted_proxies.clone(),
+            read_timeout: config.gateway.read_timeout,
             cache: ExchangeCache::new(
                 exchanger,
                 clock,
                 config.gateway.cache.max_entries,
                 config.issuer.clock_skew,
             ),
-            client,
+            clients,
         })
     }
 
@@ -82,9 +91,10 @@ impl Gateway {
             return refuse(StatusCode::NOT_FOUND, "no route for this host");
         };
         let peer = peer.ip().to_canonical();
+        let forwarded_for = request.headers().get_all(forward::X_FORWARDED_FOR);
         let Some(client) = client_ip(
             peer,
-            request.headers().get_all(forward::X_FORWARDED_FOR),
+            forwarded_for.iter().map(HeaderValue::as_bytes),
             &self.trusted_proxies,
         ) else {
             return refuse(StatusCode::BAD_REQUEST, "malformed X-Forwarded-For");
@@ -99,9 +109,23 @@ impl Gateway {
             Ok(minted) => minted,
             Err(error) => return exchange_failure(&error),
         };
+        let timeout = route.read_timeout.unwrap_or(self.read_timeout);
+        let Some(downstream) = self.clients.get(&timeout) else {
+            return refuse(StatusCode::INTERNAL_SERVER_ERROR, "no downstream client");
+        };
         let trusted_peer = self.trusted_proxies.iter().any(|net| net.contains(&peer));
-        forward::forward(&self.client, route, request, &minted, peer, trusted_peer).await
+        forward::forward(downstream, route, request, &minted, peer, trusted_peer).await
     }
+}
+
+/// A downstream client that waits at most `read_timeout` between reads.
+fn client(read_timeout: Duration) -> Result<reqwest::Client, GatewayError> {
+    Ok(reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(read_timeout)
+        .build()?)
 }
 
 /// The gateway's routes: every method and path, dispatched by host. Serve
@@ -139,9 +163,9 @@ fn exchange_failure(error: &ExchangeError) -> Response {
         ExchangeError::InvalidGrant(_) | ExchangeError::InvalidRequest(_) => {
             unauthorized(&message, Some("invalid_token"))
         }
-        ExchangeError::InvalidTarget(_) | ExchangeError::InvalidScope(_) => {
-            refuse(StatusCode::FORBIDDEN, &message)
-        }
+        ExchangeError::InvalidTarget(_)
+        | ExchangeError::InvalidScope(_)
+        | ExchangeError::AccessDenied => refuse(StatusCode::FORBIDDEN, &message),
         // Outages and internal failures carry detail about keys and
         // issuers, which callers don't need.
         ExchangeError::Unavailable(_) => refuse(

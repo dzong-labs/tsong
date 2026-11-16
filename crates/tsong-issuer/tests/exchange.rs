@@ -490,6 +490,7 @@ fn error_codes_and_statuses() {
             "invalid_scope",
             400,
         ),
+        (ExchangeError::AccessDenied, "access_denied", 403),
         (
             ExchangeError::Unavailable(String::new()),
             "temporarily_unavailable",

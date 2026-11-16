@@ -91,6 +91,10 @@ pub async fn forward(
     let sent = downstream.send().await;
     match sent {
         Ok(response) => inbound_response(response),
+        Err(error) if error.is_timeout() => refuse(
+            StatusCode::GATEWAY_TIMEOUT,
+            "the downstream did not answer in time",
+        ),
         Err(_) => refuse(StatusCode::BAD_GATEWAY, "the downstream is unreachable"),
     }
 }

@@ -755,6 +755,65 @@ fn accept_anything_entries_warn_as_decisions() -> TestResult {
 }
 
 #[test]
+fn the_read_timeout_defaults_to_a_minute_and_a_route_may_override_it() -> TestResult {
+    let second = ROUTE
+        .replace(r#"name = "orders""#, r#"name = "slow""#)
+        .replace(
+            r#"host = "orders.example.com""#,
+            r#"host = "slow.example.com""#,
+        )
+        .replace(
+            r#"allowed_scopes = ["orders.read"]"#,
+            "allowed_scopes = [\"orders.read\"]\nread_timeout = \"5m\"",
+        );
+    let config = Config::from_toml(&with_route(&format!("{ROUTE}{second}")))?;
+    assert_eq!(config.gateway.read_timeout, Duration::from_secs(60));
+    assert_eq!(
+        route(&config, 0)?.read_timeout(&config.gateway),
+        Duration::from_secs(60)
+    );
+    assert_eq!(
+        route(&config, 1)?.read_timeout(&config.gateway),
+        Duration::from_secs(300)
+    );
+    let text = with_route(ROUTE).replace(
+        "[gateway.cache]",
+        "read_timeout = \"90s\"\n\n[gateway.cache]",
+    );
+    let config = Config::from_toml(&text)?;
+    assert_eq!(
+        route(&config, 0)?.read_timeout(&config.gateway),
+        Duration::from_secs(90)
+    );
+    Ok(())
+}
+
+#[test]
+fn read_timeouts_are_above_zero() -> TestResult {
+    let text = route_with(
+        r#"allowed_scopes = ["orders.read"]"#,
+        "allowed_scopes = [\"orders.read\"]\nread_timeout = \"0s\"",
+    )
+    .replace(
+        "[gateway.cache]",
+        "read_timeout = \"0s\"\n\n[gateway.cache]",
+    );
+    assert_eq!(
+        problems(&text)?,
+        [
+            r#"route "orders" read_timeout must be above zero"#,
+            "gateway.read_timeout must be above zero",
+        ]
+    );
+    let bad = route_with(
+        r#"allowed_scopes = ["orders.read"]"#,
+        "allowed_scopes = [\"orders.read\"]\nread_timeout = \"soon\"",
+    );
+    parse_error(&bad)?;
+    Ok(())
+}
+
+#[test]
 fn every_problem_is_reported() {
     let text = minimal()
         .replace("https://tsong", "http://tsong")

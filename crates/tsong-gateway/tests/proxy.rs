@@ -412,3 +412,22 @@ async fn a_streamed_body_is_forwarded_whole() -> TestResult {
     assert_eq!(answer.echoed()?.get("body"), Some(&json!("one,two,three")));
     Ok(())
 }
+
+#[tokio::test]
+async fn a_stalled_downstream_is_a_504_after_its_read_timeout() -> TestResult {
+    let address = downstream().await?;
+    let mut config = config_to(&format!("http://{address}"))?;
+    config.gateway.read_timeout = std::time::Duration::from_millis(200);
+    for route in &mut config.routes {
+        if route.name == "builds" {
+            route.read_timeout = Some(std::time::Duration::from_secs(10));
+        }
+    }
+    let h = harness_with(&config, Arc::new(FakeExchanger::default()), address)?;
+    let answer = send(&h, get("orders.test", "/stall", Some("alice"))?).await?;
+    assert_eq!(answer.status, StatusCode::GATEWAY_TIMEOUT);
+    assert_eq!(answer.body, "the downstream did not answer in time\n");
+    let answer = send(&h, get("builds.test", "/stall", Some("alice"))?).await?;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+    Ok(())
+}

@@ -139,6 +139,9 @@ impl Exchanger for FakeExchanger {
 /// query, headers (each name to its values) and body.
 async fn echo(request: Request) -> Response {
     let (parts, body) = request.into_parts();
+    if parts.uri.path() == "/stall" {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
     if parts.uri.path() == "/teapot" {
         return (
             StatusCode::IM_A_TEAPOT,

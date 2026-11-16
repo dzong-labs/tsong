@@ -48,6 +48,7 @@ allowed_scopes = []
 - `allowed_audiences` lists the inbound `aud` values the route accepts. The inbound token must carry at least one of them.
 - `allowed_scopes` lists the inbound scopes the route accepts. Every scope the inbound token carries must be in it.
 - `allow` is optional, and adds a second IP check to the gateway-wide `gateway.allow`. A client must be in both lists, so a route can only narrow access. A route without `allow` takes `gateway.allow` alone.
+- `read_timeout` is optional, and overrides `gateway.read_timeout`, the longest the gateway waits on a downstream between reads. That defaults to 60 seconds.
 
 An empty `allowed_*` list denies every request. `"*"` accepts any value. IP lists follow the same rule: an empty `gateway.allow`, or an empty route `allow`, denies every client, and `["0.0.0.0/0", "::/0"]` allows every client. Validation stays mandatory: the config sets values, and no value switches a check off.
 
@@ -55,7 +56,7 @@ An empty `allowed_*` list denies every request. `"*"` accepts any value. IP list
 
 ## Exchange
 
-The token endpoint stays reachable on its own, so the issuer enforces the route, not the gateway. The gateway asks for an exchange with `audience` set to the request's host. The issuer then:
+The token endpoint stays reachable on its own, so the issuer enforces the route, not the gateway. Before an exchange it applies the same IP allow lists the gateway does, `gateway.allow` and the named route's `allow`, finding the client through the same trusted proxies, and refuses with `access_denied` (403). The gateway asks for an exchange with `audience` set to the request's host. The issuer then:
 
 1. Looks up the route by that host, and fails with `invalid_target` when there is none.
 2. Validates the subject token against the global trusted issuers. Every trusted issuer may exchange into every route.
@@ -99,6 +100,7 @@ The gateway fails closed:
 | Issuer or inbound JWKS unavailable | 503, without the cause |
 | Exchange failed inside the issuer, such as signing | 500, without the cause |
 | Downstream unreachable | 502 |
+| Downstream silent past its read timeout | 504 |
 
 ## Config lint
 

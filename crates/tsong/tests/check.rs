@@ -254,6 +254,14 @@ async fn serve_runs_the_issuer_and_gateway_until_shut_down() -> TestResult {
         Some(&json!("https://tsong.example.com"))
     );
     assert_eq!(gateway_status(gateway_port).await?, 404);
+    let token = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{port}/token"))
+        .form(&[("grant_type", "password")])
+        .send()
+        .await?;
+    assert_eq!(token.status().as_u16(), 400);
+    let body: Value = token.json().await?;
+    assert_eq!(body.get("error"), Some(&json!("unsupported_grant_type")));
 
     stop.send(()).map_err(|()| "the server stopped early")?;
     server.await??;

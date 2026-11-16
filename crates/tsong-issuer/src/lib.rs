@@ -12,12 +12,13 @@ mod error;
 mod http;
 mod mint;
 
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tsong_clock::Clock;
-use tsong_config::{Config, Route, RouteTable};
+use tsong_config::{Config, Route, RouteTable, allowed, client_ip};
 use tsong_keys::KeySet;
 use tsong_validate::{Validated, Validator, scopes};
 
@@ -167,6 +168,32 @@ impl Issuer {
         let renames = self.config.claims.rename.get(validated.issuer())?;
         let (from, _) = renames.iter().find(|(_, to)| *to == "sub")?;
         validated.claims().get(from)?.as_str()
+    }
+
+    /// Whether a token request from the connection's `peer`, with these
+    /// `X-Forwarded-For` values, may exchange for `audience`. The client
+    /// must be in `gateway.allow` and, when the audience names a route with
+    /// its own `allow`, in that list too: the token endpoint admits exactly
+    /// the clients the gateway admits.
+    pub fn admits<'a>(
+        &self,
+        peer: IpAddr,
+        forwarded_for: impl DoubleEndedIterator<Item = &'a [u8]>,
+        audience: Option<&str>,
+    ) -> Result<(), ExchangeError> {
+        let gateway = &self.config.gateway;
+        let client = client_ip(peer, forwarded_for, &gateway.trusted_proxies)
+            .ok_or_else(|| ExchangeError::InvalidRequest("malformed X-Forwarded-For".into()))?;
+        let route = audience.and_then(|audience| self.routes.get(audience));
+        if allowed(
+            client,
+            &gateway.allow,
+            route.and_then(|route| route.allow.as_deref()),
+        ) {
+            Ok(())
+        } else {
+            Err(ExchangeError::AccessDenied)
+        }
     }
 
     /// The OIDC discovery document.

@@ -1,19 +1,19 @@
-//! Who the client is, and whether it may pass.
+//! Who a client is, and whether it may pass: the client-address rules the
+//! gateway and the issuer's token endpoint both enforce.
 
 use std::net::IpAddr;
 
-use axum::http::HeaderValue;
-use axum::http::header::GetAll;
 use ipnet::IpNet;
 
 /// The client's address. It is the connection's peer, unless the peer is
-/// a trusted proxy: then `X-Forwarded-For` is read from the right, each hop
-/// believed while the address before it is a trusted proxy, and the first
-/// address that isn't one is the client. Hops left of the client are never
-/// read. `None` when a hop that must be believed isn't an IP address.
-pub fn client_ip(
+/// a trusted proxy: then the `X-Forwarded-For` values, given in header
+/// order, are read from the right, each hop believed while the address
+/// before it is a trusted proxy, and the first address that isn't one is
+/// the client. Hops left of the client are never read. `None` when a hop
+/// that must be believed isn't an IP address.
+pub fn client_ip<'a>(
     peer: IpAddr,
-    forwarded_for: GetAll<'_, HeaderValue>,
+    forwarded_for: impl DoubleEndedIterator<Item = &'a [u8]>,
     trusted_proxies: &[IpNet],
 ) -> Option<IpAddr> {
     let trusted = |ip: &IpAddr| trusted_proxies.iter().any(|net| net.contains(ip));
@@ -21,8 +21,8 @@ pub fn client_ip(
     if !trusted(&client) {
         return Some(client);
     }
-    for value in forwarded_for.iter().rev() {
-        for hop in value.to_str().ok()?.rsplit(',') {
+    for value in forwarded_for.rev() {
+        for hop in std::str::from_utf8(value).ok()?.rsplit(',') {
             client = hop.trim().parse::<IpAddr>().ok()?.to_canonical();
             if !trusted(&client) {
                 return Some(client);

@@ -8,3 +8,14 @@ pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duratio
     let text = String::deserialize(deserializer)?;
     humantime::parse_duration(&text).map_err(D::Error::custom)
 }
+
+/// An optional duration: absent is `None`.
+pub mod option {
+    use super::*;
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Duration>, D::Error> {
+        super::deserialize(deserializer).map(Some)
+    }
+}

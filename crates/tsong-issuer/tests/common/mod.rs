@@ -32,7 +32,8 @@ state = "active"
 
 [gateway]
 listen = "127.0.0.1:0"
-allow = ["127.0.0.0/8"]
+trusted_proxies = ["10.0.0.0/24"]
+allow = ["127.0.0.0/8", "10.0.0.0/8"]
 
 [gateway.cache]
 max_entries = 10
@@ -69,6 +70,7 @@ downstream = "https://open-lb.test"
 append_audience = ""
 allowed_audiences = ["*"]
 allowed_scopes = ["*"]
+allow = ["10.1.0.0/16"]
 
 [[routes]]
 name = "closed"
