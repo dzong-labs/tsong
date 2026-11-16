@@ -51,8 +51,12 @@ fn trusted(issuer: &str, jwks_url: Option<&str>) -> TestResult<TrustedIssuer> {
         audiences: vec!["tsong".into()],
         validation: Validation::Jwt,
         algorithms: vec![],
+        discovery_url: None,
         jwks_url: jwks_url.map(str::parse).transpose()?,
+        jwks_max_age: Duration::from_secs(3600),
+        jwks_retry: Duration::from_secs(10),
         jwks_refetch: Duration::from_secs(30),
+        jwks_timeout: Duration::from_secs(10),
         introspection_url: None,
         client_id: None,
         client_secret_env: None,
@@ -87,6 +91,68 @@ async fn keys_are_found_through_discovery() -> TestResult {
     let slashed = format!("{base}/");
     let error = fetch_error(&trusted(&slashed, None)?).await?;
     assert!(error.to_string().contains("names issuer"), "{error}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_configured_discovery_url_replaces_the_well_known_path() -> TestResult {
+    let base = serve(|base| {
+        let document = json!({ "issuer": base, "jwks_uri": format!("{base}/jwks") });
+        Router::new()
+            .route(
+                "/tenant/v2.0/.well-known/openid-configuration",
+                get(move || async move { axum::Json(document) }),
+            )
+            .route("/jwks", get(|| async { axum::Json(jwks()) }))
+    })
+    .await?;
+    let mut trusted = trusted(&base, None)?;
+    assert!(matches!(fetch_error(&trusted).await?, FetchError::Http(_)));
+    trusted.discovery_url =
+        Some(format!("{base}/tenant/v2.0/.well-known/openid-configuration").parse()?);
+    assert_eq!(kids(&fetch(&trusted).await?), K1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_fetch_gives_up_after_its_timeout() -> TestResult {
+    let base = serve(|base| {
+        let document = json!({ "issuer": base, "jwks_uri": format!("{base}/jwks") });
+        Router::new()
+            .route(
+                "/.well-known/openid-configuration",
+                get(move || async move { axum::Json(document) }),
+            )
+            .route(
+                "/slow-discovery/.well-known/openid-configuration",
+                get(|| async {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    axum::Json(json!({}))
+                }),
+            )
+            .route(
+                "/jwks",
+                get(|| async {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    axum::Json(jwks())
+                }),
+            )
+    })
+    .await?;
+    let mut slow_jwks = trusted(&base, None)?;
+    slow_jwks.jwks_timeout = Duration::from_millis(200);
+    let mut slow_discovery = slow_jwks.clone();
+    slow_discovery.discovery_url =
+        Some(format!("{base}/slow-discovery/.well-known/openid-configuration").parse()?);
+    for trusted in [slow_jwks, slow_discovery] {
+        let started = std::time::Instant::now();
+        let error = fetch_error(&trusted).await?;
+        assert!(
+            matches!(&error, FetchError::Http(error) if error.is_timeout()),
+            "{error:?}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(4));
+    }
     Ok(())
 }
 

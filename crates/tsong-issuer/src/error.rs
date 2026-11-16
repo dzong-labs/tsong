@@ -52,7 +52,9 @@ impl ExchangeError {
 impl From<ValidateError> for ExchangeError {
     fn from(error: ValidateError) -> Self {
         match error {
-            ValidateError::Jwks(_) => Self::Unavailable(error.to_string()),
+            ValidateError::Jwks(_) | ValidateError::KeysExpired => {
+                Self::Unavailable(error.to_string())
+            }
             _ => Self::InvalidRequest(error.to_string()),
         }
     }

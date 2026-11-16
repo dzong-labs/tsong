@@ -365,6 +365,107 @@ algorithms"
     Ok(())
 }
 
+/// The okta issuer with `lines` added.
+fn okta_with(lines: &str) -> String {
+    format!(
+        "{}{}",
+        minimal(),
+        OKTA.replace("algorithms", &format!("{lines}\nalgorithms"))
+    )
+}
+
+#[test]
+fn key_timing_has_defaults_and_is_configurable() -> TestResult {
+    let config = Config::from_toml(&okta_with(""))?;
+    let okta = trusted(&config, "okta")?;
+    assert_eq!(
+        (
+            okta.jwks_max_age,
+            okta.jwks_retry,
+            okta.jwks_refetch,
+            okta.jwks_timeout
+        ),
+        (
+            Duration::from_secs(3600),
+            Duration::from_secs(10),
+            Duration::from_secs(30),
+            Duration::from_secs(10)
+        )
+    );
+    let config = Config::from_toml(&okta_with(
+        "jwks_max_age = \"2h\"\njwks_retry = \"5s\"\njwks_timeout = \"3s\"",
+    ))?;
+    let okta = trusted(&config, "okta")?;
+    assert_eq!(
+        (okta.jwks_max_age, okta.jwks_retry, okta.jwks_timeout),
+        (
+            Duration::from_secs(7200),
+            Duration::from_secs(5),
+            Duration::from_secs(3)
+        )
+    );
+    Ok(())
+}
+
+#[test]
+fn key_timing_is_above_zero() -> TestResult {
+    for field in ["jwks_max_age", "jwks_retry", "jwks_refetch", "jwks_timeout"] {
+        assert_eq!(
+            problems(&okta_with(&format!("{field} = \"0s\"")))?,
+            [format!("trusted_issuers.okta.{field} must be above zero")]
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn a_discovery_url_is_https() -> TestResult {
+    let http = okta_with(
+        "discovery_url = \"http://okta.example.com/tenant/.well-known/openid-configuration\"",
+    );
+    assert_eq!(
+        problems(&http)?,
+        ["trusted_issuers.okta.discovery_url must be https"]
+    );
+    let config = Config::from_toml(&http.replace("http://", "https://"))?;
+    assert_eq!(
+        trusted(&config, "okta")?
+            .discovery_url
+            .as_ref()
+            .map(|url| url.as_str()),
+        Some("https://okta.example.com/tenant/.well-known/openid-configuration")
+    );
+    Ok(())
+}
+
+#[test]
+fn a_discovery_url_and_a_jwks_url_are_not_both_set() -> TestResult {
+    let both = okta_with(
+        "discovery_url = \"https://okta.example.com/d\"\njwks_url = \"https://okta.example.com/k\"",
+    );
+    assert_eq!(
+        problems(&both)?,
+        [
+            "trusted_issuers.okta sets both discovery_url and jwks_url; jwks_url skips discovery, so set one"
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn keys_trusted_for_more_than_a_day_warn() -> TestResult {
+    let warning = "trusted_issuers.okta.jwks_max_age is over 24h; a key the issuer withdraws stays trusted that long".to_owned();
+    let day = Config::from_toml(&okta_with("jwks_max_age = \"24h\""))?;
+    assert!(!day.warnings().0.contains(&warning), "{}", day.warnings());
+    let longer = Config::from_toml(&okta_with("jwks_max_age = \"25h\""))?;
+    assert!(
+        longer.warnings().0.contains(&warning),
+        "{}",
+        longer.warnings()
+    );
+    Ok(())
+}
+
 #[test]
 fn claim_mapping_may_not_write_reserved_claims() -> TestResult {
     let text = format!(

@@ -45,6 +45,7 @@ Like the webhook's, the list is deployed, never loaded from Git, and checked aga
 | `tsong_downstream_seconds` | `route` | Time to a downstream's response headers, 1ms to about 16s |
 | `tsong_exchanges_total` | `outcome` | Token exchanges: `issued`, or the OAuth error code |
 | `tsong_jwks_fetch_failures_total` | `issuer` | Failed JWKS fetches, by the trusted issuer's `iss` |
+| `tsong_jwks_age_seconds` | `issuer` | Seconds since the trusted issuer's keys were fetched. Past its `jwks_max_age`, its tokens are refused |
 | `tsong_config_reloads_total` | `outcome` | Reloads that found a new revision: `applied`, `fetch_failed`, `invalid_config` or `build_failed` |
 
 Labelling by route costs one series per route and status, and one histogram per route. That cost grows with the route count.
@@ -62,6 +63,15 @@ Each token exchange writes one JSON line to stdout. That covers every cache miss
 `iss` and `sub` are the subject token's, which identify the caller together. A refusal carries the OAuth error code as its `outcome` and its `error_description`. `iss` and `sub` are null when the token never validated. Tokens are never written.
 
 The issuer reports each exchange to an `ExchangeObserver` (`crates/tsong-issuer/src/context.rs`). `ExchangeAudit` in `crates/tsong/src/telemetry.rs` writes the line and counts the exchange.
+
+Each failed JWKS fetch writes a line, and so does the first fetch that succeeds after a failure. While an issuer is down, a line appears every `jwks_retry`.
+
+```json
+{"event":"jwks_fetch","at":1763251200,"outcome":"failed","issuer":"https://example.okta.com/oauth2/default","error":"…"}
+{"event":"jwks_fetch","at":1763251230,"outcome":"recovered","issuer":"https://example.okta.com/oauth2/default","error":null}
+```
+
+`ObservedFetcher` in `crates/tsong/src/telemetry.rs` writes these lines and counts the failures.
 
 ## Correlation
 
