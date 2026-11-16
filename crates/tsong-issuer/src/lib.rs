@@ -393,6 +393,12 @@ fn granted_scopes(
             )));
         }
     }
+    if let Some(missing) = route.missing_scope(|scope| held.contains(scope)) {
+        return Err(ExchangeError::InvalidScope(format!(
+            "route {:?} requires scope {missing:?}",
+            route.name
+        )));
+    }
     let Some(requested) = requested else {
         return Ok(held.into_iter().map(str::to_owned).collect());
     };
@@ -406,6 +412,12 @@ fn granted_scopes(
         if !granted.iter().any(|kept| kept == scope) {
             granted.push(scope.to_owned());
         }
+    }
+    if let Some(missing) = route.missing_scope(|scope| granted.iter().any(|kept| kept == scope)) {
+        return Err(ExchangeError::InvalidScope(format!(
+            "the requested scope drops {missing:?}, which route {:?} requires",
+            route.name
+        )));
     }
     granted.sort();
     Ok(granted)

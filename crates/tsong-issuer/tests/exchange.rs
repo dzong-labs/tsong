@@ -193,6 +193,56 @@ async fn requested_scopes_narrow_the_subjects() -> TestResult {
 }
 
 #[tokio::test]
+async fn a_route_s_required_scopes_must_all_be_held() -> TestResult {
+    let h = harness()?;
+    let all = subject(json!({ "scope": "orders.read billing.read orders.write" }));
+    let (response, _) = exchanged(&h, request(&h, "billing.test", all)).await?;
+    assert_eq!(
+        response.scope.as_deref(),
+        Some("billing.read orders.read orders.write")
+    );
+
+    for (scope, missing) in [
+        (json!("orders.read"), "billing.read"),
+        (json!("billing.read orders.write"), "orders.read"),
+        (Value::Null, "orders.read"),
+    ] {
+        let claims = subject(json!({ "scope": scope }));
+        assert_eq!(
+            refused(&h, request(&h, "billing.test", claims)).await?,
+            (
+                "invalid_scope",
+                format!(r#"route "billing" requires scope "{missing}""#)
+            )
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_requested_scope_keeps_the_required_scopes() -> TestResult {
+    let h = harness()?;
+    let all = || subject(json!({ "scope": "orders.read billing.read orders.write" }));
+    let kept = changed(request(&h, "billing.test", all()), |r| {
+        r.scope = Some("billing.read orders.read".into());
+    });
+    let (response, _) = exchanged(&h, kept).await?;
+    assert_eq!(response.scope.as_deref(), Some("billing.read orders.read"));
+
+    let dropped = changed(request(&h, "billing.test", all()), |r| {
+        r.scope = Some("orders.read orders.write".into());
+    });
+    assert_eq!(
+        refused(&h, dropped).await?,
+        (
+            "invalid_scope",
+            r#"the requested scope drops "billing.read", which route "billing" requires"#.into()
+        )
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_subject_without_scopes_gets_none() -> TestResult {
     let h = harness()?;
     let claims = subject(json!({ "scope": null }));

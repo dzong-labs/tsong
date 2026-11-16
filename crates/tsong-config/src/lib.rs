@@ -256,6 +256,11 @@ pub struct Route {
     /// The inbound scopes the route accepts: every scope the inbound token
     /// carries must be one. Empty denies every token; `"*"` accepts any.
     pub allowed_scopes: Vec<String>,
+    /// The scopes the inbound token must all carry, which a token minted
+    /// for the route always keeps. Each must be one `allowed_scopes`
+    /// accepts. Empty or unset requires none.
+    #[serde(default)]
+    pub required_scopes: Vec<String>,
     /// Client ranges allowed to this route, checked after the gateway's
     /// `allow`. Unset, the gateway's list alone applies. Empty denies
     /// every client.
@@ -283,6 +288,15 @@ impl Route {
         let allowed = &self.allowed_audiences;
         allowed.iter().any(|value| value == ANY)
             || audiences.any(|aud| allowed.iter().any(|value| value == aud))
+    }
+
+    /// The first of the route's required scopes that `holds` says is
+    /// missing.
+    pub fn missing_scope(&self, holds: impl Fn(&str) -> bool) -> Option<&str> {
+        self.required_scopes
+            .iter()
+            .map(String::as_str)
+            .find(|scope| !holds(scope))
     }
 
     /// The first of these scopes the route doesn't accept. An empty

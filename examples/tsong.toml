@@ -77,6 +77,7 @@ downstream = "https://orders-lb.internal.example.com"
 append_audience = "orders.example.com"      # added to the minted aud; "" adds nothing
 allowed_audiences = ["api://default", "api://tsong"]
 allowed_scopes = ["orders.read", "orders.write"]
+required_scopes = ["orders.read"]          # optional: the token must carry all of these
 
 [[routes]]
 name = "builds"

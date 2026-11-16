@@ -6,7 +6,7 @@ use std::fmt;
 
 use url::Url;
 
-use crate::{Config, KeyProvider, KeyState, Validation};
+use crate::{ANY, Config, KeyProvider, KeyState, Validation};
 
 /// Claims Tsong sets on every token it issues, which claim mapping may not
 /// write.
@@ -218,6 +218,18 @@ impl Config {
                 ));
             } else if !hosts.insert(route.host.to_ascii_lowercase()) {
                 problems.push(format!("routes repeats host {:?}", route.host));
+            }
+            let allows_any = route.allowed_scopes.iter().any(|scope| scope == ANY);
+            for scope in &route.required_scopes {
+                if scope == ANY {
+                    problems.push(format!(
+                        "route {name:?} required_scopes may not hold \"*\"; name each scope"
+                    ));
+                } else if !allows_any && !route.allowed_scopes.contains(scope) {
+                    problems.push(format!(
+                        "route {name:?} requires scope {scope:?}, which its allowed_scopes refuses"
+                    ));
+                }
             }
             if route.read_timeout.is_some_and(|timeout| timeout.is_zero()) {
                 problems.push(format!("route {name:?} read_timeout must be above zero"));

@@ -885,6 +885,51 @@ fn a_route_refuses_the_first_scope_it_does_not_allow() -> TestResult {
 }
 
 #[test]
+fn a_route_reports_the_first_required_scope_missing() -> TestResult {
+    let mut route = orders(&[], &["read", "write"])?;
+    assert_eq!(route.missing_scope(|_| false), None, "none required");
+    route.required_scopes = vec!["read".into(), "write".into()];
+    assert_eq!(route.missing_scope(|_| true), None);
+    assert_eq!(route.missing_scope(|scope| scope == "read"), Some("write"));
+    assert_eq!(route.missing_scope(|_| false), Some("read"));
+    Ok(())
+}
+
+#[test]
+fn required_scopes_default_to_none_and_load() -> TestResult {
+    let config = Config::from_toml(&with_route(ROUTE))?;
+    assert!(route(&config, 0)?.required_scopes.is_empty());
+    let required = ROUTE.replace(
+        "allowed_scopes",
+        "required_scopes = [\"orders.read\"]\nallowed_scopes",
+    );
+    let config = Config::from_toml(&with_route(&required))?;
+    assert_eq!(route(&config, 0)?.required_scopes, ["orders.read"]);
+    Ok(())
+}
+
+#[test]
+fn required_scopes_must_be_allowed_and_named() -> TestResult {
+    let refused = ROUTE.replace(
+        "allowed_scopes",
+        "required_scopes = [\"orders.read\", \"admin\", \"*\"]\nallowed_scopes",
+    );
+    assert_eq!(
+        problems(&with_route(&refused))?,
+        [
+            r#"route "orders" requires scope "admin", which its allowed_scopes refuses"#,
+            r#"route "orders" required_scopes may not hold "*"; name each scope"#,
+        ]
+    );
+    let open = refused.replace(", \"*\"]", "]").replace(
+        r#"allowed_scopes = ["orders.read"]"#,
+        r#"allowed_scopes = ["*"]"#,
+    );
+    Config::from_toml(&with_route(&open))?;
+    Ok(())
+}
+
+#[test]
 fn an_empty_scope_list_refuses_everything_and_a_star_accepts_anything() -> TestResult {
     let empty = orders(&[], &[])?;
     assert_eq!(empty.refused_scope(std::iter::empty()), Err(None));
