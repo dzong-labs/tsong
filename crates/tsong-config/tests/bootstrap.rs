@@ -359,3 +359,21 @@ known_hosts = \"/etc/tsong/known_hosts\"
     }
     Ok(())
 }
+
+#[test]
+fn health_checks_have_their_own_listener_and_allow_list() -> TestResult {
+    let text =
+        format!("{GIT}\n[health]\nlisten = \"127.0.0.1:8447\"\nallow = [\"10.20.0.0/16\"]\n");
+    let health = Bootstrap::from_toml(&text)?.health.ok_or("no health")?;
+    assert_eq!(health.listen.port(), 8447);
+    assert_eq!(health.allow.len(), 1);
+    assert!(Bootstrap::from_toml(GIT)?.health.is_none());
+    let closed = text.replace(r#"allow = ["10.20.0.0/16"]"#, "allow = []");
+    assert_eq!(
+        problems(&closed)?,
+        ["health.allow is empty, so no health check can arrive"]
+    );
+    let unknown = text.replace("[health]", "[health]\npath = \"/up\"");
+    assert!(parse_error(&unknown)?.contains("path"));
+    Ok(())
+}

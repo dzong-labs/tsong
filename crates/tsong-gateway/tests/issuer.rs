@@ -38,7 +38,8 @@ async fn the_issuer_mints_the_token_the_downstream_receives() -> TestResult {
         validator,
         clock.clone(),
     );
-    let gateway = Gateway::new(&config, Arc::new(issuer), clock)?;
+    let metrics = Arc::new(tsong_gateway::GatewayMetrics::default());
+    let gateway = Gateway::new(&config, Arc::new(issuer), clock, metrics)?;
     let router = tsong_gateway::router(Arc::new(gateway));
 
     let token = inbound.sign(&json!({

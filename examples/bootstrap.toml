@@ -20,7 +20,8 @@ poll = "5m"                               # fetch this often when no webhook arr
 # path = "tsong.toml"
 
 # ── admin listener ────────────────────────────────────
-# GET /status. Only clients in the served config's gateway.allow get in.
+# GET /status and GET /metrics. Only clients in the served config's
+# gateway.allow get in.
 [admin]
 listen = "0.0.0.0:8445"
 
@@ -35,3 +36,11 @@ listen = "0.0.0.0:8446"
 allow = ["192.30.252.0/22", "185.199.108.0/22", "140.82.112.0/20", "143.55.64.0/20"]
 host = "github"                           # or "gitlab"
 secret_env = "TSONG_WEBHOOK_SECRET"       # the variable holding the webhook secret
+
+# ── health listener ───────────────────────────────────
+# GET /health/live and GET /health/ready, for the load balancer. Like the
+# webhook's, its allow list is deployed here and checked against each
+# connection's own address.
+[health]
+listen = "0.0.0.0:8447"
+allow = ["10.20.0.0/16"]                  # the load balancer's subnets

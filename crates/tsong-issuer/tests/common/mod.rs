@@ -7,7 +7,9 @@ use std::sync::Arc;
 use serde_json::{Map, Value, json};
 use tsong_clock::ManualClock;
 use tsong_config::Config;
-use tsong_issuer::{ACCESS_TOKEN, Issuer, TOKEN_EXCHANGE, TokenRequest};
+use tsong_issuer::{
+    ACCESS_TOKEN, ExchangeEvent, ExchangeObserver, Issuer, TOKEN_EXCHANGE, TokenRequest,
+};
 use tsong_keys::{FileKey, KeySet};
 use tsong_validate::Validator;
 use tsong_validate::testkit::{FakeFetcher, TestKey, pem};
@@ -81,7 +83,35 @@ allowed_audiences = ["tsong"]
 allowed_scopes = []
 "#;
 
+/// Every exchange event the issuer reported.
+#[derive(Default)]
+pub struct Recording(std::sync::Mutex<Vec<ExchangeEvent>>);
+
+impl Recording {
+    pub fn events(&self) -> Vec<ExchangeEvent> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The last event, or a test failure when there is none.
+    pub fn last(&self) -> TestResult<ExchangeEvent> {
+        Ok(self.events().pop().ok_or("no exchange was observed")?)
+    }
+}
+
+impl ExchangeObserver for Recording {
+    fn exchanged(&self, event: &ExchangeEvent) {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(event.clone());
+    }
+}
+
 pub struct Harness {
+    pub events: Arc<Recording>,
     pub issuer: Arc<Issuer>,
     pub fetcher: Arc<FakeFetcher>,
     pub inbound: TestKey,
@@ -96,11 +126,14 @@ pub fn harness_with_keys(keys: KeySet) -> TestResult<Harness> {
     let fetcher = Arc::new(FakeFetcher::with(vec![inbound.jwk()]));
     let clock = Arc::new(ManualClock::at(NOW));
     let validator = Validator::new(&config, fetcher.clone(), clock.clone());
-    let issuer = Arc::new(Issuer::new(config, keys, validator, clock));
+    let events = Arc::new(Recording::default());
+    let issuer =
+        Arc::new(Issuer::new(config, keys, validator, clock).with_observer(events.clone()));
     Ok(Harness {
         issuer,
         fetcher,
         inbound,
+        events,
     })
 }
 

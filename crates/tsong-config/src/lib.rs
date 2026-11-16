@@ -23,7 +23,7 @@ use serde::Deserialize;
 use url::Url;
 
 pub use bootstrap::{
-    Admin, Bootstrap, BootstrapError, CONFIG_FILE, GitHost, GitSource, Source, Webhook,
+    Admin, Bootstrap, BootstrapError, CONFIG_FILE, GitHost, GitSource, Health, Source, Webhook,
 };
 pub use lint::Warnings;
 pub use network::{allowed, client_ip};

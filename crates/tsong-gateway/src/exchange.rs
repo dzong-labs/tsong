@@ -5,7 +5,8 @@ use std::future::Future;
 use std::pin::Pin;
 
 use tsong_issuer::{
-    ACCESS_TOKEN, ExchangeError, Issuer, TOKEN_EXCHANGE, TokenRequest, TokenResponse,
+    ACCESS_TOKEN, ExchangeContext, ExchangeError, Issuer, TOKEN_EXCHANGE, TokenRequest,
+    TokenResponse,
 };
 
 /// The future an [`Exchanger`] returns.
@@ -15,14 +16,24 @@ pub type ExchangeFuture<'a> =
 /// Exchanges an inbound access token for one Tsong signs.
 pub trait Exchanger: Send + Sync {
     /// Exchanges `token` for a token for the route whose host is
-    /// `audience`.
-    fn exchange<'a>(&'a self, token: &'a str, audience: &'a str) -> ExchangeFuture<'a>;
+    /// `audience`, for the request `context` describes.
+    fn exchange<'a>(
+        &'a self,
+        token: &'a str,
+        audience: &'a str,
+        context: &'a ExchangeContext,
+    ) -> ExchangeFuture<'a>;
 }
 
 /// The issuer in the same process.
 impl Exchanger for Issuer {
-    fn exchange<'a>(&'a self, token: &'a str, audience: &'a str) -> ExchangeFuture<'a> {
-        Box::pin(Issuer::exchange(
+    fn exchange<'a>(
+        &'a self,
+        token: &'a str,
+        audience: &'a str,
+        context: &'a ExchangeContext,
+    ) -> ExchangeFuture<'a> {
+        Box::pin(Issuer::exchange_with(
             self,
             TokenRequest {
                 grant_type: Some(TOKEN_EXCHANGE.into()),
@@ -31,6 +42,7 @@ impl Exchanger for Issuer {
                 audience: Some(audience.into()),
                 ..TokenRequest::default()
             },
+            context,
         ))
     }
 }

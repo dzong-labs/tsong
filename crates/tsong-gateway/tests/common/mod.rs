@@ -18,8 +18,8 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 use tsong_clock::ManualClock;
 use tsong_config::Config;
-use tsong_gateway::{ExchangeFuture, Exchanger, Gateway};
-use tsong_issuer::{ExchangeError, TokenResponse};
+use tsong_gateway::{ExchangeFuture, Exchanger, Gateway, GatewayMetrics};
+use tsong_issuer::{ExchangeContext, ExchangeError, TokenResponse};
 
 /// What a test returns: nothing, or why it failed.
 pub type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
@@ -90,11 +90,20 @@ pub fn minted(name: &str, exp: u64) -> TestResult<String> {
 #[derive(Default)]
 pub struct FakeExchanger {
     calls: Mutex<Vec<(String, String)>>,
+    contexts: Mutex<Vec<ExchangeContext>>,
 }
 
 impl FakeExchanger {
     pub fn calls(&self) -> Vec<(String, String)> {
         self.calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The request context of each exchange, in order.
+    pub fn contexts(&self) -> Vec<ExchangeContext> {
+        self.contexts
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
@@ -126,11 +135,20 @@ impl FakeExchanger {
 }
 
 impl Exchanger for FakeExchanger {
-    fn exchange<'a>(&'a self, token: &'a str, audience: &'a str) -> ExchangeFuture<'a> {
+    fn exchange<'a>(
+        &'a self,
+        token: &'a str,
+        audience: &'a str,
+        context: &'a ExchangeContext,
+    ) -> ExchangeFuture<'a> {
         self.calls
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push((token.into(), audience.into()));
+        self.contexts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(context.clone());
         Box::pin(async move { Self::answer(token, audience) })
     }
 }
@@ -186,6 +204,7 @@ pub struct Harness {
     pub router: Router,
     pub exchanger: Arc<FakeExchanger>,
     pub downstream: SocketAddr,
+    pub metrics: Arc<GatewayMetrics>,
 }
 
 /// The config with every route forwarding to `downstream` over plain
@@ -211,11 +230,13 @@ pub fn harness_with(
     downstream: SocketAddr,
 ) -> TestResult<Harness> {
     let clock = Arc::new(ManualClock::at(NOW));
-    let gateway = Gateway::new(config, exchanger.clone(), clock)?;
+    let metrics = Arc::new(GatewayMetrics::default());
+    let gateway = Gateway::new(config, exchanger.clone(), clock, metrics.clone())?;
     Ok(Harness {
         router: tsong_gateway::router(Arc::new(gateway)),
         exchanger,
         downstream,
+        metrics,
     })
 }
 

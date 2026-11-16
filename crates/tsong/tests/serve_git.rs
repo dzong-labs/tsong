@@ -140,8 +140,16 @@ async fn serve_reloads_when_the_branch_moves() -> TestResult {
     let origin = Origin::new()?;
     let port = free_port()?;
     let admin = free_port()?;
+    let health = free_port()?;
     let first = origin.commit("https://one.test", port)?;
-    let (stop, server) = serve(origin.bootstrap("50ms", admin, "")?);
+    let checks = format!(
+        "
+[health]
+listen = \"127.0.0.1:{health}\"
+allow = [\"127.0.0.0/8\"]
+"
+    );
+    let (stop, server) = serve(origin.bootstrap("50ms", admin, &checks)?);
 
     let status = serving(admin, &first).await?;
     assert_eq!(status.get("reloads"), Some(&Value::from(1)));
@@ -152,9 +160,22 @@ async fn serve_reloads_when_the_branch_moves() -> TestResult {
         Some("https://one.test")
     );
 
+    let ready = get_json(&format!("http://127.0.0.1:{health}/health/ready")).await?;
+    assert_eq!(ready.get("ready"), Some(&Value::Bool(true)));
+    let live = get_json(&format!("http://127.0.0.1:{health}/health/live")).await?;
+    assert_eq!(live.get("live"), Some(&Value::Bool(true)));
+
     let second = origin.commit("https://two.test", port)?;
     let status = serving(admin, &second).await?;
     assert_eq!(status.get("reloads"), Some(&Value::from(2)));
+    let metrics = reqwest::get(format!("http://127.0.0.1:{admin}/metrics"))
+        .await?
+        .text()
+        .await?;
+    assert!(
+        metrics.contains(r#"tsong_config_reloads_total{outcome="applied"} 1"#),
+        "{metrics}"
+    );
     let issuer = get_json(&discovery).await?;
     assert_eq!(
         issuer.get("issuer").and_then(Value::as_str),

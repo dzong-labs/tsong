@@ -431,3 +431,92 @@ async fn a_stalled_downstream_is_a_504_after_its_read_timeout() -> TestResult {
     assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
     Ok(())
 }
+
+#[tokio::test]
+async fn each_request_is_correlated_downstream_and_back() -> TestResult {
+    let h = harness().await?;
+    let request = from(
+        CLIENT,
+        Request::get("/")
+            .header("host", "orders.test")
+            .header("authorization", "Bearer alice")
+            .header("x-request-id", "r-9")
+            .header(
+                "traceparent",
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            )
+            .body(Body::empty())?,
+    )?;
+    let answer = send(&h, request).await?;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+    assert_eq!(answer.header("x-request-id"), Some("r-9"));
+    assert_eq!(answer.received_one("x-request-id")?, "r-9");
+    let traceparent = answer.received_one("traceparent")?;
+    assert_eq!(
+        tsong_issuer::trace_id(&traceparent),
+        Some("4bf92f3577b34da6a3ce929d0e0e4736")
+    );
+    assert_eq!(
+        h.exchanger.contexts(),
+        [tsong_issuer::ExchangeContext {
+            request_id: Some("r-9".into()),
+            trace_id: Some("4bf92f3577b34da6a3ce929d0e0e4736".into()),
+        }]
+    );
+
+    let refused = send(&h, get("nowhere.test", "/", Some("alice"))?).await?;
+    let id = refused.header("x-request-id").ok_or("no request ID")?;
+    assert_eq!(id.len(), 32, "even a refusal carries a request ID");
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_cache_counts_hits_and_misses() -> TestResult {
+    let h = harness().await?;
+    for token in ["alice", "alice", "alice", "bob", "unavailable"] {
+        send(&h, get("orders.test", "/", Some(token))?).await?;
+    }
+    assert_eq!(h.metrics.cache_misses.get(), 3);
+    assert_eq!(h.metrics.cache_hits.get(), 2);
+    assert_eq!(h.metrics.cache_entries.get(), 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn requests_are_counted_by_route_and_status_and_timed() -> TestResult {
+    use prometheus_client::registry::Registry;
+    use tsong_gateway::{RouteLabel, RouteStatus};
+
+    let h = harness().await?;
+    send(&h, get("orders.test", "/", Some("alice"))?).await?;
+    send(&h, get("orders.test", "/", None)?).await?;
+    send(&h, get("nowhere.test", "/", Some("alice"))?).await?;
+    let count = |route: &str, status: u16| {
+        h.metrics
+            .requests
+            .get_or_create(&RouteStatus {
+                route: route.into(),
+                status,
+            })
+            .get()
+    };
+    assert_eq!(count("orders", 200), 1);
+    assert_eq!(count("orders", 401), 1);
+    assert_eq!(count("-", 404), 1);
+
+    let mut registry = Registry::default();
+    registry.register("downstream", "timing", h.metrics.downstream_seconds.clone());
+    let mut text = String::new();
+    prometheus_client::encoding::text::encode(&mut text, &registry)?;
+    assert!(
+        text.contains(r#"downstream_count{route="orders"} 1"#),
+        "{text}"
+    );
+    h.metrics
+        .downstream_seconds
+        .get_or_create(&RouteLabel {
+            route: "orders".into(),
+        })
+        .observe(0.0);
+    Ok(())
+}

@@ -12,6 +12,8 @@ use tokio::sync::watch;
 use tsong_clock::Clock;
 use tsong_config::{Config, ConfigStore, Route};
 
+/// A new revision was swapped in.
+pub const APPLIED: &str = "applied";
 /// The store couldn't produce the config, such as a failed fetch.
 pub const FETCH_FAILED: &str = "fetch_failed";
 /// The config didn't parse or validate.
@@ -21,6 +23,7 @@ pub const INVALID_CONFIG: &str = "invalid_config";
 pub const BUILD_FAILED: &str = "build_failed";
 
 use crate::state::{State, listen_addresses};
+use crate::telemetry::{Metrics, OutcomeLabel};
 
 /// Where audit lines go: stdout in production, collected by the platform.
 pub trait Audit: Send + Sync {
@@ -84,6 +87,7 @@ pub struct Reloader {
     status: Arc<Mutex<Status>>,
     audit: Arc<dyn Audit>,
     clock: Arc<dyn Clock>,
+    metrics: Arc<Metrics>,
     /// The content of the last config rejected as invalid. It can't become
     /// valid until it changes, so it is not rejected again.
     invalid: Mutex<Option<String>>,
@@ -109,10 +113,18 @@ impl Reloader {
             store,
             state,
             status: Arc::new(Mutex::new(status)),
+            metrics: Arc::default(),
             invalid: Mutex::new(None),
             audit,
             clock,
         }
+    }
+
+    /// This reloader, building each state with `metrics` and counting its
+    /// reloads there.
+    pub fn with_metrics(mut self, metrics: Arc<Metrics>) -> Self {
+        self.metrics = metrics;
+        self
     }
 
     /// A receiver of the current state and each state swapped in after it.
@@ -150,7 +162,13 @@ impl Reloader {
                 return self.reject(&current, Some(&revision), INVALID_CONFIG, error.to_string());
             }
         };
-        let next = match State::build(snapshot, self.clock.clone()) {
+        let built = State::build_with(
+            snapshot,
+            self.clock.clone(),
+            &self.metrics,
+            self.audit.clone(),
+        );
+        let next = match built {
             Ok(next) => next,
             Err(error) => {
                 return self.reject(&current, Some(&revision), BUILD_FAILED, error.to_string());
@@ -162,6 +180,7 @@ impl Reloader {
             status.revision = next.revision.clone();
             status.loaded_at = self.clock.unix_seconds();
             status.reloads += 1;
+            self.count(APPLIED);
             applied(Some(&current.config), &next, &status)
         };
         self.audit.record(&line);
@@ -179,6 +198,7 @@ impl Reloader {
         {
             let mut status = self.lock();
             status.failed_reloads += 1;
+            self.count(reason);
             status.last_failure = Some(reason.to_owned());
         }
         let line = json!({
@@ -192,6 +212,15 @@ impl Reloader {
         });
         self.audit.record(&line.to_string());
         Outcome::Rejected(error)
+    }
+
+    fn count(&self, outcome: &str) {
+        self.metrics
+            .reloads
+            .get_or_create(&OutcomeLabel {
+                outcome: outcome.to_owned(),
+            })
+            .inc();
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Status> {

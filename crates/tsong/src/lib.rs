@@ -7,11 +7,13 @@ pub mod admin;
 pub mod allow;
 pub mod reload;
 pub mod state;
+pub mod telemetry;
 
 use std::future::Future;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tokio::net::TcpListener;
@@ -25,8 +27,9 @@ use tsong_git::GitStore;
 use tsong_keys::{KeyError, KeySet};
 
 use crate::admin::Hook;
-use crate::reload::{Lines, Reloader};
+use crate::reload::{Audit, Lines, Reloader};
 use crate::state::State;
+use crate::telemetry::Metrics;
 
 /// How to run the command.
 pub const USAGE: &str =
@@ -100,19 +103,22 @@ pub async fn serve_until(
     let bootstrap = Bootstrap::load(path)?;
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let (store, poll) = store(&bootstrap.source);
-    let first = State::build(store.load().await?.parse()?, clock.clone())?;
+    let metrics = Arc::new(Metrics::default());
+    let audit: Arc<dyn Audit> = Arc::new(Lines::new(std::io::stdout()));
+    let first = State::build_with(
+        store.load().await?.parse()?,
+        clock.clone(),
+        &metrics,
+        audit.clone(),
+    )?;
     let issuer_address = first.config.issuer.listen;
     let gateway_address = first.config.gateway.listen;
-    let reloader = Arc::new(Reloader::new(
-        store,
-        first,
-        Arc::new(Lines::new(std::io::stdout())),
-        clock,
-    ));
+    let reloader =
+        Arc::new(Reloader::new(store, first, audit, clock).with_metrics(metrics.clone()));
     let trigger = Arc::new(Notify::new());
     let admin = match &bootstrap.admin {
         Some(admin) => {
-            let router = admin::status_router(reloader.status()).layer(
+            let router = admin::status_router(reloader.status(), metrics).layer(
                 axum::middleware::from_fn_with_state(reloader.subscribe(), allow::admit),
             );
             Some((TcpListener::bind(admin.listen).await?, router))
@@ -136,8 +142,22 @@ pub async fn serve_until(
         }
         _ => None,
     };
+    let ready = Arc::new(AtomicBool::new(false));
+    let health = match &bootstrap.health {
+        Some(health) => {
+            let router =
+                admin::health_router(ready.clone()).layer(axum::middleware::from_fn_with_state(
+                    Arc::new(health.allow.clone()),
+                    allow::admit_peer,
+                ));
+            Some((TcpListener::bind(health.listen).await?, router))
+        }
+        None => None,
+    };
     let issuer_listener = TcpListener::bind(issuer_address).await?;
     let gateway_listener = TcpListener::bind(gateway_address).await?;
+    // The config is loaded and every listener is bound.
+    ready.store(true, Ordering::Release);
 
     // One shutdown, heard by every server and the reload loop.
     let (stop, stopping) = watch::channel(false);
@@ -163,6 +183,7 @@ pub async fn serve_until(
     .with_graceful_shutdown(stopped(stopping.clone()));
     let admin_server = optional(admin, stopped(stopping.clone()));
     let webhook_server = optional(webhook, stopped(stopping.clone()));
+    let health_server = optional(health, stopped(stopping.clone()));
     let reloads = async move {
         if let Some(poll) = poll {
             reload_loop(&reloader, &trigger, poll, stopped(stopping)).await;
@@ -175,6 +196,7 @@ pub async fn serve_until(
         async { gateway_server.await },
         admin_server,
         webhook_server,
+        health_server,
         reloads,
     )?;
     Ok(())

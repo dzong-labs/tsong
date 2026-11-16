@@ -1,19 +1,23 @@
 //! The admin listener's reload status, and the webhook listener's push
 //! deliveries. Each runs on its own listener with its own allow list.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use tokio::sync::Notify;
 use tsong_config::GitHost;
 use tsong_git::webhook::{pushed_branch, signature_header, verify};
 
+use serde_json::json;
+
 use crate::reload::Status;
+use crate::telemetry::Metrics;
 
 /// How the webhook knows a delivery is real and whether it matters.
 pub struct Hook {
@@ -23,19 +27,58 @@ pub struct Hook {
     pub branch: String,
 }
 
-/// `GET /status`.
-pub fn status_router(status: Arc<Mutex<Status>>) -> Router {
-    Router::new()
-        .route("/status", get(status_handler))
-        .with_state(status)
+struct Admin {
+    status: Arc<Mutex<Status>>,
+    metrics: Arc<Metrics>,
 }
 
-async fn status_handler(State(status): State<Arc<Mutex<Status>>>) -> Response {
-    let status = status
+/// `GET /status` and `GET /metrics`.
+pub fn status_router(status: Arc<Mutex<Status>>, metrics: Arc<Metrics>) -> Router {
+    Router::new()
+        .route("/status", get(status_handler))
+        .route("/metrics", get(metrics_handler))
+        .with_state(Arc::new(Admin { status, metrics }))
+}
+
+async fn status_handler(State(admin): State<Arc<Admin>>) -> Response {
+    let status = admin
+        .status
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
     axum::Json(status).into_response()
+}
+
+/// The Prometheus text exposition format.
+const METRICS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
+
+async fn metrics_handler(State(admin): State<Arc<Admin>>) -> Response {
+    match admin.metrics.encode() {
+        Ok(text) => ([(header::CONTENT_TYPE, METRICS_CONTENT_TYPE)], text).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+/// `GET /health/live`, which answers 200 while the process runs, and
+/// `GET /health/ready`, which answers 200 once `ready` is set and 503
+/// until then.
+pub fn health_router(ready: Arc<AtomicBool>) -> Router {
+    Router::new()
+        .route(
+            "/health/live",
+            get(|| async { axum::Json(json!({ "live": true })) }),
+        )
+        .route("/health/ready", get(readiness))
+        .with_state(ready)
+}
+
+async fn readiness(State(ready): State<Arc<AtomicBool>>) -> Response {
+    if ready.load(Ordering::Acquire) {
+        axum::Json(json!({ "ready": true })).into_response()
+    } else {
+        let body = json!({ "ready": false, "missing": ["listeners_bound"] });
+        (StatusCode::SERVICE_UNAVAILABLE, axum::Json(body)).into_response()
+    }
 }
 
 /// The largest delivery accepted: GitHub caps push payloads at 25 MB.

@@ -8,12 +8,14 @@
 //! route's `append_audience`. [`router`] serves the token endpoint, the JWKS
 //! and the discovery document over HTTP.
 
+mod context;
 mod error;
 mod http;
 mod mint;
 
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -22,6 +24,10 @@ use tsong_config::{Config, Route, RouteTable, allowed, client_ip};
 use tsong_keys::KeySet;
 use tsong_validate::{Validated, Validator, scopes};
 
+pub use context::{
+    ExchangeContext, ExchangeEvent, ExchangeObserver, REQUEST_ID, TRACEPARENT, request_id_is_valid,
+    trace_id,
+};
 pub use error::ExchangeError;
 pub use http::router;
 
@@ -64,6 +70,16 @@ pub struct Issuer {
     keys: KeySet,
     validator: Validator,
     clock: Arc<dyn Clock>,
+    observer: Option<Arc<dyn ExchangeObserver>>,
+}
+
+/// What an exchange learned before it finished, for its event.
+#[derive(Default)]
+struct Seen {
+    trusted_issuer: Option<String>,
+    iss: Option<String>,
+    sub: Option<String>,
+    scope: Option<String>,
 }
 
 impl Issuer {
@@ -79,13 +95,65 @@ impl Issuer {
             keys,
             validator,
             clock,
+            observer: None,
         }
+    }
+
+    /// This issuer, reporting every exchange to `observer`.
+    pub fn with_observer(mut self, observer: Arc<dyn ExchangeObserver>) -> Self {
+        self.observer = Some(observer);
+        self
     }
 
     /// Exchanges a subject token for a token Tsong signs.
     pub async fn exchange(&self, request: TokenRequest) -> Result<TokenResponse, ExchangeError> {
-        let (subject_token, audience) = check_request(&request)?;
+        self.exchange_with(request, &ExchangeContext::default())
+            .await
+    }
+
+    /// Exchanges a subject token for a token Tsong signs, reporting the
+    /// exchange, in `context`, to the observer.
+    pub async fn exchange_with(
+        &self,
+        request: TokenRequest,
+        context: &ExchangeContext,
+    ) -> Result<TokenResponse, ExchangeError> {
+        let started = Instant::now();
+        let mut seen = Seen::default();
+        let result = self.run(&request, &mut seen).await;
+        if let Some(observer) = &self.observer {
+            observer.exchanged(&ExchangeEvent {
+                context: context.clone(),
+                audience: request.audience.clone(),
+                trusted_issuer: seen.trusted_issuer,
+                iss: seen.iss,
+                sub: seen.sub,
+                scope: seen.scope,
+                error: result.as_ref().err().map(ExchangeError::code),
+                error_description: result.as_ref().err().map(ToString::to_string),
+                duration: started.elapsed(),
+            });
+        }
+        result
+    }
+
+    async fn run(
+        &self,
+        request: &TokenRequest,
+        seen: &mut Seen,
+    ) -> Result<TokenResponse, ExchangeError> {
+        let (subject_token, audience) = check_request(request)?;
         let validated = self.validator.validate(subject_token).await?;
+        seen.trusted_issuer = Some(validated.issuer().to_owned());
+        let claim = |name: &str| {
+            validated
+                .claims()
+                .get(name)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        };
+        seen.iss = claim("iss");
+        seen.sub = claim("sub");
         let route = self.routes.get(audience).ok_or_else(|| {
             ExchangeError::InvalidTarget(format!("no route has host {audience:?}"))
         })?;
@@ -130,6 +198,7 @@ impl Issuer {
         }
 
         let access_token = mint::sign(self.keys.active(), &claims).await?;
+        seen.scope.clone_from(&scope);
         Ok(TokenResponse {
             access_token,
             issued_token_type: ACCESS_TOKEN.into(),

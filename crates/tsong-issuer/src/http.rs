@@ -11,7 +11,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::json;
 
-use crate::{ExchangeError, Issuer, TokenRequest};
+use crate::{ExchangeContext, ExchangeError, Issuer, TokenRequest};
 
 /// The issuer's routes: `POST /token`, `GET /jwks.json` and
 /// `GET /.well-known/openid-configuration`. Serve it with
@@ -39,7 +39,11 @@ async fn token(
                 forwarded_for.iter().map(HeaderValue::as_bytes),
                 request.audience.as_deref(),
             ) {
-                Ok(()) => issuer.exchange(request).await,
+                Ok(()) => {
+                    issuer
+                        .exchange_with(request, &ExchangeContext::from_headers(&headers))
+                        .await
+                }
                 Err(error) => Err(error),
             }
         }

@@ -69,7 +69,7 @@ async fn status_reports_the_reloads() -> TestResult {
         failed_reloads: 1,
         last_failure: Some("fetch_failed".into()),
     }));
-    let response = status_router(status)
+    let response = status_router(status, Arc::default())
         .oneshot(Request::get("/status").body(Body::empty())?)
         .await?;
     assert_eq!(response.status(), StatusCode::OK);
@@ -89,7 +89,7 @@ async fn status_reports_the_reloads() -> TestResult {
 
 #[tokio::test]
 async fn the_status_listener_has_no_webhook() -> TestResult {
-    let router = status_router(Arc::default());
+    let router = status_router(Arc::default(), Arc::default());
     let request = Request::post("/hooks/config").body(Body::from(PUSH_MAIN))?;
     assert_eq!(
         router.oneshot(request).await?.status(),

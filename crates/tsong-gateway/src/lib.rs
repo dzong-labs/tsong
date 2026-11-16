@@ -9,14 +9,16 @@
 //! never sent downstream.
 
 mod cache;
+mod correlate;
 mod exchange;
 mod forward;
+mod metrics;
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::extract::{ConnectInfo, Request, State};
@@ -25,10 +27,12 @@ use axum::response::{IntoResponse, Response};
 use ipnet::IpNet;
 use tsong_clock::Clock;
 use tsong_config::{Config, RouteTable, allowed, client_ip};
-use tsong_issuer::ExchangeError;
+use tsong_issuer::{ExchangeContext, ExchangeError};
 
 pub use cache::{ExchangeCache, lifetime};
+pub use correlate::correlate;
 pub use exchange::{ExchangeFuture, Exchanger};
+pub use metrics::{GatewayMetrics, RouteLabel, RouteStatus};
 
 /// How long the gateway waits to connect to a downstream.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -49,6 +53,7 @@ pub struct Gateway {
     cache: ExchangeCache,
     /// One downstream client per read timeout in the config.
     clients: HashMap<Duration, reqwest::Client>,
+    metrics: Arc<GatewayMetrics>,
 }
 
 impl Gateway {
@@ -56,6 +61,7 @@ impl Gateway {
         config: &Config,
         exchanger: Arc<dyn Exchanger>,
         clock: Arc<dyn Clock>,
+        metrics: Arc<GatewayMetrics>,
     ) -> Result<Self, GatewayError> {
         let mut clients = HashMap::new();
         let timeouts = config
@@ -78,12 +84,42 @@ impl Gateway {
                 clock,
                 config.gateway.cache.max_entries,
                 config.issuer.clock_skew,
+                metrics.clone(),
             ),
             clients,
+            metrics,
         })
     }
 
-    async fn handle(&self, peer: SocketAddr, request: Request) -> Response {
+    /// Answers `request`, with its request ID on the response, and counts
+    /// the answer by route and status.
+    async fn handle(&self, peer: SocketAddr, mut request: Request) -> Response {
+        let Some(request_id) = correlate(request.headers_mut()) else {
+            return refuse(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "no randomness for a request ID",
+            );
+        };
+        let route = forward::request_host(&request)
+            .and_then(|host| self.routes.get(&host))
+            .map_or_else(|| "-".to_owned(), |route| route.name.clone());
+        let mut response = self.route(peer, request).await;
+        if let Ok(value) = HeaderValue::from_str(&request_id) {
+            response
+                .headers_mut()
+                .insert(tsong_issuer::REQUEST_ID, value);
+        }
+        self.metrics
+            .requests
+            .get_or_create(&RouteStatus {
+                route,
+                status: response.status().as_u16(),
+            })
+            .inc();
+        response
+    }
+
+    async fn route(&self, peer: SocketAddr, request: Request) -> Response {
         let Some(host) = forward::request_host(&request) else {
             return refuse(StatusCode::NOT_FOUND, "no route for this host");
         };
@@ -105,7 +141,8 @@ impl Gateway {
         let Some(token) = bearer(request.headers()) else {
             return unauthorized("a bearer token is required", None);
         };
-        let minted = match self.cache.token(token, &host).await {
+        let context = ExchangeContext::from_headers(request.headers());
+        let minted = match self.cache.token(token, &host, &context).await {
             Ok(minted) => minted,
             Err(error) => return exchange_failure(&error),
         };
@@ -114,7 +151,16 @@ impl Gateway {
             return refuse(StatusCode::INTERNAL_SERVER_ERROR, "no downstream client");
         };
         let trusted_peer = self.trusted_proxies.iter().any(|net| net.contains(&peer));
-        forward::forward(downstream, route, request, &minted, peer, trusted_peer).await
+        let started = Instant::now();
+        let response =
+            forward::forward(downstream, route, request, &minted, peer, trusted_peer).await;
+        self.metrics
+            .downstream_seconds
+            .get_or_create(&RouteLabel {
+                route: route.name.clone(),
+            })
+            .observe(started.elapsed().as_secs_f64());
+        response
     }
 }
 
