@@ -492,10 +492,7 @@ async fn liveness_answers_while_readiness_waits_for_the_listeners() -> TestResul
     );
     assert_eq!(
         health(ready.clone(), "/health/ready").await?,
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            json!({ "ready": false, "missing": ["listeners_bound"] })
-        )
+        (StatusCode::SERVICE_UNAVAILABLE, json!({ "ready": false }))
     );
     ready.store(true, Ordering::Release);
     assert_eq!(

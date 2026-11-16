@@ -53,6 +53,18 @@ tsong serve <bootstrap.toml>
 
 [examples/tsong.toml](examples/tsong.toml) is a sample config, and [examples/bootstrap.toml](examples/bootstrap.toml) a sample bootstrap file. [docs/notes/gateway-plan.md](docs/notes/gateway-plan.md) describes how the gateway works, and [docs/notes/roadmap.md](docs/notes/roadmap.md) lists what comes next: introspection for opaque tokens, actor tokens, and keys from a secrets manager.
 
+`tsong serve` stops on SIGTERM or Ctrl+C. Readiness fails first, for the bootstrap file's `health.drain` (5s by default), so the load balancer stops sending requests before the listeners close.
+
+### Container
+
+The [Containerfile](Containerfile) builds an image that runs `tsong serve /etc/tsong/bootstrap.toml` as an unprivileged user on Debian slim, which carries the `ssh` a Git source needs. The root filesystem can be read-only; the only writable path is `/var/lib/tsong`, for a Git source's clone. [deploy/podman](deploy/podman) runs it in local podman with a stub bootstrap file and config:
+
+```sh
+deploy/podman/run.sh build    # build tsong:local
+deploy/podman/run.sh start    # gateway :8443, issuer :8444, admin :8445, health :8447
+deploy/podman/run.sh stop     # SIGTERM, then the drain
+```
+
 ## Crates
 
 - `tsong-config`: the TOML model, its validation and warnings, the host route table, the client-address rules, the bootstrap file, and the `ConfigStore` trait with the file store.

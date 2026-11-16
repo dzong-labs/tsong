@@ -35,6 +35,14 @@ pub struct Health {
     /// The addresses health checks come from. Each connection's peer
     /// address must be in it; no `X-Forwarded-For` is read.
     pub allow: Vec<IpNet>,
+    /// How long, on shutdown, readiness reports not ready before the
+    /// listeners close, so the load balancer stops sending requests first.
+    #[serde(default = "default_drain", with = "duration")]
+    pub drain: Duration,
+}
+
+fn default_drain() -> Duration {
+    Duration::from_secs(5)
 }
 
 /// Where the config comes from.
