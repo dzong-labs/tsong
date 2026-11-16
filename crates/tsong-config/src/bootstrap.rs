@@ -52,6 +52,37 @@ pub struct GitSource {
     pub poll: Duration,
 }
 
+/// How a Git source's url is reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Transport {
+    /// `ssh://`, or scp-like `user@host:path`: authenticated by the deploy
+    /// key against pinned host keys.
+    Ssh,
+    /// A path or `file://` url on this machine.
+    Local,
+    /// Anything else, such as `http://` or `git://`, which nothing
+    /// authenticates.
+    Other,
+}
+
+fn transport(url: &str) -> Transport {
+    if url.starts_with("ssh://") {
+        return Transport::Ssh;
+    }
+    if url.starts_with("file://") {
+        return Transport::Local;
+    }
+    if url.contains("://") {
+        return Transport::Other;
+    }
+    // scp-like syntax: a colon before any slash, after something that
+    // isn't a Windows drive letter.
+    match url.split_once(':') {
+        Some((host, _)) if host.len() > 1 && !host.contains('/') => Transport::Ssh,
+        _ => Transport::Local,
+    }
+}
+
 /// The config file's name within a Git source's folder.
 pub const CONFIG_FILE: &str = "tsong.toml";
 
@@ -143,8 +174,27 @@ impl Bootstrap {
             if folder.starts_with('/') || folder.split('/').any(|part| part == "..") {
                 problems.push("source.folder must be within the repository".into());
             }
-            if ssh_key.is_some() != known_hosts.is_some() {
-                problems.push("source.ssh_key and source.known_hosts are set together".into());
+            match transport(url) {
+                _ if url.is_empty() => {}
+                Transport::Ssh => {
+                    if ssh_key.is_none() || known_hosts.is_none() {
+                        problems.push(
+                            "source.ssh_key and source.known_hosts are required for an ssh url"
+                                .into(),
+                        );
+                    }
+                }
+                Transport::Local => {
+                    if ssh_key.is_some() || known_hosts.is_some() {
+                        problems.push(
+                            "source.ssh_key and source.known_hosts are for an ssh url".into(),
+                        );
+                    }
+                }
+                Transport::Other => problems.push(
+                    "source.url must be an ssh url or a local path; other transports are not supported"
+                        .into(),
+                ),
             }
             if poll.is_zero() {
                 problems.push("source.poll must be above zero".into());

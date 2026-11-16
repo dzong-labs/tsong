@@ -42,7 +42,7 @@ secret_env = "TSONG_WEBHOOK_SECRET"
 
 - It keeps a bare clone at `checkout` and fetches only the watched branch.
 - It reads `tsong.toml` from `folder` in the fetched commit's tree. Nothing is checked out. The folder leaves room for route files split out of `tsong.toml`, roadmap item 15.
-- It authenticates with a read-only deploy key over SSH. gix runs the system `ssh` program with the key, `known_hosts`, `StrictHostKeyChecking=yes` and `IdentitiesOnly=yes`, so the OpenSSH client must be installed.
+- It authenticates with a read-only deploy key over SSH. gix runs the system `ssh` program with the key, `known_hosts`, `StrictHostKeyChecking=yes` and `IdentitiesOnly=yes`, so the OpenSSH client must be installed. An ssh url must set both `ssh_key` and `known_hosts`, so host keys are always pinned and the machine's own SSH settings can't relax them. Only ssh urls and local paths are accepted: a transport nothing authenticates, such as `http://` or `git://`, would let anyone on the path rewrite the trusted issuers.
 
 Every `ConfigStore` returns the config with a revision: the commit ID for Git, a SHA-256 of the file for a file store.
 

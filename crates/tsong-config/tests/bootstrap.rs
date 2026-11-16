@@ -156,19 +156,64 @@ fn git_sources_need_a_url_and_branch_inside_the_repository() -> TestResult {
 }
 
 #[test]
-fn the_ssh_key_and_known_hosts_go_together() -> TestResult {
-    let key_only = GIT.replace("known_hosts = \"/etc/tsong/known_hosts\"\n", "");
-    assert_eq!(
-        problems(&key_only)?,
-        ["source.ssh_key and source.known_hosts are set together"]
+fn an_ssh_url_needs_a_deploy_key_and_pinned_host_keys() -> TestResult {
+    const REQUIRED: &str = "source.ssh_key and source.known_hosts are required for an ssh url";
+    let without_hosts = GIT.replace("known_hosts = \"/etc/tsong/known_hosts\"\n", "");
+    assert_eq!(problems(&without_hosts)?, [REQUIRED]);
+    let without_key = GIT.replace("ssh_key = \"/etc/tsong/deploy_key\"\n", "");
+    assert_eq!(problems(&without_key)?, [REQUIRED]);
+    let neither = without_key.replace("known_hosts = \"/etc/tsong/known_hosts\"\n", "");
+    assert_eq!(problems(&neither)?, [REQUIRED]);
+    let scp_like = neither.replace(
+        "ssh://git@github.com/example/config.git",
+        "git@github.com:example/config.git",
     );
-    let hosts_only = GIT.replace("ssh_key = \"/etc/tsong/deploy_key\"\n", "");
-    assert_eq!(
-        problems(&hosts_only)?,
-        ["source.ssh_key and source.known_hosts are set together"]
+    assert_eq!(problems(&scp_like)?, [REQUIRED]);
+    let keyed_scp = GIT.replace(
+        "ssh://git@github.com/example/config.git",
+        "git@github.com:example/config.git",
     );
-    let neither = hosts_only.replace("known_hosts = \"/etc/tsong/known_hosts\"\n", "");
-    Bootstrap::from_toml(&neither)?;
+    Bootstrap::from_toml(&keyed_scp)?;
+    Ok(())
+}
+
+#[test]
+fn a_local_url_needs_no_keys() -> TestResult {
+    const KEYS: &str =
+        "ssh_key = \"/etc/tsong/deploy_key\"\nknown_hosts = \"/etc/tsong/known_hosts\"\n";
+    for local in [
+        "/srv/git/config.git",
+        "file:///srv/git/config.git",
+        "C:/git/config.git",
+        "C:\\\\git\\\\config.git",
+        "../config.git",
+    ] {
+        let with_keys = GIT.replace("ssh://git@github.com/example/config.git", local);
+        assert_eq!(
+            problems(&with_keys)?,
+            ["source.ssh_key and source.known_hosts are for an ssh url"],
+            "{local}"
+        );
+        let text = with_keys.replace(KEYS, "");
+        Bootstrap::from_toml(&text).map_err(|error| format!("{local}: {error}"))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn unauthenticated_transports_are_refused() -> TestResult {
+    for url in [
+        "http://git.example.com/config.git",
+        "https://github.com/example/config.git",
+        "git://git.example.com/config.git",
+    ] {
+        let text = GIT.replace("ssh://git@github.com/example/config.git", url);
+        assert_eq!(
+            problems(&text)?,
+            ["source.url must be an ssh url or a local path; other transports are not supported"],
+            "{url}"
+        );
+    }
     Ok(())
 }
 
@@ -225,5 +270,24 @@ fn the_sample_bootstrap_loads() -> TestResult {
         .and_then(|admin| admin.webhook)
         .map(|webhook| webhook.host);
     assert_eq!(host, Some(GitHost::GitHub));
+    Ok(())
+}
+
+#[test]
+fn a_local_url_takes_neither_key_alone() -> TestResult {
+    let local = GIT.replace(
+        "ssh://git@github.com/example/config.git",
+        "/srv/git/config.git",
+    );
+    for (field, line) in [
+        ("ssh_key", "known_hosts = \"/etc/tsong/known_hosts\"\n"),
+        ("known_hosts", "ssh_key = \"/etc/tsong/deploy_key\"\n"),
+    ] {
+        assert_eq!(
+            problems(&local.replace(line, ""))?,
+            ["source.ssh_key and source.known_hosts are for an ssh url"],
+            "{field} alone"
+        );
+    }
     Ok(())
 }
