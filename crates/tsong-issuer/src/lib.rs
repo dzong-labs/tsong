@@ -378,6 +378,16 @@ fn granted_scopes(
     requested: Option<&str>,
 ) -> Result<Vec<String>, ExchangeError> {
     let held = scopes(validated.claims());
+    // An `scp` array item is one scope. Empty, or holding whitespace, it
+    // would turn into no scope or several in the minted `scope` string.
+    if let Some(malformed) = held
+        .iter()
+        .find(|scope| scope.is_empty() || scope.contains(char::is_whitespace))
+    {
+        return Err(ExchangeError::InvalidRequest(format!(
+            "the subject token's scope {malformed:?} is not a single scope"
+        )));
+    }
     match route.refused_scope(held.iter().copied()) {
         Ok(()) => {}
         Err(None) => {
@@ -393,21 +403,37 @@ fn granted_scopes(
             )));
         }
     }
-    let Some(requested) = requested else {
-        return Ok(held.into_iter().map(str::to_owned).collect());
+    let granted = match requested {
+        None => held.iter().map(|scope| (*scope).to_owned()).collect(),
+        Some(requested) => {
+            let mut granted = Vec::new();
+            for scope in requested.split_whitespace() {
+                if !held.contains(scope) {
+                    return Err(ExchangeError::InvalidScope(format!(
+                        "the subject token lacks scope {scope:?}"
+                    )));
+                }
+                if !granted.iter().any(|kept| kept == scope) {
+                    granted.push(scope.to_owned());
+                }
+            }
+            granted.sort();
+            granted
+        }
     };
-    let mut granted = Vec::new();
-    for scope in requested.split_whitespace() {
-        if !held.contains(scope) {
-            return Err(ExchangeError::InvalidScope(format!(
-                "the subject token lacks scope {scope:?}"
-            )));
-        }
-        if !granted.iter().any(|kept| kept == scope) {
-            granted.push(scope.to_owned());
-        }
+    // The minted token keeps every scope the route requires: the subject
+    // token must hold them, and a requested scope may not drop them.
+    if let Some(missing) = route.missing_scope(|scope| granted.iter().any(|kept| kept == scope)) {
+        let reason = if requested.is_some() && held.contains(missing) {
+            format!(
+                "the requested scope drops {missing:?}, which route {:?} requires",
+                route.name
+            )
+        } else {
+            format!("route {:?} requires scope {missing:?}", route.name)
+        };
+        return Err(ExchangeError::InvalidScope(reason));
     }
-    granted.sort();
     Ok(granted)
 }
 

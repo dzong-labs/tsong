@@ -47,6 +47,7 @@ allowed_scopes = []
 - `append_audience` is added to the minted token's `aud`. When it is empty, nothing is added.
 - `allowed_audiences` lists the inbound `aud` values the route accepts. The inbound token must carry at least one of them.
 - `allowed_scopes` lists the inbound scopes the route accepts. Every scope the inbound token carries must be in it.
+- `required_scopes`, optional, lists scopes the inbound token must all carry. Each must be one `allowed_scopes` accepts, and a scope narrowed with the token endpoint's `scope` parameter must keep them all.
 - `allow` is optional, and adds a second IP check to the gateway-wide `gateway.allow`. A client must be in both lists, so a route can only narrow access. A route without `allow` takes `gateway.allow` alone.
 - `read_timeout` is optional, and overrides `gateway.read_timeout`, the longest the gateway waits on a downstream between reads. That defaults to 60 seconds.
 
@@ -60,9 +61,9 @@ The token endpoint stays reachable on its own, so the issuer enforces the route,
 
 1. Looks up the route by that host, and fails with `invalid_target` when there is none.
 2. Validates the subject token against the global trusted issuers. Every trusted issuer may exchange into every route.
-3. Checks the inbound `aud` against `allowed_audiences` and the inbound scopes against `allowed_scopes`. A failure is `invalid_target` for the audience and `invalid_scope` for the scopes.
+3. Checks the inbound `aud` against `allowed_audiences`, and the inbound scopes against `allowed_scopes` and `required_scopes`. A failure is `invalid_target` for the audience and `invalid_scope` for the scopes.
 4. Mints a token whose `aud` is the inbound `aud` followed by `append_audience`, without duplicates.
-5. Sets the minted `scope` to the inbound scopes. A `scope` parameter on the request narrows them, and asking for a scope the inbound token lacks is `invalid_scope`.
+5. Sets the minted `scope` to the inbound scopes. A `scope` parameter on the request narrows them. Asking for a scope the inbound token lacks, or narrowing away one the route requires, is `invalid_scope`.
 
 The gateway calls the issuer through an `Exchanger` trait. The MVP implementation calls the `Issuer` in-process. An HTTP implementation can come later.
 

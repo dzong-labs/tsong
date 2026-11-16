@@ -79,6 +79,15 @@ allowed_scopes = ["*"]
 allow = ["10.1.0.0/16"]
 
 [[routes]]
+name = "billing"
+host = "billing.test"
+downstream = "https://billing-lb.test"
+append_audience = ""
+allowed_audiences = ["tsong"]
+allowed_scopes = ["orders.read", "orders.write", "billing.read"]
+required_scopes = ["orders.read", "billing.read"]
+
+[[routes]]
 name = "closed"
 host = "closed.test"
 downstream = "https://closed-lb.test"
