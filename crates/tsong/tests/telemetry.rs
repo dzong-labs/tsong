@@ -418,6 +418,15 @@ async fn the_last_fetch_and_the_served_revision_are_reported() -> TestResult {
     assert_eq!(reloader.reload().await, Outcome::Unchanged);
     assert_eq!(tip_rejected(), 0);
     assert_eq!(status(&reloader).revision, "r4");
+
+    // The invalid config coming back is rejected and flagged again.
+    store.push(Ok(fetched("not toml [", "r3")?));
+    assert!(matches!(reloader.reload().await, Outcome::Rejected(_)));
+    assert_eq!(tip_rejected(), 1);
+    metrics.config_tip_rejected.set(0);
+    store.push(Ok(fetched("not toml [", "r3")?));
+    assert_eq!(reloader.reload().await, Outcome::Unchanged);
+    assert_eq!(tip_rejected(), 1, "each read of a rejected tip flags it");
     assert_eq!(
         revisions()?,
         [r#"tsong_config_revision_info{revision="r4"} 1"#]

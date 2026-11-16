@@ -181,9 +181,13 @@ impl Reloader {
             let old = std::mem::replace(&mut self.lock().revision, fetched.revision.clone());
             self.publish_revision(Some(&old), &fetched.revision);
             self.metrics.config_tip_rejected.set(0);
+            // The rejected config is no longer the tip; if it comes back it
+            // is judged and flagged again.
+            *self.invalid.lock().unwrap_or_else(PoisonError::into_inner) = None;
             return Outcome::Unchanged;
         }
         if rejected.as_ref() == Some(&content) {
+            self.metrics.config_tip_rejected.set(1);
             return Outcome::Unchanged;
         }
         let revision = fetched.revision.clone();
