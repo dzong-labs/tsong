@@ -53,14 +53,6 @@ impl Fixture {
     }
 }
 
-fn status(reloader: &Reloader) -> Status {
-    reloader
-        .status()
-        .lock()
-        .map(|status| status.clone())
-        .unwrap_or_default()
-}
-
 #[tokio::test]
 async fn the_first_load_is_audited_and_counted() -> TestResult {
     let f = Fixture::new()?;
@@ -89,9 +81,11 @@ async fn the_first_load_is_audited_and_counted() -> TestResult {
         Status {
             revision: "r1".into(),
             loaded_at: NOW,
+            fetched_at: NOW,
             reloads: 1,
             failed_reloads: 0,
             last_failure: None,
+            tip_rejected: false,
         }
     );
     assert_eq!(reloader.subscribe().borrow().revision, "r1");
@@ -364,16 +358,21 @@ fn lines_are_written_one_to_a_line() {
 }
 
 #[tokio::test]
-async fn a_new_revision_with_the_same_content_changes_nothing() -> TestResult {
+async fn a_new_revision_with_the_same_content_rebuilds_nothing_but_is_reported() -> TestResult {
     let f = Fixture::new()?;
     let text = f.text("https://one.test", 8444, "");
     let reloader = f.reloader(&text)?;
+    let state = reloader.subscribe().borrow().clone();
     let mut unrelated = fetched(&text, "r2")?;
     unrelated.content = "content of r1".into();
     f.store.push(Ok(unrelated));
     assert_eq!(reloader.reload().await, Outcome::Unchanged);
-    assert_eq!(f.lines.parsed()?.len(), 1);
-    assert_eq!(status(&reloader).revision, "r1");
+    assert_eq!(f.lines.parsed()?.len(), 1, "nothing new to audit");
+    assert!(
+        Arc::ptr_eq(&state, &reloader.subscribe().borrow()),
+        "nothing rebuilt"
+    );
+    assert_eq!(status(&reloader).revision, "r2");
     Ok(())
 }
 

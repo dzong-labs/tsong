@@ -87,6 +87,15 @@ max_entries = 10
     )
 }
 
+/// A copy of the status `reloader` reports.
+pub fn status(reloader: &tsong::reload::Reloader) -> tsong::reload::Status {
+    reloader
+        .status()
+        .lock()
+        .map(|status| status.clone())
+        .unwrap_or_else(|poisoned| poisoned.into_inner().clone())
+}
+
 /// `text` as a store fetches it at `revision`, with content of its own.
 pub fn fetched(text: &str, revision: &str) -> TestResult<Fetched> {
     Ok(Fetched {

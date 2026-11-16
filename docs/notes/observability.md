@@ -47,6 +47,9 @@ Like the webhook's, the list is deployed, never loaded from Git, and checked aga
 | `tsong_jwks_fetch_failures_total` | `issuer` | Failed JWKS fetches, by the trusted issuer's `iss` |
 | `tsong_jwks_age_seconds` | `issuer` | Seconds since the trusted issuer's keys were fetched, for the config being served. Past its `jwks_max_age`, its tokens are refused. An issuer whose keys were never fetched has no series |
 | `tsong_config_reloads_total` | `outcome` | Reloads that found a new revision: `applied`, `fetch_failed`, `invalid_config` or `build_failed` |
+| `tsong_config_last_fetch_timestamp_seconds` | | When the config store was last read, new revision or not. While it can't be read, the last good config keeps serving. For a Git source, alert on `time() - tsong_config_last_fetch_timestamp_seconds` above a few poll intervals. A file source is read once at startup, so the value stays there |
+| `tsong_config_revision_info` | `revision` | The revision being served, set to 1: the newest commit read whose config is in use. Across replicas, more than one `revision` means they haven't converged |
+| `tsong_config_tip_rejected` | | 1 while the newest config read was invalid or failed to build, so an older one is still served |
 
 Labelling by route costs one series per route and status, and one histogram per route. That cost grows with the route count.
 

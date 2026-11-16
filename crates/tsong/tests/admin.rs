@@ -65,9 +65,11 @@ async fn status_reports_the_reloads() -> TestResult {
     let status = Arc::new(Mutex::new(Status {
         revision: "r7".into(),
         loaded_at: 42,
+        fetched_at: 50,
         reloads: 3,
         failed_reloads: 1,
         last_failure: Some("fetch_failed".into()),
+        tip_rejected: false,
     }));
     let response = status_router(status, Arc::default())
         .oneshot(Request::get("/status").body(Body::empty())?)
@@ -79,9 +81,11 @@ async fn status_reports_the_reloads() -> TestResult {
         json!({
             "revision": "r7",
             "loaded_at": 42,
+            "fetched_at": 50,
             "reloads": 3,
             "failed_reloads": 1,
             "last_failure": "fetch_failed",
+            "tip_rejected": false,
         })
     );
     Ok(())

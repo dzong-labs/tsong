@@ -24,7 +24,7 @@ pub const INVALID_CONFIG: &str = "invalid_config";
 pub const BUILD_FAILED: &str = "build_failed";
 
 use crate::state::{State, listen_addresses};
-use crate::telemetry::{Metrics, OutcomeLabel};
+use crate::telemetry::{Metrics, OutcomeLabel, RevisionLabel};
 
 /// Where audit lines go: stdout in production, collected by the platform.
 pub trait Audit: Send + Sync {
@@ -57,10 +57,15 @@ impl<W: Write + Send> Audit for Lines<W> {
 /// What `GET /status` reports.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Status {
-    /// The revision being served.
+    /// The revision being served: the newest commit read whose config is
+    /// the one in use, even when that commit changed only other files.
     pub revision: String,
     /// When it was loaded, in Unix seconds.
     pub loaded_at: u64,
+    /// When the store was last read successfully, in Unix seconds, whether
+    /// or not it had a new revision. While the store can't be read, this
+    /// falls behind and the last good config keeps serving.
+    pub fetched_at: u64,
     /// Reloads that swapped in a new revision, the first load included.
     pub reloads: u64,
     /// Reloads that kept the old state.
@@ -68,6 +73,9 @@ pub struct Status {
     /// Why the last failed reload failed, in short: `fetch_failed`,
     /// `invalid_config` or `build_failed`. The audit log has the detail.
     pub last_failure: Option<String>,
+    /// Whether the newest config read was rejected as invalid or failed to
+    /// build, so an older one is still served.
+    pub tip_rejected: bool,
 }
 
 /// What a reload did.
@@ -94,6 +102,8 @@ pub struct Reloader {
     /// The content of the last config rejected as invalid. It can't become
     /// valid until it changes, so it is not rejected again.
     invalid: Mutex<Option<String>>,
+    /// The revision last reported in `tsong_config_revision_info`.
+    published: Mutex<Option<String>>,
 }
 
 impl Reloader {
@@ -104,9 +114,11 @@ impl Reloader {
         audit: Arc<dyn Audit>,
         clock: Arc<dyn Clock>,
     ) -> Self {
+        let now = clock.unix_seconds();
         let status = Status {
             revision: first.revision.clone(),
-            loaded_at: clock.unix_seconds(),
+            loaded_at: now,
+            fetched_at: now,
             reloads: 1,
             ..Status::default()
         };
@@ -119,15 +131,17 @@ impl Reloader {
             metrics: Arc::default(),
             fetcher: Arc::new(HttpFetcher::default()),
             invalid: Mutex::new(None),
+            published: Mutex::new(None),
             audit,
             clock,
         }
     }
 
-    /// This reloader, building each state with `metrics` and counting its
-    /// reloads there.
+    /// This reloader, building each state with `metrics`, counting its
+    /// reloads there, and reporting its status there.
     pub fn with_metrics(mut self, metrics: Arc<Metrics>) -> Self {
         self.metrics = metrics;
+        self.publish();
         self
     }
 
@@ -149,27 +163,39 @@ impl Reloader {
     }
 
     /// Fetches the store's config and, when its content is new and it
-    /// parses, validates and builds, swaps it in.
+    /// parses, validates and builds, swaps it in. The metrics then report
+    /// the status it leaves.
     pub async fn reload(&self) -> Outcome {
+        let outcome = self.load().await;
+        self.publish();
+        outcome
+    }
+
+    async fn load(&self) -> Outcome {
         let current = self.state.borrow().clone();
         let fetched = match self.store.load().await {
             Ok(fetched) => fetched,
             Err(error) => return self.reject(&current, None, FETCH_FAILED, error.to_string()),
         };
+        self.lock().fetched_at = self.clock.unix_seconds();
         let content = fetched.content.clone();
-        let rejected = self
-            .invalid
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        if content == current.content || rejected.as_ref() == Some(&content) {
+        if content == current.content {
+            // A commit that leaves the config alone is still the one served,
+            // and a rejected config that comes back is judged again.
+            *self.rejected() = None;
+            let mut status = self.lock();
+            status.revision = fetched.revision;
+            status.tip_rejected = false;
+            return Outcome::Unchanged;
+        }
+        if self.rejected().as_ref() == Some(&content) {
             return Outcome::Unchanged;
         }
         let revision = fetched.revision.clone();
         let snapshot = match fetched.parse() {
             Ok(snapshot) => snapshot,
             Err(error) => {
-                *self.invalid.lock().unwrap_or_else(PoisonError::into_inner) = Some(content);
+                *self.rejected() = Some(content);
                 return self.reject(&current, Some(&revision), INVALID_CONFIG, error.to_string());
             }
         };
@@ -186,12 +212,13 @@ impl Reloader {
                 return self.reject(&current, Some(&revision), BUILD_FAILED, error.to_string());
             }
         };
-        *self.invalid.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        *self.rejected() = None;
         let line = {
             let mut status = self.lock();
             status.revision = next.revision.clone();
             status.loaded_at = self.clock.unix_seconds();
             status.reloads += 1;
+            status.tip_rejected = false;
             self.count(APPLIED);
             applied(Some(&current.config), &next, &status)
         };
@@ -212,6 +239,9 @@ impl Reloader {
             status.failed_reloads += 1;
             self.count(reason);
             status.last_failure = Some(reason.to_owned());
+            if reason != FETCH_FAILED {
+                status.tip_rejected = true;
+            }
         }
         let line = json!({
             "event": "config_reload",
@@ -224,6 +254,43 @@ impl Reloader {
         });
         self.audit.record(&line.to_string());
         Outcome::Rejected(error)
+    }
+
+    /// Reports the status in the metrics: when the store was last read,
+    /// whether its newest config was rejected, and the revision served. A
+    /// new revision's series is set before the old one goes, so a scrape
+    /// always sees one.
+    fn publish(&self) {
+        let status = self.lock().clone();
+        let metrics = &self.metrics;
+        metrics
+            .config_fetched
+            .set(i64::try_from(status.fetched_at).unwrap_or(i64::MAX));
+        metrics
+            .config_tip_rejected
+            .set(i64::from(status.tip_rejected));
+        let mut published = self
+            .published
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if published.as_ref() == Some(&status.revision) {
+            return;
+        }
+        metrics
+            .config_revision
+            .get_or_create(&RevisionLabel {
+                revision: status.revision.clone(),
+            })
+            .set(1);
+        if let Some(old) = published.replace(status.revision) {
+            metrics
+                .config_revision
+                .remove(&RevisionLabel { revision: old });
+        }
+    }
+
+    fn rejected(&self) -> std::sync::MutexGuard<'_, Option<String>> {
+        self.invalid.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn count(&self, outcome: &str) {

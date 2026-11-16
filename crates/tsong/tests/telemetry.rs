@@ -16,7 +16,7 @@ use tsong::state::State;
 use tsong::telemetry::{
     ExchangeAudit, IssuerLabel, Metrics, ObservedFetcher, OutcomeLabel, Refresher, refresh,
 };
-use tsong_clock::{Clock, ManualClock};
+use tsong_clock::ManualClock;
 use tsong_config::{Config, ConfigError, TrustedIssuer};
 use tsong_issuer::{ExchangeContext, ExchangeEvent, ExchangeObserver};
 use tsong_validate::JwksFetcher;
@@ -294,12 +294,22 @@ fn the_metrics_encode_as_prometheus_text() -> TestResult {
     Ok(())
 }
 
-#[tokio::test]
-async fn reloads_are_counted_by_outcome() -> TestResult {
+/// A reloader serving r1 from a queue store, reporting into its own
+/// metrics, on a manual clock.
+struct Metered {
+    _dir: tempfile::TempDir,
+    key: std::path::PathBuf,
+    store: Arc<QueueStore>,
+    clock: Arc<ManualClock>,
+    metrics: Arc<Metrics>,
+    reloader: Reloader,
+}
+
+fn metered() -> TestResult<Metered> {
     let dir = tempfile::tempdir()?;
     let key = write_key(dir.path())?;
     let store = Arc::new(QueueStore::default());
-    let clock: Arc<dyn Clock> = Arc::new(ManualClock::at(NOW));
+    let clock = Arc::new(ManualClock::at(NOW));
     let first = State::build(
         snapshot(&config_text(&key, "https://one.test", 8444, ""), "r1")?,
         clock.clone(),
@@ -309,9 +319,29 @@ async fn reloads_are_counted_by_outcome() -> TestResult {
         Box::new(Shared(store.clone())),
         first,
         Arc::new(Recorded::default()),
-        clock,
+        clock.clone(),
     )
     .with_metrics(metrics.clone());
+    Ok(Metered {
+        _dir: dir,
+        key,
+        store,
+        clock,
+        metrics,
+        reloader,
+    })
+}
+
+#[tokio::test]
+async fn reloads_are_counted_by_outcome() -> TestResult {
+    let Metered {
+        _dir,
+        key,
+        store,
+        metrics,
+        reloader,
+        ..
+    } = metered()?;
     store.push(Ok(fetched(
         &config_text(&key, "https://two.test", 8444, ""),
         "r2",
@@ -332,6 +362,94 @@ async fn reloads_are_counted_by_outcome() -> TestResult {
     assert_eq!(count("applied"), 1);
     assert_eq!(count("fetch_failed"), 1);
     assert_eq!(count("invalid_config"), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_last_fetch_and_the_served_revision_are_reported() -> TestResult {
+    let Metered {
+        _dir,
+        key,
+        store,
+        clock,
+        metrics,
+        reloader,
+    } = metered()?;
+    let fetched_at = || metrics.config_fetched.get();
+    let revisions = || -> TestResult<Vec<String>> {
+        let text = metrics.encode()?;
+        Ok(text
+            .lines()
+            .filter(|line| line.starts_with("tsong_config_revision_info{"))
+            .map(str::to_owned)
+            .collect())
+    };
+    let now = i64::try_from(NOW)?;
+    assert_eq!(fetched_at(), now);
+    assert_eq!(
+        revisions()?,
+        [r#"tsong_config_revision_info{revision="r1"} 1"#]
+    );
+
+    // A store that can't be read leaves the last fetch where it was.
+    clock.advance(Duration::from_secs(60));
+    store.push(Err(ConfigError::Store("offline".into())));
+    assert!(matches!(reloader.reload().await, Outcome::Rejected(_)));
+    assert_eq!(fetched_at(), now);
+    assert_eq!(status(&reloader).fetched_at, NOW);
+
+    // A read with nothing new still counts as a fetch.
+    clock.advance(Duration::from_secs(60));
+    store.push(Ok(fetched(
+        &config_text(&key, "https://one.test", 8444, ""),
+        "r1",
+    )?));
+    assert_eq!(reloader.reload().await, Outcome::Unchanged);
+    assert_eq!(fetched_at(), now + 120);
+    assert_eq!(status(&reloader).fetched_at, NOW + 120);
+    assert_eq!(status(&reloader).loaded_at, NOW);
+
+    clock.advance(Duration::from_secs(60));
+    store.push(Ok(fetched(
+        &config_text(&key, "https://two.test", 8444, ""),
+        "r2",
+    )?));
+    assert_eq!(reloader.reload().await, Outcome::Applied);
+    assert_eq!(fetched_at(), now + 180);
+    assert_eq!(
+        revisions()?,
+        [r#"tsong_config_revision_info{revision="r2"} 1"#]
+    );
+
+    // An invalid tip is flagged while r2 keeps serving, read after read.
+    let tip_rejected = || metrics.config_tip_rejected.get();
+    assert_eq!(tip_rejected(), 0);
+    store.push(Ok(fetched("not toml [", "r3")?));
+    assert!(matches!(reloader.reload().await, Outcome::Rejected(_)));
+    assert_eq!(tip_rejected(), 1);
+    store.push(Ok(fetched("not toml [", "r3")?));
+    assert_eq!(reloader.reload().await, Outcome::Unchanged);
+    assert_eq!(tip_rejected(), 1);
+    assert_eq!(status(&reloader).revision, "r2");
+
+    // A commit that restores r2's config, or touches only other files, is
+    // the revision served.
+    let mut same = fetched(&config_text(&key, "https://two.test", 8444, ""), "r2")?;
+    same.revision = "r4".into();
+    store.push(Ok(same));
+    assert_eq!(reloader.reload().await, Outcome::Unchanged);
+    assert_eq!(tip_rejected(), 0);
+    assert_eq!(status(&reloader).revision, "r4");
+
+    // The invalid config coming back is rejected and flagged again.
+    store.push(Ok(fetched("not toml [", "r3")?));
+    assert!(matches!(reloader.reload().await, Outcome::Rejected(_)));
+    assert_eq!(tip_rejected(), 1);
+    assert!(status(&reloader).tip_rejected);
+    assert_eq!(
+        revisions()?,
+        [r#"tsong_config_revision_info{revision="r4"} 1"#]
+    );
     Ok(())
 }
 
