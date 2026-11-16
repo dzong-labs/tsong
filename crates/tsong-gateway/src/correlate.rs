@@ -42,12 +42,10 @@ pub fn correlate(headers: &mut HeaderMap) -> Option<String> {
     Some(request_id)
 }
 
-/// `N` random bytes as hex, never all zero.
+/// `N` random bytes as hex. W3C forbids an all-zero ID, which 8 or more
+/// random bytes draw with a chance of at most one in 2^64.
 fn random_hex<const N: usize>() -> Option<String> {
     let mut bytes = [0u8; N];
     getrandom::fill(&mut bytes).ok()?;
-    if bytes.iter().all(|byte| *byte == 0) {
-        bytes.fill(1);
-    }
     Some(hex(&bytes))
 }
