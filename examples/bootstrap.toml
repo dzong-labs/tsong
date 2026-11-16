@@ -20,8 +20,9 @@ poll = "5m"                               # fetch this often when no webhook arr
 # path = "tsong.toml"
 
 # ── admin listener ────────────────────────────────────
-# GET /status, and the push webhook at POST /hooks/config. Keep it off the
-# public network: only the Git host needs to reach it.
+# GET /status, and the push webhook at POST /hooks/config. Only clients in
+# the config's gateway.allow get in, so it must include the Git host's
+# webhook delivery addresses.
 [admin]
 listen = "0.0.0.0:8445"
 

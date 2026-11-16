@@ -47,7 +47,6 @@ impl<W: Write + Send> Audit for Lines<W> {
 pub struct Status {
     /// The revision being served.
     pub revision: String,
-    pub author: Option<String>,
     /// When it was loaded, in Unix seconds.
     pub loaded_at: u64,
     /// Reloads that swapped in a new revision, the first load included.
@@ -88,7 +87,6 @@ impl Reloader {
     ) -> Self {
         let status = Status {
             revision: first.revision.clone(),
-            author: first.author.clone(),
             loaded_at: clock.unix_seconds(),
             reloads: 1,
             ..Status::default()
@@ -133,7 +131,6 @@ impl Reloader {
         let line = {
             let mut status = self.lock();
             status.revision = next.revision.clone();
-            status.author = next.author.clone();
             status.loaded_at = self.clock.unix_seconds();
             status.reloads += 1;
             applied(Some(&current.config), &next, &status)

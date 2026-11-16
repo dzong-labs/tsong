@@ -29,7 +29,6 @@ fn fixture(host: Option<GitHost>) -> Fixture {
     let reload = Arc::new(Notify::new());
     let status = Arc::new(Mutex::new(Status {
         revision: "r7".into(),
-        author: Some("Ada <ada@example.test>".into()),
         loaded_at: 42,
         reloads: 3,
         failed_reloads: 1,
@@ -80,7 +79,6 @@ async fn status_reports_the_reloads() -> TestResult {
         body,
         json!({
             "revision": "r7",
-            "author": "Ada <ada@example.test>",
             "loaded_at": 42,
             "reloads": 3,
             "failed_reloads": 1,

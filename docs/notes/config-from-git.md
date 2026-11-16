@@ -53,6 +53,8 @@ Private keys never live in Git. The config refers to a key by a pointer, a file 
 - A webhook on its own listener, `admin.listen`, at `POST /hooks/config`. The secret is read from the environment variable `admin.webhook.secret_env` at start; Tsong refuses to start without it. GitHub requests are verified by the HMAC-SHA256 in `X-Hub-Signature-256`, GitLab requests by the shared token in `X-Gitlab-Token`, both compared in constant time. A verified push to the watched branch triggers a fetch and answers 202. Any other verified delivery, such as a ping or a push to another branch, answers 204, and an unverified one 401. The payload's commit ID is not trusted; the fetch decides what changed.
 - A poll every `poll` interval, in case a webhook is missed.
 
+The admin listener admits only clients in `gateway.allow` of the config being served, found through `gateway.trusted_proxies` like every other listener. So the Git host's webhook delivery addresses, published by GitHub at `api.github.com/meta`, belong in `gateway.allow`.
+
 ## Reload
 
 1. Fetch. If the branch's commit is the one being served, stop.
@@ -67,7 +69,7 @@ Rebuilding the state clears the exchange cache, drops cached JWKS, picks up new 
 Eight things react to a reload. Four are part of the state, so rebuilding it handles them: the exchange cache is cleared, cached JWKS are dropped, new signing keys are loaded, and clients for new read timeouts are built. The reloader (`crates/tsong/src/reload.rs`) handles the other four, because a failed reload produces no new state for a watcher to see:
 
 - The audit log writes one JSON line to stdout for each new revision and each failure: the time, commit, author, outcome, and the routes added, removed and changed, keyed by host. A fetch that finds the revision being served writes nothing. Collecting stdout belongs to the platform.
-- `GET /status` on the admin listener reports the revision being served, its author, when it loaded, the count of reloads and failed reloads, and the last failure.
+- `GET /status` on the admin listener reports the revision being served, when it loaded, the count of reloads and failed reloads, and the last failure.
 - The reload counts in `/status` stand in for metrics until observability, roadmap item 9.
 - A change to `issuer.listen` or `gateway.listen` is named in the audit line's `restart_required`. The old addresses stay bound until a restart.
 

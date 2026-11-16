@@ -4,6 +4,7 @@
 //! Git branch moves.
 
 pub mod admin;
+pub mod allow;
 pub mod reload;
 pub mod state;
 
@@ -112,7 +113,9 @@ pub async fn serve_until(
     let admin = match &bootstrap.admin {
         Some(admin) => {
             let hook = hook(&bootstrap, admin.webhook.as_ref())?;
-            let router = admin::router(hook, trigger.clone(), reloader.status());
+            let router = admin::router(hook, trigger.clone(), reloader.status()).layer(
+                axum::middleware::from_fn_with_state(reloader.subscribe(), allow::admit),
+            );
             Some((TcpListener::bind(admin.listen).await?, router))
         }
         None => None,
@@ -147,9 +150,12 @@ pub async fn serve_until(
         async move {
             match admin {
                 Some((listener, router)) => {
-                    axum::serve(listener, router)
-                        .with_graceful_shutdown(stopped(stopping))
-                        .await
+                    axum::serve(
+                        listener,
+                        router.into_make_service_with_connect_info::<SocketAddr>(),
+                    )
+                    .with_graceful_shutdown(stopped(stopping))
+                    .await
                 }
                 None => Ok(()),
             }

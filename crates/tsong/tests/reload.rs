@@ -88,7 +88,6 @@ async fn the_first_load_is_audited_and_counted() -> TestResult {
         status(&reloader),
         Status {
             revision: "r1".into(),
-            author: Some("Ada <ada@example.test>".into()),
             loaded_at: NOW,
             reloads: 1,
             failed_reloads: 0,
