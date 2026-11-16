@@ -10,7 +10,7 @@ Tsong is an API gateway and an RFC 8693 token exchange issuer. It replaces each 
 4. Tsong exchanges the token for a new one signed by Tsong. The new token's subject names the issuer, such as `entra:<id>`, so subjects from different providers never collide.
 5. Tsong forwards the request to the route's service with the new token in place of the original. The original token never reaches the service.
 
-The new token is cached until shortly before it expires, so a repeat request with the same token skips steps 3 and 4.
+Tsong caches the new token until shortly before it expires, so a repeat request with the same token skips steps 3 and 4.
 
 ## Parts
 
@@ -20,26 +20,26 @@ The new token is cached until shortly before it expires, so a repeat request wit
 ## Terms
 
 - Upstream: the caller.
-- Downstream: the service a route forwards to. Some gateways use these two words the other way round.
+- Downstream: the service a route forwards to. Some gateways use these two words the other way around.
 - Subject token: the caller's token, in RFC 8693's terms.
 - Minted token: the token signed by Tsong that replaces it.
 
 ## Features
 
-1. Routing. A request is routed by its host alone, without port or case, to the route's https downstream. The path and query pass through unchanged, and request and response bodies stream.
+1. Routing. Tsong routes a request by its host alone, ignoring port and case, to the route's https downstream. The path and query pass through unchanged, and request and response bodies stream.
 2. Token exchange. The gateway swaps the caller's bearer token for one signed by Tsong.
-3. Exchange cache. A token is exchanged at most once per route host while it stays cached, and concurrent requests share one exchange. An entry expires at the minted token's `exp` less the clock skew, and `max_entries` bounds the cache. Failed exchanges are not kept.
-4. Inbound validation. Tokens are checked against the trusted issuers' JWKS, refetched on an unknown key ID. Every check is mandatory: `iss`, `aud`, `exp`, `nbf`, signature, algorithm and key ID.
+3. Exchange cache. Tsong exchanges a token at most once per route host while it stays cached, and concurrent requests share one exchange. An entry expires at the minted token's `exp` less the clock skew, and `max_entries` bounds the cache. Failed exchanges aren't cached.
+4. Inbound validation. Tsong checks tokens against the trusted issuers' JWKS, and refetches a JWKS when it sees an unknown key ID. Every check is mandatory: `iss`, `aud`, `exp`, `nbf`, signature, algorithm and key ID.
 5. Route policy. A token must carry one of the route's `allowed_audiences`, and only scopes in its `allowed_scopes`. An empty list denies everything; `"*"` accepts anything.
-6. Minted tokens. ES256 JWTs that keep the inbound `aud` and scopes and add the route's `append_audience`. Their lifetime is capped by the inbound token and `token_lifetime`. Claims can be copied, or renamed per issuer.
-7. Issuer-qualified subjects. The minted `sub` is the trusted issuer's `sub_prefix`, a colon and the subject, such as `rauthy:123456`, so two issuers' subjects never collide. The original subject is kept in an RFC 9493 `sub_id` claim. Its `iss_sub` format holds the subject token's own `iss` and `sub`. When a rename supplies the subject, such as Entra's `oid`, a token without that claim is refused rather than falling back to its `sub`.
+6. Minted tokens. ES256 JWTs that keep the inbound `aud` and scopes and add the route's `append_audience`. The inbound token's expiry and `token_lifetime` cap their lifetime. You can copy claims, or rename them per issuer.
+7. Issuer-qualified subjects. The minted `sub` is the trusted issuer's `sub_prefix`, a colon and the subject, such as `rauthy:123456`, so two issuers' subjects never collide. Tsong keeps the original subject in an RFC 9493 `sub_id` claim. Its `iss_sub` format holds the subject token's own `iss` and `sub`. When a rename supplies the subject, such as Entra's `oid`, Tsong refuses a token without that claim instead of falling back to its `sub`.
 8. RFC 8693 issuer. The token endpoint, JWKS and discovery document. The endpoint is reachable directly and enforces the same route policy and IP allow lists as the gateway. A subject token that fails validation gets `invalid_request`, as RFC 8693 section 2.2.2 requires.
-9. IP allow lists. `gateway.allow` applies everywhere, and a route's optional `allow` narrows it. `X-Forwarded-For` is believed only from trusted proxies.
-10. Header hygiene. Hop-by-hop and `Forwarded` headers are stripped, and `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` are set. A trusted proxy's values are kept.
+9. IP allow lists. `gateway.allow` applies everywhere, and a route's optional `allow` narrows it. Tsong believes `X-Forwarded-For` only from trusted proxies.
+10. Header hygiene. Tsong strips hop-by-hop and `Forwarded` headers, and sets `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host`. It keeps a trusted proxy's values.
 11. Fails closed. 401 for a missing or bad token; 403 for a refused client, audience or scope; 503 when an issuer is unavailable; 502 when the downstream is unreachable; 504 when it stops answering past its read timeout.
 12. Signing keys. Behind the `SigningKey` trait, with PEM files today. One key is active, and retiring keys stay published in the JWKS.
-13. Config. One TOML file, read through the `ConfigStore` trait from disk or from a folder on a Git branch. Unknown fields are errors, and every problem is reported at once.
-14. Reload from Git. A signed push webhook from GitHub or GitLab, or a poll, fetches the branch over SSH with a deploy key. A new config is validated and its state built in full before it is swapped in. A config that fails leaves the old one serving. Each reload is audited as a JSON line on stdout, and `GET /status` on the admin listener reports the revision being served.
+13. Config. One TOML file, read through the `ConfigStore` trait from disk or from a folder on a Git branch. Unknown fields are errors, and Tsong reports every problem at once.
+14. Reload from Git. A signed push webhook from GitHub or GitLab, or a poll, fetches the branch over SSH with a deploy key. Tsong validates a new config and builds its state in full before swapping it in. A config that fails leaves the old one serving. Tsong audits each reload as a JSON line on stdout, and `GET /status` on the admin listener reports the revision being served.
 15. Observability. Liveness and readiness on their own listener, Prometheus metrics at `GET /metrics` (cache hits and misses, requests and downstream latency by route, exchanges, JWKS failures, reloads), one JSON audit line per token exchange with the caller's `iss` and `sub`, and every request correlated by `X-Request-Id` and W3C `traceparent`.
 16. CLI. `tsong check` validates a config and loads its keys, and warns on empty or accept-anything lists. `--deny-warnings` fails on warnings in CI. `tsong serve` reads a bootstrap file, deployed with Tsong, that names the config source and the admin and webhook listeners, then runs the gateway and the issuer.
 
