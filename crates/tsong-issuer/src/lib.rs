@@ -378,6 +378,16 @@ fn granted_scopes(
     requested: Option<&str>,
 ) -> Result<Vec<String>, ExchangeError> {
     let held = scopes(validated.claims());
+    // An `scp` array item is one scope. Empty, or holding whitespace, it
+    // would turn into no scope or several in the minted `scope` string.
+    if let Some(malformed) = held
+        .iter()
+        .find(|scope| scope.is_empty() || scope.contains(char::is_whitespace))
+    {
+        return Err(ExchangeError::InvalidRequest(format!(
+            "the subject token's scope {malformed:?} is not a single scope"
+        )));
+    }
     match route.refused_scope(held.iter().copied()) {
         Ok(()) => {}
         Err(None) => {

@@ -287,6 +287,23 @@ async fn the_route_refuses_scopes_it_does_not_allow() -> TestResult {
 }
 
 #[tokio::test]
+async fn an_scp_item_must_be_a_single_scope() -> TestResult {
+    let h = harness()?;
+    // A route that accepts any scope would otherwise mint "a b" as two.
+    for item in ["orders.read billing.read", "", "orders.read\tadmin"] {
+        let claims = subject(json!({ "scope": null, "scp": ["orders.read", item] }));
+        assert_eq!(
+            refused(&h, request(&h, "open.test", claims)).await?,
+            (
+                "invalid_request",
+                format!("the subject token's scope {item:?} is not a single scope")
+            )
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_route_with_no_allowed_scopes_refuses_every_subject() -> TestResult {
     let h = harness()?;
     for scope in [json!("orders.read"), json!(null)] {
