@@ -1,13 +1,26 @@
 # Tsong
 
-Tsong is a reverse-proxy API gateway that exchanges tokens. A request arrives with a bearer token from one of the organization's trusted issuers. Tsong validates it, exchanges it for a token Tsong signs itself, and forwards the request to the route's downstream service with the new token in place of the old one. The original token never reaches the downstream.
+Tsong sits between callers and your services. Callers bring access tokens from several identity providers. Tsong checks each token and replaces it with a token it signs itself, so your services trust one issuer instead of many.
 
-It has two parts:
+## How a request flows
 
-- The gateway: routes by host, IP allow lists, the exchange cache and header rewriting.
-- The issuer: an RFC 8693 token exchange endpoint, with JWKS and OIDC discovery so downstream services can validate the tokens it signs.
+1. A caller sends a request with `Authorization: Bearer <token>`. The token comes from an identity provider Tsong is configured to trust, called a trusted issuer, such as Entra or Okta.
+2. Tsong picks a route by the request's host name. The route names the service the request goes to.
+3. Tsong validates the token: its signature, issuer, audience and expiry, and the route's audience and scope rules.
+4. Tsong exchanges the token for a new one that Tsong signs. The new token's subject names the issuer, such as `entra:<id>`, so subjects from different providers never collide.
+5. Tsong forwards the request to the route's service with the new token in place of the original. The original token never reaches the service.
 
-In Tsong's terms the upstream is the caller and the downstream is the service a route forwards to.
+The new token is cached until shortly before it expires, so a repeat request with the same token skips steps 3 and 4.
+
+## Parts
+
+- The gateway: the reverse proxy that carries out the steps above. It handles host routing, IP allow lists, the exchange cache and header rewriting.
+- The issuer: the token exchange, also reachable directly as an RFC 8693 token endpoint. It publishes its signing keys (JWKS) and an OIDC discovery document, which services use to validate the tokens it signs.
+
+## Terms
+
+- Upstream: the caller.
+- Downstream: the service a route forwards to. Some gateways use these two words the other way round.
 
 ## Features
 
