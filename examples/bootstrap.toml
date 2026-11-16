@@ -1,0 +1,37 @@
+# A sample bootstrap file, deployed with Tsong: `tsong serve bootstrap.toml`.
+# It says where the config lives, which the config itself can't say.
+
+# ── config source ─────────────────────────────────────
+# A folder on a Git branch, reloaded when the branch moves. Tsong reads
+# tsong.toml from the folder at the branch's tip.
+[source]
+store = "git"
+url = "ssh://git@github.com/example/tsong-config.git"
+branch = "main"
+folder = "tsong"                          # "" for the repository's root
+checkout = "/var/lib/tsong/config.git"    # the bare clone Tsong keeps
+ssh_key = "/etc/tsong/deploy_key"         # a read-only deploy key
+known_hosts = "/etc/tsong/known_hosts"    # the only host keys SSH accepts
+poll = "5m"                               # fetch this often when no webhook arrives
+
+# Or a file on disk, relative to this file, read once:
+# [source]
+# store = "file"
+# path = "tsong.toml"
+
+# ── admin listener ────────────────────────────────────
+# GET /status. Only clients in the served config's gateway.allow get in.
+[admin]
+listen = "0.0.0.0:8445"
+
+# ── webhook listener ──────────────────────────────────
+# POST /hooks/config, on its own listener. Its allow list is deployed here,
+# never loaded from Git, and holds only the Git host's delivery addresses
+# (GitHub publishes them as "hooks" at api.github.com/meta). It is checked
+# against each connection's own address; nothing should proxy this listener.
+[webhook]
+listen = "0.0.0.0:8446"
+# An example; take the current list from api.github.com/meta.
+allow = ["192.30.252.0/22", "185.199.108.0/22", "140.82.112.0/20", "143.55.64.0/20"]
+host = "github"                           # or "gitlab"
+secret_env = "TSONG_WEBHOOK_SECRET"       # the variable holding the webhook secret

@@ -9,18 +9,27 @@ workspace = true
 
 [dependencies]
 axum.workspace = true
+ipnet.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tsong-clock.workspace = true
 tsong-config.workspace = true
 tsong-gateway.workspace = true
+tsong-git.workspace = true
 tsong-issuer.workspace = true
 tsong-keys.workspace = true
 tsong-validate.workspace = true
+tower = { workspace = true, features = ["util"] }
 
 [dev-dependencies]
-p256.workspace = true
+getrandom.workspace = true
+hmac.workspace = true
+http-body-util.workspace = true
+sha2.workspace = true
+tsong-clock = { workspace = true, features = ["test-util"] }
+tsong-validate = { workspace = true, features = ["test-util"] }
 reqwest.workspace = true
-serde_json.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }

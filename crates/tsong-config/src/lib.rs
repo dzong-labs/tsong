@@ -6,6 +6,7 @@
 //! problem listed. Unknown fields are errors: a misspelled security setting
 //! must not fall back to its default.
 
+mod bootstrap;
 mod duration;
 mod lint;
 mod network;
@@ -21,9 +22,12 @@ use ipnet::IpNet;
 use serde::Deserialize;
 use url::Url;
 
+pub use bootstrap::{
+    Admin, Bootstrap, BootstrapError, CONFIG_FILE, GitHost, GitSource, Source, Webhook,
+};
 pub use lint::Warnings;
 pub use network::{allowed, client_ip};
-pub use store::{ConfigStore, FileStore, LoadFuture};
+pub use store::{ConfigStore, Fetched, FileStore, LoadFuture, Snapshot, hex};
 pub use validate::{Problems, RESERVED_CLAIMS};
 
 /// A whole Tsong configuration.
@@ -201,7 +205,7 @@ pub struct Claims {
 
 /// A host mapped to a downstream service. The upstream is the caller; the
 /// downstream is where the request goes.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Route {
     pub name: String,
@@ -308,6 +312,9 @@ pub enum ConfigError {
     Parse(#[from] toml::de::Error),
     #[error("invalid config:\n{0}")]
     Invalid(Problems),
+    /// The store couldn't produce the config, such as a failed fetch.
+    #[error("{0}")]
+    Store(String),
 }
 
 impl Config {
@@ -321,18 +328,33 @@ impl Config {
     /// Reads, parses and validates a TOML file. Relative key paths are
     /// taken from the file's directory.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
-        let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
-            path: path.to_owned(),
-            source,
-        })?;
-        let mut config = Self::from_toml(&text)?;
-        let dir = path.parent().unwrap_or(Path::new(""));
+        Self::from_text(&store::read(path)?, Some(&store::directory(path)))
+    }
+
+    /// Parses and validates a TOML document, taking relative key paths from
+    /// `base_dir`. Without one, as for a config from Git, a relative key
+    /// path is a problem: it has nothing to be relative to.
+    pub fn from_text(text: &str, base_dir: Option<&Path>) -> Result<Self, ConfigError> {
+        let mut config = Self::from_toml(text)?;
+        let mut problems = Vec::new();
         for key in &mut config.issuer.signing.keys {
-            if let Some(key_path) = &mut key.path {
-                *key_path = dir.join(&*key_path);
+            let Some(key_path) = &mut key.path else {
+                continue;
+            };
+            match base_dir {
+                Some(dir) => *key_path = dir.join(&*key_path),
+                None if key_path.is_relative() => problems.push(format!(
+                    "issuer.signing.keys {:?} path must be absolute, since the config has no directory",
+                    key.kid
+                )),
+                None => {}
             }
         }
-        Ok(config)
+        if problems.is_empty() {
+            Ok(config)
+        } else {
+            Err(ConfigError::Invalid(Problems(problems)))
+        }
     }
 
     /// The active signing key: always one, in a validated config.

@@ -16,15 +16,18 @@ Done means built, tested above the 95% line-coverage floor, and merged. Until so
 4. Actor tokens: accept `actor_token` and `actor_token_type` on the token endpoint and record the actor in the minted token's `act` claim. A token gets an `act` claim only when an actor token is sent. Until then, either parameter fails with `invalid_request`.
 5. Gateway: the reverse proxy, planned in [[gateway-plan]]. Look up the route by host, enforce the IP allow lists, exchange the bearer token, replace the `Authorization` header and stream the request to the route's downstream. Fail closed and never forward the original token. (done)
 6. Exchange cache: a read-through cache keyed on a hash of the inbound token plus the route host, expiring at the minted token's `exp` minus the clock skew, bounded by `gateway.cache.max_entries`. Planned in [[gateway-plan]] and built with item 5. (done)
-7. Config from Git: a `ConfigStore` (`crates/tsong-config/src/store.rs`) that watches `main` and reloads on merge, triggered by a webhook. Validate a new config fully, swap it in atomically, and keep the last good config when a merged one is invalid. Optionally require signed commits.
-8. Cloud signing keys: AWS KMS, Azure Key Vault and HSM providers behind the `SigningKey` trait (`crates/tsong-keys/src/lib.rs`), which signs without exposing private keys.
+7. Config from Git: a bootstrap file names the config source; `GitStore` fetches the branch over SSH and reloads on a webhook or a poll, swapping in fully validated state and keeping the last good config when a new one fails. Planned in [[config-from-git]] (done).
+8. Cloud signing keys: AWS KMS, AWS Secrets Manager, Azure Key Vault and HSM providers behind the `SigningKey` trait (`crates/tsong-keys/src/lib.rs`), alongside the file provider. The config refers to a key by a pointer, such as a path or an ARN, never by its contents.
 9. Observability: an audit log of every exchange that records the issuer and the outcome but never token contents, plus metrics, tracing, and health and readiness endpoints.
 10. Hooks: pre-exchange and post-exchange plugins, sandboxed in WebAssembly.
 11. Rauthy integration test: exchange a token from a real issuer, Rauthy in podman, in addition to the in-process fake issuer the tests use now.
 12. Issuer behind a path: the router serves `/token`, `/jwks.json` and `/.well-known/openid-configuration` at the root. For an `issuer.url` with a path, such as `https://example.com/tsong`, the discovery document names endpoints under that path. The router doesn't serve them there yet.
 13. Downstream TLS names: verify a downstream's certificate when its DNS name differs from the name the certificate covers.
 14. Minted-token policy per route: audiences and scopes the minted token carries, beyond the filters on the inbound token.
-15. Split route files: load routes from many files so one config file doesn't grow unbounded.
+15. Split route files: load routes from many files in the config folder, so one config file doesn't grow unbounded.
 16. Remote exchanger: an HTTP `Exchanger` for a gateway that runs apart from the issuer.
 17. Upgraded connections: WebSocket and other `Upgrade` requests through the gateway, which strips hop-by-hop headers until then.
 18. `Forwarded`: read and send the RFC 7239 `Forwarded` header alongside `X-Forwarded-*`. Until then the gateway strips it.
+19. Git over HTTPS: fetch the config with a token, as an alternative to the SSH deploy key. Until then only ssh urls and local paths are accepted.
+20. Git host file API: a `ConfigStore` that reads the config through a Git host's API instead of a clone, chosen in the bootstrap file.
+21. Signed commits: refuse a config whose commit isn't signed by a trusted key.

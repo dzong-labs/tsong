@@ -22,27 +22,29 @@ In Tsong's terms the upstream is the caller and the downstream is the service a 
 9. Header hygiene. Hop-by-hop and `Forwarded` headers are stripped, and `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` are set. A trusted proxy's values are kept.
 10. Fails closed. 401 for a missing or bad token; 403 for a refused client, audience or scope; 503 when an issuer is unavailable; 502 when the downstream is unreachable; 504 when it stops answering past its read timeout.
 11. Signing keys. Behind the `SigningKey` trait, with PEM files today. One key is active, and retiring keys stay published in the JWKS.
-12. Config. One TOML file, read through the `ConfigStore` trait. Unknown fields are errors, and every problem is reported at once.
-13. CLI. `tsong check` validates a config and loads its keys, and warns on empty or accept-anything lists; `--deny-warnings` fails on warnings in CI. `tsong serve` runs the gateway and the issuer.
+12. Config. One TOML file, read through the `ConfigStore` trait from disk or from a folder on a Git branch. Unknown fields are errors, and every problem is reported at once.
+13. Reload from Git. A signed push webhook from GitHub or GitLab, or a poll, fetches the branch over SSH with a deploy key. A new config is validated and its state built in full before it is swapped in; a config that fails keeps the old one serving. Each reload is audited as a JSON line on stdout, and `GET /status` on the admin listener reports the revision being served.
+14. CLI. `tsong check` validates a config and loads its keys, and warns on empty or accept-anything lists; `--deny-warnings` fails on warnings in CI. `tsong serve` reads a bootstrap file, deployed with Tsong, that names the config source and the admin and webhook listeners, then runs the gateway and the issuer.
 
 ## Usage
 
 ```sh
 tsong check [--deny-warnings] <config.toml>
-tsong serve <config.toml>
+tsong serve <bootstrap.toml>
 ```
 
-[examples/tsong.toml](examples/tsong.toml) is a sample config. [docs/notes/gateway-plan.md](docs/notes/gateway-plan.md) describes how the gateway works, and [docs/notes/roadmap.md](docs/notes/roadmap.md) lists what comes next: introspection for opaque tokens, actor tokens, and config loaded from Git and reloaded on merge.
+[examples/tsong.toml](examples/tsong.toml) is a sample config, and [examples/bootstrap.toml](examples/bootstrap.toml) a sample bootstrap file. [docs/notes/gateway-plan.md](docs/notes/gateway-plan.md) describes how the gateway works, and [docs/notes/roadmap.md](docs/notes/roadmap.md) lists what comes next: introspection for opaque tokens, actor tokens, and keys from a secrets manager.
 
 ## Crates
 
-- `tsong-config`: the TOML model, its validation and warnings, the host route table, the client-address rules, and the `ConfigStore` trait with the file store.
+- `tsong-config`: the TOML model, its validation and warnings, the host route table, the client-address rules, the bootstrap file, and the `ConfigStore` trait with the file store.
 - `tsong-clock`: the injected `Clock`.
 - `tsong-keys`: the `SigningKey` trait, the `KeySet` that rotates keys, and the file provider.
 - `tsong-validate`: inbound token validation and JWKS fetching, shared by the issuer and the gateway.
 - `tsong-issuer`: the RFC 8693 token endpoint, JWKS and discovery.
 - `tsong-gateway`: the reverse proxy and the exchange cache.
-- `tsong`: the command.
+- `tsong-git`: the Git config store and webhook verification.
+- `tsong`: the command, the reloader, and the admin and webhook listeners.
 
 ## Development
 

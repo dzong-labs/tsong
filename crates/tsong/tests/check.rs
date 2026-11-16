@@ -1,13 +1,11 @@
-use std::error::Error;
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use p256::ecdsa::SigningKey;
-use p256::pkcs8::{EncodePrivateKey, LineEnding};
+use common::{TestResult, config_on, free_port, write_key};
 use serde_json::{Value, json};
-
-type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
 /// A config in `dir` with the issuer on `port`, with its key file unless
 /// `with_key` is false.
@@ -25,37 +23,27 @@ fn write_config_with(
     extra: &str,
 ) -> TestResult<PathBuf> {
     if with_key {
-        let pem = SigningKey::from_slice(&[7; 32])?.to_pkcs8_pem(LineEnding::LF)?;
-        std::fs::write(dir.join("k1.pem"), pem.as_bytes())?;
+        write_key(dir)?;
     }
-    let config = format!(
-        r#"
-[issuer]
-url = "https://tsong.example.com"
-listen = "127.0.0.1:{port}"
-token_lifetime = "15m"
-clock_skew = "30s"
-
-[issuer.signing]
-provider = "file"
-algorithm = "ES256"
-
-[[issuer.signing.keys]]
-kid = "k1"
-path = "k1.pem"
-state = "active"
-
-[gateway]
-listen = "127.0.0.1:{gateway_port}"
-allow = ["127.0.0.0/8"]
-
-[gateway.cache]
-max_entries = 10
-{extra}"#
+    let config = config_on(
+        Path::new("k1.pem"),
+        "https://tsong.example.com",
+        port,
+        gateway_port,
+        extra,
     );
     let path = dir.join("tsong.toml");
     std::fs::write(&path, config)?;
+    std::fs::write(
+        dir.join("bootstrap.toml"),
+        "[source]\nstore = \"file\"\npath = \"tsong.toml\"\n",
+    )?;
     Ok(path)
+}
+
+/// The bootstrap file beside the config at `config`, which reads it.
+fn boot(config: &Path) -> PathBuf {
+    config.with_file_name("bootstrap.toml")
 }
 
 fn args(command: &str, path: &Path) -> Vec<String> {
@@ -68,12 +56,6 @@ fn failure<T: std::fmt::Debug>(result: Result<T, tsong::Error>) -> TestResult<ts
         Ok(value) => Err(format!("expected an error, got {value:?}").into()),
         Err(error) => Ok(error),
     }
-}
-
-/// A port nothing listens on, at the moment it is chosen.
-fn free_port() -> TestResult<u16> {
-    let free = std::net::TcpListener::bind("127.0.0.1:0")?;
-    Ok(free.local_addr()?.port())
 }
 
 /// The issuer's discovery document on `port`, once it answers.
@@ -163,10 +145,20 @@ async fn check_reports_a_missing_key() -> TestResult {
 
 #[tokio::test]
 async fn check_and_serve_report_a_bad_config() -> TestResult {
-    for command in ["check", "serve"] {
-        let error = failure(tsong::run(args(command, Path::new("no-such-file.toml"))).await)?;
-        assert!(matches!(error, tsong::Error::Config(_)), "{command}");
-    }
+    let missing = Path::new("no-such-file.toml");
+    let error = failure(tsong::run(args("check", missing)).await)?;
+    assert!(matches!(error, tsong::Error::Config(_)));
+    let error = failure(tsong::run(args("serve", missing)).await)?;
+    assert!(matches!(error, tsong::Error::Bootstrap(_)));
+
+    let dir = tempfile::tempdir()?;
+    let boot = dir.path().join("bootstrap.toml");
+    std::fs::write(
+        &boot,
+        "[source]\nstore = \"file\"\npath = \"missing.toml\"\n",
+    )?;
+    let error = failure(tsong::serve_until(&boot, async {}).await)?;
+    assert!(matches!(error, tsong::Error::Config(_)));
     Ok(())
 }
 
@@ -174,7 +166,7 @@ async fn check_and_serve_report_a_bad_config() -> TestResult {
 async fn serve_reports_a_missing_key() -> TestResult {
     let dir = tempfile::tempdir()?;
     let path = write_config(dir.path(), 0, false)?;
-    let error = failure(tsong::serve_until(&path, async {}).await)?;
+    let error = failure(tsong::serve_until(&boot(&path), async {}).await)?;
     assert!(matches!(error, tsong::Error::Key(_)));
     Ok(())
 }
@@ -184,10 +176,10 @@ async fn serve_reports_an_address_in_use() -> TestResult {
     let taken = std::net::TcpListener::bind("127.0.0.1:0")?;
     let dir = tempfile::tempdir()?;
     let path = write_config(dir.path(), taken.local_addr()?.port(), true)?;
-    let error = failure(tsong::serve_until(&path, async {}).await)?;
+    let error = failure(tsong::serve_until(&boot(&path), async {}).await)?;
     assert!(error.to_string().starts_with("serving: "), "{error}");
     let gateway = write_config_with(dir.path(), 0, taken.local_addr()?.port(), true, "")?;
-    let error = failure(tsong::serve_until(&gateway, async {}).await)?;
+    let error = failure(tsong::serve_until(&boot(&gateway), async {}).await)?;
     assert!(error.to_string().starts_with("serving: "), "{error}");
     Ok(())
 }
@@ -212,7 +204,7 @@ async fn serve_keeps_running_until_signalled() -> TestResult {
     let port = free_port()?;
     let dir = tempfile::tempdir()?;
     let path = write_config(dir.path(), port, true)?;
-    let server = tokio::spawn(tsong::run(args("serve", &path)));
+    let server = tokio::spawn(tsong::run(args("serve", &boot(&path))));
     let answered = discovery(port).await;
     let still_running = !server.is_finished();
     server.abort();
@@ -242,7 +234,7 @@ async fn serve_runs_the_issuer_and_gateway_until_shut_down() -> TestResult {
     let path = write_config_with(dir.path(), port, gateway_port, true, "")?;
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let server = tokio::spawn(async move {
-        tsong::serve_until(&path, async {
+        tsong::serve_until(&boot(&path), async {
             let _ = stopped.await;
         })
         .await
