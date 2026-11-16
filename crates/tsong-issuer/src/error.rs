@@ -16,6 +16,8 @@ pub enum ExchangeError {
     InvalidTarget(String),
     #[error("{0}")]
     InvalidScope(String),
+    #[error("client address not allowed")]
+    AccessDenied,
     #[error("{0}")]
     Unavailable(String),
     #[error("{0}")]
@@ -31,6 +33,7 @@ impl ExchangeError {
             Self::InvalidGrant(_) => "invalid_grant",
             Self::InvalidTarget(_) => "invalid_target",
             Self::InvalidScope(_) => "invalid_scope",
+            Self::AccessDenied => "access_denied",
             Self::Unavailable(_) => "temporarily_unavailable",
             Self::Server(_) => "server_error",
         }
@@ -39,6 +42,7 @@ impl ExchangeError {
     /// The HTTP status.
     pub fn status(&self) -> u16 {
         match self {
+            Self::AccessDenied => 403,
             Self::Unavailable(_) => 503,
             Self::Server(_) => 500,
             _ => 400,

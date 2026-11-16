@@ -7,10 +7,12 @@
 //! must not fall back to its default.
 
 mod duration;
+mod lint;
+mod network;
 mod store;
 mod validate;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -19,6 +21,8 @@ use ipnet::IpNet;
 use serde::Deserialize;
 use url::Url;
 
+pub use lint::Warnings;
+pub use network::{allowed, client_ip};
 pub use store::{ConfigStore, FileStore, LoadFuture};
 pub use validate::{Problems, RESERVED_CLAIMS};
 
@@ -106,10 +110,18 @@ pub struct Gateway {
     /// Proxies whose `X-Forwarded-For` hops are believed.
     #[serde(default)]
     pub trusted_proxies: Vec<IpNet>,
-    /// Client ranges allowed through. Empty allows every client.
-    #[serde(default)]
+    /// Client ranges allowed through. Empty denies every client;
+    /// `["0.0.0.0/0", "::/0"]` allows every client.
     pub allow: Vec<IpNet>,
+    /// The longest the gateway waits on a downstream between reads, before
+    /// answering 504. A route may set its own.
+    #[serde(default = "default_read_timeout", with = "duration")]
+    pub read_timeout: Duration,
     pub cache: Cache,
+}
+
+fn default_read_timeout() -> Duration {
+    Duration::from_secs(60)
 }
 
 /// The exchanged-token cache.
@@ -187,37 +199,101 @@ pub struct Claims {
     pub rename: BTreeMap<String, BTreeMap<String, String>>,
 }
 
-/// A path or host mapped to a downstream service. The upstream is the
-/// caller; the downstream is where the request goes.
+/// A host mapped to a downstream service. The upstream is the caller; the
+/// downstream is where the request goes.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Route {
     pub name: String,
-    #[serde(rename = "match")]
-    pub matcher: Match,
+    /// The host requests for this route arrive on, without a port.
+    /// Compared without regard to case.
+    pub host: String,
+    /// The https origin requests are forwarded to. The request's path and
+    /// query are kept.
     pub downstream: Url,
-    /// Names from `trusted_issuers` whose tokens this route exchanges.
-    pub trusted_issuers: Vec<String>,
-    /// The `aud` of the tokens exchanged for this route. The downstream's
-    /// host is added as a second audience.
-    pub audience: String,
-    /// The scopes exchanged tokens may carry.
-    #[serde(default)]
-    pub scopes: Vec<String>,
-    /// The scopes an inbound token must carry to be exchanged.
-    #[serde(default)]
-    pub required_scopes: Vec<String>,
-    /// Narrows the gateway's allow list for this route.
-    #[serde(default)]
-    pub allow: Vec<IpNet>,
+    /// Added to the `aud` of tokens minted for this route. Empty adds
+    /// nothing.
+    pub append_audience: String,
+    /// The inbound `aud` values the route accepts: the inbound token must
+    /// carry one. Empty denies every token; `"*"` accepts any.
+    pub allowed_audiences: Vec<String>,
+    /// The inbound scopes the route accepts: every scope the inbound token
+    /// carries must be one. Empty denies every token; `"*"` accepts any.
+    pub allowed_scopes: Vec<String>,
+    /// Client ranges allowed to this route, checked after the gateway's
+    /// `allow`. Unset, the gateway's list alone applies. Empty denies
+    /// every client.
+    pub allow: Option<Vec<IpNet>>,
+    /// Overrides `gateway.read_timeout` for this route.
+    #[serde(default, with = "duration::option")]
+    pub read_timeout: Option<Duration>,
 }
 
-/// What a request must match to take a route. At least one is set.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Match {
-    pub host: Option<String>,
-    pub path_prefix: Option<String>,
+impl Route {
+    /// The longest the gateway waits on this route's downstream between
+    /// reads.
+    pub fn read_timeout(&self, gateway: &Gateway) -> Duration {
+        self.read_timeout.unwrap_or(gateway.read_timeout)
+    }
+}
+
+/// The entry in `allowed_audiences` or `allowed_scopes` that accepts any
+/// value.
+pub const ANY: &str = "*";
+
+impl Route {
+    /// Whether the route accepts a token with these audiences.
+    pub fn accepts_audiences<'a>(&self, mut audiences: impl Iterator<Item = &'a str>) -> bool {
+        let allowed = &self.allowed_audiences;
+        allowed.iter().any(|value| value == ANY)
+            || audiences.any(|aud| allowed.iter().any(|value| value == aud))
+    }
+
+    /// The first of these scopes the route doesn't accept. An empty
+    /// `allowed_scopes` accepts nothing, so even a token without scopes is
+    /// refused, reported as `None` in `Err`.
+    pub fn refused_scope<'a>(
+        &self,
+        mut scopes: impl Iterator<Item = &'a str>,
+    ) -> Result<(), Option<&'a str>> {
+        let allowed = &self.allowed_scopes;
+        if allowed.is_empty() {
+            return Err(None);
+        }
+        if allowed.iter().any(|value| value == ANY) {
+            return Ok(());
+        }
+        match scopes.find(|scope| !allowed.iter().any(|value| value == scope)) {
+            Some(refused) => Err(Some(refused)),
+            None => Ok(()),
+        }
+    }
+}
+
+/// The routes keyed by host, for lookup in constant time.
+#[derive(Debug, Clone, Default)]
+pub struct RouteTable {
+    routes: HashMap<String, Route>,
+}
+
+impl RouteTable {
+    /// Indexes `routes` by lowercased host. A validated config has no
+    /// repeated host; were one repeated, the first route would win.
+    pub fn new(routes: &[Route]) -> Self {
+        let mut table = HashMap::with_capacity(routes.len());
+        for route in routes {
+            table
+                .entry(route.host.to_ascii_lowercase())
+                .or_insert_with(|| route.clone());
+        }
+        Self { routes: table }
+    }
+
+    /// The route for `host`, compared without regard to case. The host
+    /// carries no port.
+    pub fn get(&self, host: &str) -> Option<&Route> {
+        self.routes.get(&host.to_ascii_lowercase())
+    }
 }
 
 /// Why a config didn't load.

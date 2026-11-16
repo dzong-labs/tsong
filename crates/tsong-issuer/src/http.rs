@@ -1,10 +1,11 @@
 //! The issuer over HTTP: the token endpoint, the JWKS and discovery.
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::rejection::FormRejection;
-use axum::extract::{Form, State};
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::extract::{ConnectInfo, Form, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -13,7 +14,9 @@ use serde_json::json;
 use crate::{ExchangeError, Issuer, TokenRequest};
 
 /// The issuer's routes: `POST /token`, `GET /jwks.json` and
-/// `GET /.well-known/openid-configuration`.
+/// `GET /.well-known/openid-configuration`. Serve it with
+/// `into_make_service_with_connect_info::<SocketAddr>()`: the token
+/// endpoint checks each client against the IP allow lists.
 pub fn router(issuer: Arc<Issuer>) -> Router {
     Router::new()
         .route("/token", post(token))
@@ -24,10 +27,22 @@ pub fn router(issuer: Arc<Issuer>) -> Router {
 
 async fn token(
     State(issuer): State<Arc<Issuer>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     form: Result<Form<TokenRequest>, FormRejection>,
 ) -> Response {
+    let forwarded_for = headers.get_all("x-forwarded-for");
     let result = match form {
-        Ok(Form(request)) => issuer.exchange(request).await,
+        Ok(Form(request)) => {
+            match issuer.admits(
+                peer.ip(),
+                forwarded_for.iter().map(HeaderValue::as_bytes),
+                request.audience.as_deref(),
+            ) {
+                Ok(()) => issuer.exchange(request).await,
+                Err(error) => Err(error),
+            }
+        }
         Err(rejection) => Err(ExchangeError::InvalidRequest(rejection.body_text())),
     };
     let mut response = match result {

@@ -32,13 +32,15 @@ state = "active"
 
 [gateway]
 listen = "127.0.0.1:0"
+trusted_proxies = ["10.0.0.0/24"]
+allow = ["127.0.0.0/8", "10.0.0.0/8"]
 
 [gateway.cache]
 max_entries = 10
 
 [trusted_issuers.test]
 issuer = "https://issuer.test"
-audiences = ["tsong"]
+audiences = ["tsong", "api"]
 algorithms = ["ES256"]
 
 [trusted_issuers.other]
@@ -55,35 +57,28 @@ uid = "user"
 
 [[routes]]
 name = "orders"
-match = { path_prefix = "/orders" }
-downstream = "https://orders.internal.test/api"
-trusted_issuers = ["test"]
-audience = "orders-api"
-scopes = ["orders.read", "orders.write"]
-required_scopes = ["orders"]
+host = "orders.test"
+downstream = "https://orders-lb.test"
+append_audience = "orders.test"
+allowed_audiences = ["tsong"]
+allowed_scopes = ["orders.read", "orders.write"]
 
 [[routes]]
-name = "plain"
-match = { path_prefix = "/plain" }
-downstream = "https://plain.test"
-trusted_issuers = ["test"]
-audience = "plain.test"
+name = "open"
+host = "open.test"
+downstream = "https://open-lb.test"
+append_audience = ""
+allowed_audiences = ["*"]
+allowed_scopes = ["*"]
+allow = ["10.1.0.0/16"]
 
 [[routes]]
-name = "shared-other"
-match = { path_prefix = "/shared-a" }
-downstream = "https://a.test"
-trusted_issuers = ["other"]
-audience = "shared"
-scopes = ["a"]
-
-[[routes]]
-name = "shared-test"
-match = { path_prefix = "/shared-b" }
-downstream = "https://b.test"
-trusted_issuers = ["test"]
-audience = "shared"
-scopes = ["b"]
+name = "closed"
+host = "closed.test"
+downstream = "https://closed-lb.test"
+append_audience = "closed.test"
+allowed_audiences = ["tsong"]
+allowed_scopes = []
 "#;
 
 pub struct Harness {
@@ -130,7 +125,7 @@ pub fn subject(changes: Value) -> TestResult<Value> {
         "sub": "alice",
         "aud": "tsong",
         "exp": NOW + 3600,
-        "scope": "orders",
+        "scope": "orders.read orders.write",
         "email": "alice@example.test",
         "groups": ["admins"],
         "uid": "a-1",

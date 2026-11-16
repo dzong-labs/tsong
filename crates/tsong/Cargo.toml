@@ -10,9 +10,10 @@ workspace = true
 [dependencies]
 axum.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["net", "rt-multi-thread", "signal"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
 tsong-clock.workspace = true
 tsong-config.workspace = true
+tsong-gateway.workspace = true
 tsong-issuer.workspace = true
 tsong-keys.workspace = true
 tsong-validate.workspace = true

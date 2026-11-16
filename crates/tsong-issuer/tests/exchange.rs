@@ -72,7 +72,7 @@ async fn a_subject_token_is_exchanged_for_the_route() -> TestResult {
     let h = harness()?;
     let response = h
         .issuer
-        .exchange(request(&h, "orders-api", subject(json!({})))?)
+        .exchange(request(&h, "orders.test", subject(json!({})))?)
         .await?;
     assert_eq!(response.issued_token_type, ACCESS_TOKEN);
     assert_eq!(response.token_type, "Bearer");
@@ -85,7 +85,7 @@ async fn a_subject_token_is_exchanged_for_the_route() -> TestResult {
     for (name, value) in [
         ("iss", json!("https://tsong.test")),
         ("sub", json!("alice")),
-        ("aud", json!(["orders-api", "orders.internal.test"])),
+        ("aud", json!(["tsong", "orders.test"])),
         ("iat", json!(NOW)),
         ("exp", json!(NOW + 900)),
         ("scope", json!("orders.read orders.write")),
@@ -109,8 +109,8 @@ async fn a_subject_token_is_exchanged_for_the_route() -> TestResult {
 #[tokio::test]
 async fn each_token_gets_its_own_id() -> TestResult {
     let h = harness()?;
-    let (_, first) = exchanged(&h, request(&h, "orders-api", subject(json!({})))).await?;
-    let (_, second) = exchanged(&h, request(&h, "orders-api", subject(json!({})))).await?;
+    let (_, first) = exchanged(&h, request(&h, "orders.test", subject(json!({})))).await?;
+    let (_, second) = exchanged(&h, request(&h, "orders.test", subject(json!({})))).await?;
     assert!(first.contains_key("jti"));
     assert_ne!(first.get("jti"), second.get("jti"));
     Ok(())
@@ -121,14 +121,14 @@ async fn a_token_lives_no_longer_than_its_subject() -> TestResult {
     let h = harness()?;
     let (response, claims) = exchanged(
         &h,
-        request(&h, "orders-api", subject(json!({ "exp": NOW + 60 }))),
+        request(&h, "orders.test", subject(json!({ "exp": NOW + 60 }))),
     )
     .await?;
     assert_eq!(response.expires_in, 60);
     assert_eq!(claims.get("exp"), Some(&json!(NOW + 60)));
     let (response, _) = exchanged(
         &h,
-        request(&h, "orders-api", subject(json!({ "exp": NOW + 1 }))),
+        request(&h, "orders.test", subject(json!({ "exp": NOW + 1 }))),
     )
     .await?;
     assert_eq!(response.expires_in, 1);
@@ -142,7 +142,7 @@ async fn a_subject_inside_its_skew_but_expired_is_refused() -> TestResult {
         assert_eq!(
             refused(
                 &h,
-                request(&h, "orders-api", subject(json!({ "exp": exp })))
+                request(&h, "orders.test", subject(json!({ "exp": exp })))
             )
             .await?,
             ("invalid_grant", "the subject token has expired".into())
@@ -152,83 +152,138 @@ async fn a_subject_inside_its_skew_but_expired_is_refused() -> TestResult {
 }
 
 #[tokio::test]
-async fn requested_scopes_must_be_the_routes() -> TestResult {
+async fn requested_scopes_narrow_the_subjects() -> TestResult {
     let h = harness()?;
-    let narrowed = changed(request(&h, "orders-api", subject(json!({}))), |r| {
-        r.scope = Some("orders.read".into());
+    let narrowed = changed(request(&h, "orders.test", subject(json!({}))), |r| {
+        r.scope = Some("orders.write orders.read orders.write".into());
     });
     let (response, claims) = exchanged(&h, narrowed).await?;
-    assert_eq!(response.scope.as_deref(), Some("orders.read"));
-    assert_eq!(claims.get("scope"), Some(&json!("orders.read")));
+    assert_eq!(response.scope.as_deref(), Some("orders.read orders.write"));
+    assert_eq!(
+        claims.get("scope"),
+        Some(&json!("orders.read orders.write"))
+    );
 
-    let widened = changed(request(&h, "orders-api", subject(json!({}))), |r| {
-        r.scope = Some("orders.read orders.delete".into());
+    let one = changed(request(&h, "orders.test", subject(json!({}))), |r| {
+        r.scope = Some("orders.write".into());
     });
+    let (response, _) = exchanged(&h, one).await?;
+    assert_eq!(response.scope.as_deref(), Some("orders.write"));
+
+    let widened = changed(
+        request(
+            &h,
+            "orders.test",
+            subject(json!({ "scope": "orders.read" })),
+        ),
+        |r| r.scope = Some("orders.read orders.write".into()),
+    );
     assert_eq!(
         refused(&h, widened).await?,
         (
             "invalid_scope",
-            r#"scope "orders.delete" is not allowed for audience "orders-api""#.into()
+            r#"the subject token lacks scope "orders.write""#.into()
         )
     );
     Ok(())
 }
 
 #[tokio::test]
-async fn a_route_without_scopes_grants_none() -> TestResult {
+async fn a_subject_without_scopes_gets_none() -> TestResult {
     let h = harness()?;
-    let (response, claims) = exchanged(&h, request(&h, "plain.test", subject(json!({})))).await?;
+    let claims = subject(json!({ "scope": null }));
+    let (response, claims) = exchanged(&h, request(&h, "orders.test", claims)).await?;
     assert_eq!(response.scope, None);
     assert!(!claims.contains_key("scope"));
-    assert_eq!(claims.get("aud"), Some(&json!(["plain.test"])));
     Ok(())
 }
 
 #[tokio::test]
-async fn the_subject_must_hold_the_required_scopes() -> TestResult {
+async fn the_route_refuses_scopes_it_does_not_allow() -> TestResult {
+    let h = harness()?;
+    let claims = subject(json!({ "scope": "orders.read admin" }));
+    assert_eq!(
+        refused(&h, request(&h, "orders.test", claims)).await?,
+        (
+            "invalid_scope",
+            r#"scope "admin" is not allowed for route "orders""#.into()
+        )
+    );
+    let entra = subject(json!({ "scope": null, "scp": ["orders.read"] }));
+    let (response, _) = exchanged(&h, request(&h, "orders.test", entra)).await?;
+    assert_eq!(response.scope.as_deref(), Some("orders.read"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_route_with_no_allowed_scopes_refuses_every_subject() -> TestResult {
     let h = harness()?;
     for scope in [json!("orders.read"), json!(null)] {
         let claims = subject(json!({ "scope": scope }));
         assert_eq!(
-            refused(&h, request(&h, "orders-api", claims)).await?,
-            (
-                "invalid_grant",
-                r#"the subject token lacks scope "orders""#.into()
-            )
+            refused(&h, request(&h, "closed.test", claims)).await?,
+            ("invalid_scope", r#"route "closed" allows no scopes"#.into())
         );
     }
-    let entra = subject(json!({ "scope": null, "scp": "orders other" }));
-    exchanged(&h, request(&h, "orders-api", entra)).await?;
     Ok(())
 }
 
 #[tokio::test]
-async fn the_audience_picks_a_route_that_trusts_the_issuer() -> TestResult {
+async fn the_subject_must_carry_an_audience_the_route_allows() -> TestResult {
     let h = harness()?;
-    let (response, claims) = exchanged(&h, request(&h, "shared", subject(json!({})))).await?;
-    assert_eq!(response.scope.as_deref(), Some("b"));
-    assert_eq!(claims.get("aud"), Some(&json!(["shared", "b.test"])));
-    Ok(())
-}
-
-#[tokio::test]
-async fn the_issuer_must_be_trusted_on_the_audience_route() -> TestResult {
-    let h = harness()?;
-    let other = subject(json!({ "iss": "https://other.test" }));
+    let claims = subject(json!({ "aud": "api" }));
     assert_eq!(
-        refused(&h, request(&h, "orders-api", other)).await?,
+        refused(&h, request(&h, "orders.test", claims)).await?,
         (
             "invalid_target",
-            r#"issuer "other" may not exchange for audience "orders-api""#.into()
+            r#"the subject token's audience is not allowed for "orders.test""#.into()
         )
     );
+    let claims = subject(json!({ "aud": ["api", "tsong"] }));
+    let (_, claims) = exchanged(&h, request(&h, "orders.test", claims)).await?;
+    assert_eq!(
+        claims.get("aud"),
+        Some(&json!(["api", "tsong", "orders.test"]))
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_appended_audience_is_not_repeated() -> TestResult {
+    let h = harness()?;
+    let claims = subject(json!({ "aud": ["orders.test", "tsong"] }));
+    let (_, claims) = exchanged(&h, request(&h, "orders.test", claims)).await?;
+    assert_eq!(claims.get("aud"), Some(&json!(["orders.test", "tsong"])));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_star_route_accepts_any_audience_and_scope_and_appends_nothing() -> TestResult {
+    let h = harness()?;
+    let claims = subject(json!({ "aud": "api", "scope": "admin root" }));
+    let (response, claims) = exchanged(&h, request(&h, "open.test", claims)).await?;
+    assert_eq!(response.scope.as_deref(), Some("admin root"));
+    assert_eq!(claims.get("aud"), Some(&json!(["api"])));
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_audience_names_a_route_host_without_regard_to_case() -> TestResult {
+    let h = harness()?;
+    exchanged(&h, request(&h, "ORDERS.test", subject(json!({})))).await?;
     assert_eq!(
         refused(&h, request(&h, "nowhere", subject(json!({})))).await?,
-        (
-            "invalid_target",
-            r#"no route has audience "nowhere""#.into()
-        )
+        ("invalid_target", r#"no route has host "nowhere""#.into())
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn every_trusted_issuer_may_exchange_for_every_route() -> TestResult {
+    let h = harness()?;
+    let other = subject(json!({ "iss": "https://other.test" }));
+    let (_, claims) = exchanged(&h, request(&h, "orders.test", other)).await?;
+    assert_eq!(claims.get("aud"), Some(&json!(["tsong", "orders.test"])));
     Ok(())
 }
 
@@ -240,7 +295,7 @@ async fn a_renamed_claim_can_supply_the_subject() -> TestResult {
         (json!({ "oid": 7 }), "alice"),
         (json!({ "oid": "object-7", "sub": null }), "object-7"),
     ] {
-        let (_, claims) = exchanged(&h, request(&h, "orders-api", subject(changes))).await?;
+        let (_, claims) = exchanged(&h, request(&h, "orders.test", subject(changes))).await?;
         assert_eq!(claims.get("sub"), Some(&json!(sub)));
     }
     Ok(())
@@ -250,10 +305,10 @@ async fn a_renamed_claim_can_supply_the_subject() -> TestResult {
 async fn renames_apply_only_to_their_issuer() -> TestResult {
     let h = harness()?;
     let claims = subject(json!({ "iss": "https://other.test", "oid": "object-7" }));
-    let (_, claims) = exchanged(&h, request(&h, "shared", claims)).await?;
+    let (_, claims) = exchanged(&h, request(&h, "orders.test", claims)).await?;
     assert_eq!(claims.get("sub"), Some(&json!("alice")));
     assert!(!claims.contains_key("user"));
-    assert_eq!(claims.get("aud"), Some(&json!(["shared", "a.test"])));
+    assert_eq!(claims.get("aud"), Some(&json!(["tsong", "orders.test"])));
     Ok(())
 }
 
@@ -263,7 +318,7 @@ async fn a_subject_is_required() -> TestResult {
     assert_eq!(
         refused(
             &h,
-            request(&h, "orders-api", subject(json!({ "sub": null })))
+            request(&h, "orders.test", subject(json!({ "sub": null })))
         )
         .await?,
         ("invalid_grant", "the subject token has no sub".into())
@@ -275,7 +330,7 @@ async fn a_subject_is_required() -> TestResult {
 async fn the_request_must_be_a_token_exchange() -> TestResult {
     let h = harness()?;
     for grant_type in [None, Some("client_credentials".to_string())] {
-        let request = changed(request(&h, "orders-api", subject(json!({}))), |r| {
+        let request = changed(request(&h, "orders.test", subject(json!({}))), |r| {
             r.grant_type = grant_type;
         });
         assert_eq!(
@@ -324,7 +379,7 @@ async fn malformed_requests_are_invalid() -> TestResult {
         (|r| r.audience = None, "audience is required"),
     ];
     for (change, expected) in cases {
-        let request = changed(request(&h, "orders-api", subject(json!({}))), change);
+        let request = changed(request(&h, "orders.test", subject(json!({}))), change);
         assert_eq!(
             refused(&h, request).await?,
             ("invalid_request", expected.into())
@@ -336,12 +391,12 @@ async fn malformed_requests_are_invalid() -> TestResult {
 #[tokio::test]
 async fn jwt_token_types_are_accepted() -> TestResult {
     let h = harness()?;
-    let jwt = changed(request(&h, "orders-api", subject(json!({}))), |r| {
+    let jwt = changed(request(&h, "orders.test", subject(json!({}))), |r| {
         r.subject_token_type = Some(JWT.into());
         r.requested_token_type = Some(JWT.into());
     });
     exchanged(&h, jwt).await?;
-    let access = changed(request(&h, "orders-api", subject(json!({}))), |r| {
+    let access = changed(request(&h, "orders.test", subject(json!({}))), |r| {
         r.requested_token_type = Some(ACCESS_TOKEN.into());
     });
     exchanged(&h, access).await?;
@@ -353,11 +408,11 @@ async fn validation_failures_map_to_oauth_errors() -> TestResult {
     let h = harness()?;
     let expired = subject(json!({ "exp": NOW - 3600 }));
     assert_eq!(
-        refused(&h, request(&h, "orders-api", expired)).await?,
+        refused(&h, request(&h, "orders.test", expired)).await?,
         ("invalid_grant", "the token has expired".into())
     );
 
-    let opaque = changed(request(&h, "orders-api", subject(json!({}))), |r| {
+    let opaque = changed(request(&h, "orders.test", subject(json!({}))), |r| {
         r.subject_token = Some("opaque".into());
     });
     assert_eq!(refused(&h, opaque).await?.0, "invalid_grant");
@@ -365,7 +420,7 @@ async fn validation_failures_map_to_oauth_errors() -> TestResult {
     // A fresh issuer, with no keys cached yet.
     let h = harness()?;
     h.fetcher.fail(true);
-    let error = failure(&h, request(&h, "orders-api", subject(json!({})))).await?;
+    let error = failure(&h, request(&h, "orders.test", subject(json!({})))).await?;
     assert_eq!(error.code(), "temporarily_unavailable");
     assert_eq!(error.status(), 503);
     Ok(())
@@ -392,7 +447,7 @@ impl SigningKey for BrokenKey {
 #[tokio::test]
 async fn a_signing_failure_is_a_server_error() -> TestResult {
     let h = harness_with_keys(KeySet::new(Arc::new(BrokenKey), vec![])?)?;
-    let error = failure(&h, request(&h, "orders-api", subject(json!({})))).await?;
+    let error = failure(&h, request(&h, "orders.test", subject(json!({})))).await?;
     assert!(matches!(error, ExchangeError::Server(_)));
     assert_eq!(error.code(), "server_error");
     assert_eq!(error.status(), 500);
@@ -435,6 +490,7 @@ fn error_codes_and_statuses() {
             "invalid_scope",
             400,
         ),
+        (ExchangeError::AccessDenied, "access_denied", 403),
         (
             ExchangeError::Unavailable(String::new()),
             "temporarily_unavailable",

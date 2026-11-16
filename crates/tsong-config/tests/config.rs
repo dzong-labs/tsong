@@ -3,8 +3,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use tsong_config::{
-    Config, ConfigError, ConfigStore, FileStore, InboundAlgorithm, KeyProvider, KeyState, Route,
-    SigningAlgorithm, TrustedIssuer, Validation,
+    ANY, Config, ConfigError, ConfigStore, FileStore, InboundAlgorithm, KeyProvider, KeyState,
+    Route, RouteTable, SigningAlgorithm, TrustedIssuer, Validation, Warnings,
 };
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
@@ -33,6 +33,7 @@ state = "active"
 const GATEWAY: &str = r#"
 [gateway]
 listen = "127.0.0.1:8443"
+allow = ["10.0.0.0/8"]
 
 [gateway.cache]
 max_entries = 10
@@ -116,9 +117,12 @@ fn sample_loads() -> TestResult {
     );
     assert_eq!(config.routes.len(), 2);
     let orders = route(&config, 0)?;
-    assert_eq!(orders.matcher.host.as_deref(), Some("api.example.com"));
-    assert_eq!(orders.required_scopes, ["orders"]);
-    assert_eq!(route(&config, 1)?.allow.len(), 1);
+    assert_eq!(orders.host, "orders.example.com");
+    assert_eq!(orders.append_audience, "orders.example.com");
+    assert_eq!(orders.allowed_scopes, ["orders.read", "orders.write"]);
+    assert!(orders.allow.is_none());
+    assert_eq!(route(&config, 1)?.allow.as_ref().map(Vec::len), Some(1));
+    assert!(config.warnings().0.is_empty());
     Ok(())
 }
 
@@ -127,7 +131,7 @@ fn minimal_loads() -> TestResult {
     let config = Config::from_toml(&minimal())?;
     assert!(config.trusted_issuers.is_empty());
     assert!(config.routes.is_empty());
-    assert!(config.gateway.allow.is_empty());
+    assert_eq!(config.gateway.allow.len(), 1);
     Ok(())
 }
 
@@ -431,23 +435,29 @@ fn claim_renames_name_trusted_issuers() -> TestResult {
 const ROUTE: &str = r#"
 [[routes]]
 name = "orders"
-match = { path_prefix = "/orders" }
-downstream = "https://orders.example.com"
-trusted_issuers = ["okta"]
-audience = "orders-api"
+host = "orders.example.com"
+downstream = "https://orders-lb.example.com"
+append_audience = "orders.example.com"
+allowed_audiences = ["api"]
+allowed_scopes = ["orders.read"]
 "#;
 
 fn with_route(route: &str) -> String {
     format!("{}{OKTA}{route}", minimal())
 }
 
+/// The route with one line of `ROUTE` replaced.
+fn route_with(from: &str, to: &str) -> String {
+    with_route(&ROUTE.replace(from, to))
+}
+
 #[test]
 fn a_valid_route_loads() -> TestResult {
     let config = Config::from_toml(&with_route(ROUTE))?;
     let orders = route(&config, 0)?;
-    assert_eq!(orders.audience, "orders-api");
-    assert!(orders.scopes.is_empty());
-    assert!(orders.required_scopes.is_empty());
+    assert_eq!(orders.append_audience, "orders.example.com");
+    assert_eq!(orders.allowed_audiences, ["api"]);
+    assert!(orders.allow.is_none());
     Ok(())
 }
 
@@ -476,66 +486,330 @@ async fn a_file_store_loads_its_file() -> TestResult {
 }
 
 #[test]
+fn the_gateway_allow_list_is_required() -> TestResult {
+    let text = minimal().replace("allow = [\"10.0.0.0/8\"]\n", "");
+    assert!(parse_error(&text)?.contains("missing field `allow`"));
+    Ok(())
+}
+
+#[test]
+fn route_fields_are_required() -> TestResult {
+    for field in [
+        "host",
+        "downstream",
+        "append_audience",
+        "allowed_audiences",
+        "allowed_scopes",
+    ] {
+        let line = ROUTE
+            .lines()
+            .find(|line| line.starts_with(field))
+            .ok_or(format!("no {field} line"))?;
+        let text = route_with(line, "");
+        assert!(
+            parse_error(&text)?.contains(&format!("missing field `{field}`")),
+            "{field}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn route_names_are_unique() -> TestResult {
-    let text = with_route(&format!("{ROUTE}{ROUTE}"));
+    let second = ROUTE.replace(
+        r#"host = "orders.example.com""#,
+        r#"host = "other.example.com""#,
+    );
+    let text = with_route(&format!("{ROUTE}{second}"));
     assert_eq!(problems(&text)?, [r#"routes repeats name "orders""#]);
     Ok(())
 }
 
 #[test]
-fn routes_match_something() -> TestResult {
-    let text = with_route(&ROUTE.replace(r#"path_prefix = "/orders""#, ""));
+fn route_hosts_are_unique_without_regard_to_case() -> TestResult {
+    let second = ROUTE
+        .replace(r#"name = "orders""#, r#"name = "orders-2""#)
+        .replace(
+            r#"host = "orders.example.com""#,
+            r#"host = "Orders.Example.COM""#,
+        );
+    let text = with_route(&format!("{ROUTE}{second}"));
     assert_eq!(
         problems(&text)?,
-        [r#"route "orders" must match a host, a path_prefix or both"#]
-    );
-    let host_only =
-        with_route(&ROUTE.replace(r#"path_prefix = "/orders""#, r#"host = "api.example.com""#));
-    Config::from_toml(&host_only)?;
-    Ok(())
-}
-
-#[test]
-fn path_prefixes_are_absolute() -> TestResult {
-    let text = with_route(&ROUTE.replace("\"/orders\"", "\"orders\""));
-    assert_eq!(
-        problems(&text)?,
-        [r#"route "orders" path_prefix must start with /"#]
+        [r#"routes repeats host "Orders.Example.COM""#]
     );
     Ok(())
 }
 
 #[test]
-fn downstreams_are_http() -> TestResult {
-    let text = with_route(&ROUTE.replace("https://orders", "ftp://orders"));
-    assert_eq!(
-        problems(&text)?,
-        [r#"route "orders" downstream must be http or https"#]
-    );
-    let plain = with_route(&ROUTE.replace("https://orders", "http://orders"));
-    Config::from_toml(&plain)?;
+fn route_hosts_are_bare_host_names() -> TestResult {
+    for host in [
+        "",
+        "orders.example.com:443",
+        "orders.example.com/orders",
+        "https://orders.example.com",
+        "user@orders.example.com",
+        "orders example.com",
+    ] {
+        let text = route_with(
+            r#"host = "orders.example.com""#,
+            &format!("host = {host:?}"),
+        );
+        assert_eq!(
+            problems(&text)?,
+            [r#"route "orders" host must be a host name, without a scheme, port or path"#],
+            "{host}"
+        );
+    }
+    for host in ["Orders.Example.com", "10.1.2.3", "[::1]", "localhost"] {
+        let text = route_with(
+            r#"host = "orders.example.com""#,
+            &format!("host = {host:?}"),
+        );
+        Config::from_toml(&text).map_err(|error| format!("{host}: {error}"))?;
+    }
     Ok(())
 }
 
 #[test]
-fn routes_trust_known_issuers() -> TestResult {
-    let none = with_route(&ROUTE.replace(r#"["okta"]"#, "[]"));
-    assert_eq!(problems(&none)?, [r#"route "orders" trusts no issuer"#]);
-    let unknown = with_route(&ROUTE.replace(r#"["okta"]"#, r#"["okta", "entra"]"#));
+fn downstreams_are_https_origins() -> TestResult {
+    for downstream in [
+        "http://orders-lb.example.com",
+        "https://orders-lb.example.com/api",
+        "https://orders-lb.example.com/?x=1",
+        "https://orders-lb.example.com/#top",
+        "https://user@orders-lb.example.com",
+        "https://:pass@orders-lb.example.com",
+        "unix:/run/orders.sock",
+    ] {
+        let text = route_with(
+            r#"downstream = "https://orders-lb.example.com""#,
+            &format!("downstream = {downstream:?}"),
+        );
+        assert_eq!(
+            problems(&text)?,
+            [
+                r#"route "orders" downstream must be an https origin, without a path, query or credentials"#
+            ],
+            "{downstream}"
+        );
+    }
+    for downstream in [
+        "https://orders-lb.example.com/",
+        "https://orders-lb.example.com:8443",
+    ] {
+        let text = route_with(
+            r#"downstream = "https://orders-lb.example.com""#,
+            &format!("downstream = {downstream:?}"),
+        );
+        Config::from_toml(&text).map_err(|error| format!("{downstream}: {error}"))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn the_route_table_finds_routes_by_host_without_regard_to_case() -> TestResult {
+    let second = ROUTE
+        .replace(r#"name = "orders""#, r#"name = "builds""#)
+        .replace(
+            r#"host = "orders.example.com""#,
+            r#"host = "Builds.Example.com""#,
+        );
+    let config = Config::from_toml(&with_route(&format!("{ROUTE}{second}")))?;
+    let table = RouteTable::new(&config.routes);
+    let name = |host: &str| table.get(host).map(|route| route.name.clone());
+    assert_eq!(name("orders.example.com").as_deref(), Some("orders"));
+    assert_eq!(name("ORDERS.example.com").as_deref(), Some("orders"));
+    assert_eq!(name("builds.example.com").as_deref(), Some("builds"));
+    assert_eq!(name("example.com"), None);
+    assert!(RouteTable::default().get("orders.example.com").is_none());
+    Ok(())
+}
+
+#[test]
+fn the_route_table_keeps_the_first_of_a_repeated_host() -> TestResult {
+    let config = Config::from_toml(&with_route(ROUTE))?;
+    let first = route(&config, 0)?.clone();
+    let mut second = first.clone();
+    second.name = "second".into();
+    second.host = "ORDERS.example.com".into();
+    let table = RouteTable::new(&[first, second]);
+    let found = table
+        .get("orders.example.com")
+        .map(|route| route.name.as_str());
+    assert_eq!(found, Some("orders"));
+    Ok(())
+}
+
+/// The orders route with these allowed audiences and scopes.
+fn orders(audiences: &[&str], scopes: &[&str]) -> TestResult<Route> {
+    let config = Config::from_toml(&with_route(ROUTE))?;
+    let mut route = route(&config, 0)?.clone();
+    route.allowed_audiences = audiences.iter().map(|value| (*value).to_owned()).collect();
+    route.allowed_scopes = scopes.iter().map(|value| (*value).to_owned()).collect();
+    Ok(route)
+}
+
+#[test]
+fn a_route_accepts_a_token_with_one_allowed_audience() -> TestResult {
+    let route = orders(&["a", "b"], &[])?;
+    assert!(route.accepts_audiences(["x", "b"].into_iter()));
+    assert!(!route.accepts_audiences(["x", "y"].into_iter()));
+    assert!(!route.accepts_audiences(std::iter::empty()));
+    Ok(())
+}
+
+#[test]
+fn an_empty_audience_list_accepts_nothing_and_a_star_accepts_anything() -> TestResult {
+    let empty = orders(&[], &[])?;
+    assert!(!empty.accepts_audiences(["a"].into_iter()));
+    let any = orders(&[ANY], &[])?;
+    assert!(any.accepts_audiences(["a"].into_iter()));
+    assert!(any.accepts_audiences(std::iter::empty()));
+    Ok(())
+}
+
+#[test]
+fn a_route_refuses_the_first_scope_it_does_not_allow() -> TestResult {
+    let route = orders(&[], &["read", "write"])?;
+    assert_eq!(route.refused_scope(["read", "write"].into_iter()), Ok(()));
+    assert_eq!(route.refused_scope(std::iter::empty()), Ok(()));
     assert_eq!(
-        problems(&unknown)?,
-        [r#"route "orders" trusts "entra", which is not in trusted_issuers"#]
+        route.refused_scope(["read", "admin", "root"].into_iter()),
+        Err(Some("admin"))
     );
     Ok(())
 }
 
 #[test]
-fn routes_have_an_audience() -> TestResult {
-    let text = with_route(&ROUTE.replace(r#""orders-api""#, r#""""#));
+fn an_empty_scope_list_refuses_everything_and_a_star_accepts_anything() -> TestResult {
+    let empty = orders(&[], &[])?;
+    assert_eq!(empty.refused_scope(std::iter::empty()), Err(None));
+    assert_eq!(empty.refused_scope(["read"].into_iter()), Err(None));
+    let any = orders(&[], &["read", ANY])?;
+    assert_eq!(any.refused_scope(["admin"].into_iter()), Ok(()));
+    Ok(())
+}
+
+#[test]
+fn a_clean_config_has_no_warnings() -> TestResult {
+    let config = Config::from_toml(&with_route(ROUTE))?;
+    assert_eq!(config.warnings(), Warnings::default());
+    assert_eq!(config.warnings().to_string(), "");
+    Ok(())
+}
+
+#[test]
+fn empty_lists_warn_as_omissions() -> TestResult {
+    let route = ROUTE
+        .replace(r#"allowed_audiences = ["api"]"#, "allowed_audiences = []")
+        .replace(
+            r#"allowed_scopes = ["orders.read"]"#,
+            "allowed_scopes = []\nallow = []",
+        );
+    let text = with_route(&route).replace(r#"allow = ["10.0.0.0/8"]"#, "allow = []");
+    let warnings = Config::from_toml(&text)?.warnings();
+    assert_eq!(
+        warnings.0,
+        [
+            "gateway.allow is empty; every client will be denied",
+            r#"route "orders": allowed_audiences is empty; every request will be denied"#,
+            r#"route "orders": allowed_scopes is empty; every request will be denied"#,
+            r#"route "orders": allow is empty; every client will be denied"#,
+        ]
+    );
+    assert_eq!(
+        warnings.to_string().lines().next(),
+        Some("warning: gateway.allow is empty; every client will be denied")
+    );
+    Ok(())
+}
+
+#[test]
+fn accept_anything_entries_warn_as_decisions() -> TestResult {
+    let route = ROUTE
+        .replace(
+            r#"allowed_audiences = ["api"]"#,
+            r#"allowed_audiences = ["api", "*"]"#,
+        )
+        .replace(
+            r#"allowed_scopes = ["orders.read"]"#,
+            "allowed_scopes = [\"*\"]\nallow = [\"::/0\"]",
+        );
+    let text = with_route(&route).replace(
+        r#"allow = ["10.0.0.0/8"]"#,
+        r#"allow = ["0.0.0.0/0", "10.0.0.0/8", "::/0"]"#,
+    );
+    let warnings = Config::from_toml(&text)?.warnings();
+    assert_eq!(
+        warnings.0,
+        [
+            "gateway.allow has 0.0.0.0/0; every address is allowed",
+            "gateway.allow has ::/0; every address is allowed",
+            r#"route "orders": allowed_audiences has "*"; any value is accepted"#,
+            r#"route "orders": allowed_scopes has "*"; any value is accepted"#,
+            r#"route "orders": allow has ::/0; every address is allowed"#,
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn the_read_timeout_defaults_to_a_minute_and_a_route_may_override_it() -> TestResult {
+    let second = ROUTE
+        .replace(r#"name = "orders""#, r#"name = "slow""#)
+        .replace(
+            r#"host = "orders.example.com""#,
+            r#"host = "slow.example.com""#,
+        )
+        .replace(
+            r#"allowed_scopes = ["orders.read"]"#,
+            "allowed_scopes = [\"orders.read\"]\nread_timeout = \"5m\"",
+        );
+    let config = Config::from_toml(&with_route(&format!("{ROUTE}{second}")))?;
+    assert_eq!(config.gateway.read_timeout, Duration::from_secs(60));
+    assert_eq!(
+        route(&config, 0)?.read_timeout(&config.gateway),
+        Duration::from_secs(60)
+    );
+    assert_eq!(
+        route(&config, 1)?.read_timeout(&config.gateway),
+        Duration::from_secs(300)
+    );
+    let text = with_route(ROUTE).replace(
+        "[gateway.cache]",
+        "read_timeout = \"90s\"\n\n[gateway.cache]",
+    );
+    let config = Config::from_toml(&text)?;
+    assert_eq!(
+        route(&config, 0)?.read_timeout(&config.gateway),
+        Duration::from_secs(90)
+    );
+    Ok(())
+}
+
+#[test]
+fn read_timeouts_are_above_zero() -> TestResult {
+    let text = route_with(
+        r#"allowed_scopes = ["orders.read"]"#,
+        "allowed_scopes = [\"orders.read\"]\nread_timeout = \"0s\"",
+    )
+    .replace(
+        "[gateway.cache]",
+        "read_timeout = \"0s\"\n\n[gateway.cache]",
+    );
     assert_eq!(
         problems(&text)?,
-        [r#"route "orders" has an empty audience"#]
+        [
+            r#"route "orders" read_timeout must be above zero"#,
+            "gateway.read_timeout must be above zero",
+        ]
     );
+    let bad = route_with(
+        r#"allowed_scopes = ["orders.read"]"#,
+        "allowed_scopes = [\"orders.read\"]\nread_timeout = \"soon\"",
+    );
+    parse_error(&bad)?;
     Ok(())
 }
 
