@@ -1,6 +1,6 @@
 # Tsong
 
-Tsong sits between callers and your services. Callers bring access tokens from several identity providers. Tsong checks each token and replaces it with a token it signs itself, so your services trust one issuer instead of many.
+Tsong is an API gateway that sits between callers and your services. Callers bring access tokens from several identity providers. Tsong checks each token and replaces it with a token it signs itself, so your services trust one issuer instead of many.
 
 ## How a request flows
 
@@ -14,7 +14,7 @@ The new token is cached until shortly before it expires, so a repeat request wit
 
 ## Parts
 
-- The gateway: the reverse proxy that carries out the steps above. It handles host routing, IP allow lists, the exchange cache and header rewriting.
+- The gateway: carries out the steps above. It handles host routing, IP allow lists, the exchange cache and header rewriting.
 - The issuer: the token exchange, also reachable directly as an RFC 8693 token endpoint. It publishes its signing keys (JWKS) and an OIDC discovery document, which services use to validate the tokens it signs.
 
 ## Terms
@@ -24,7 +24,7 @@ The new token is cached until shortly before it expires, so a repeat request wit
 
 ## Features
 
-1. Reverse proxy. A request is routed by its host alone, without port or case, to the route's https downstream. The path and query pass through unchanged, and request and response bodies stream.
+1. Routing. A request is routed by its host alone, without port or case, to the route's https downstream. The path and query pass through unchanged, and request and response bodies stream.
 2. Token exchange. The gateway swaps the caller's bearer token for one Tsong signs.
 3. Exchange cache. A token is exchanged at most once per route host while it stays cached, and concurrent requests share one exchange. An entry expires at the minted token's `exp` less the clock skew, and `max_entries` bounds the cache. Failed exchanges are not kept.
 4. Inbound validation. Tokens are checked against the trusted issuers' JWKS, refetched on an unknown key ID. Every check is mandatory: `iss`, `aud`, `exp`, `nbf`, signature, algorithm and key ID.
@@ -57,7 +57,7 @@ tsong serve <bootstrap.toml>
 - `tsong-keys`: the `SigningKey` trait, the `KeySet` that rotates keys, and the file provider.
 - `tsong-validate`: inbound token validation and JWKS fetching, shared by the issuer and the gateway.
 - `tsong-issuer`: the RFC 8693 token endpoint, JWKS and discovery.
-- `tsong-gateway`: the reverse proxy and the exchange cache.
+- `tsong-gateway`: the API gateway and the exchange cache.
 - `tsong-git`: the Git config store and webhook verification.
 - `tsong`: the command, the reloader, and the admin and webhook listeners.
 
