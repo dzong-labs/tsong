@@ -2,9 +2,10 @@ use std::error::Error;
 use std::path::Path;
 use std::time::Duration;
 
+use sha2::{Digest, Sha256};
 use tsong_config::{
     ANY, Config, ConfigError, ConfigStore, FileStore, InboundAlgorithm, KeyProvider, KeyState,
-    Route, RouteTable, SigningAlgorithm, TrustedIssuer, Validation, Warnings,
+    Route, RouteTable, SigningAlgorithm, TrustedIssuer, Validation, Warnings, hex,
 };
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
@@ -475,8 +476,26 @@ async fn a_file_store_loads_its_file() -> TestResult {
     let path = dir.path().join("tsong.toml");
     std::fs::write(&path, minimal())?;
     let store: Box<dyn ConfigStore> = Box::new(FileStore::new(&path));
-    let config = store.load().await?;
-    assert_eq!(config.issuer.listen.port(), 8444);
+    let snapshot = store.load().await?;
+    assert_eq!(snapshot.config.issuer.listen.port(), 8444);
+    assert_eq!(
+        snapshot.revision,
+        hex(&Sha256::digest(minimal().as_bytes()))
+    );
+    assert_eq!(snapshot.revision.len(), 64);
+    assert_eq!(snapshot.author, None);
+    assert_eq!(
+        snapshot
+            .config
+            .active_key()
+            .and_then(|key| key.path.clone()),
+        Some(dir.path().join("k1.pem"))
+    );
+    std::fs::write(
+        &path,
+        minimal().replace("max_entries = 10", "max_entries = 11"),
+    )?;
+    assert_ne!(store.load().await?.revision, snapshot.revision);
     let missing = FileStore::new(dir.path().join("missing.toml"));
     assert!(matches!(
         missing.load().await,
@@ -825,4 +844,25 @@ fn every_problem_is_reported() {
             "invalid config:\n- issuer.url must be https\n- gateway.cache.max_entries must be above zero\n"
         )
     );
+}
+
+#[test]
+fn relative_key_paths_are_listed_by_kid() -> TestResult {
+    let mut config = Config::from_toml(&minimal())?;
+    assert_eq!(config.relative_key_paths(), ["k1"]);
+    for key in &mut config.issuer.signing.keys {
+        key.path = Some(std::env::temp_dir().join("k1.pem"));
+    }
+    assert!(config.relative_key_paths().is_empty());
+    for key in &mut config.issuer.signing.keys {
+        key.path = None;
+    }
+    assert!(config.relative_key_paths().is_empty());
+    Ok(())
+}
+
+#[test]
+fn hex_is_lowercase_and_two_digits_a_byte() {
+    assert_eq!(hex(&[0x00, 0x0f, 0xa0, 0xff]), "000fa0ff");
+    assert_eq!(hex(&[]), "");
 }

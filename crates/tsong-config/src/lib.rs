@@ -6,6 +6,7 @@
 //! problem listed. Unknown fields are errors: a misspelled security setting
 //! must not fall back to its default.
 
+mod bootstrap;
 mod duration;
 mod lint;
 mod network;
@@ -21,9 +22,12 @@ use ipnet::IpNet;
 use serde::Deserialize;
 use url::Url;
 
+pub use bootstrap::{
+    Admin, Bootstrap, BootstrapError, CONFIG_FILE, GitHost, GitSource, Source, Webhook,
+};
 pub use lint::Warnings;
 pub use network::{allowed, client_ip};
-pub use store::{ConfigStore, FileStore, LoadFuture};
+pub use store::{ConfigStore, FileStore, LoadFuture, Snapshot, hex};
 pub use validate::{Problems, RESERVED_CLAIMS};
 
 /// A whole Tsong configuration.
@@ -201,7 +205,7 @@ pub struct Claims {
 
 /// A host mapped to a downstream service. The upstream is the caller; the
 /// downstream is where the request goes.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Route {
     pub name: String,
@@ -308,6 +312,9 @@ pub enum ConfigError {
     Parse(#[from] toml::de::Error),
     #[error("invalid config:\n{0}")]
     Invalid(Problems),
+    /// The store couldn't produce the config, such as a failed fetch.
+    #[error("{0}")]
+    Store(String),
 }
 
 impl Config {
@@ -325,7 +332,13 @@ impl Config {
             path: path.to_owned(),
             source,
         })?;
-        let mut config = Self::from_toml(&text)?;
+        Self::from_file_text(&text, path)
+    }
+
+    /// Parses and validates the text of the file at `path`, taking
+    /// relative key paths from the file's directory.
+    pub(crate) fn from_file_text(text: &str, path: &Path) -> Result<Self, ConfigError> {
+        let mut config = Self::from_toml(text)?;
         let dir = path.parent().unwrap_or(Path::new(""));
         for key in &mut config.issuer.signing.keys {
             if let Some(key_path) = &mut key.path {
@@ -333,6 +346,19 @@ impl Config {
             }
         }
         Ok(config)
+    }
+
+    /// The kids of signing keys whose file path is relative. A config read
+    /// from somewhere other than a file, such as Git, has no directory to
+    /// resolve them against.
+    pub fn relative_key_paths(&self) -> Vec<&str> {
+        self.issuer
+            .signing
+            .keys
+            .iter()
+            .filter(|key| key.path.as_ref().is_some_and(|path| path.is_relative()))
+            .map(|key| key.kid.as_str())
+            .collect()
     }
 
     /// The active signing key: always one, in a validated config.

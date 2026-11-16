@@ -1,0 +1,78 @@
+---
+title: Config reloads from Git when the watched branch moves
+type: note
+summary: A bootstrap file names the config source; a Git source fetches the branch over SSH with gitoxide, reloads on a webhook or a slow poll, and swaps in fully validated state through a watch channel.
+status: evolving
+created: 2026-11-16
+part-of: "[[roadmap]]"
+---
+
+# Config reloads from Git when the watched branch moves
+
+Tsong reads its config from a Git branch and reloads when the branch moves. A reload builds the whole runtime state from the new commit, validates it, and swaps it in at once. A config that fails validation never replaces the one being served. This is item 7 of the [[roadmap]].
+
+## Bootstrap
+
+Settings that say where the config lives can't live in that config. A bootstrap TOML file, deployed with the app, holds them, and `tsong serve <bootstrap.toml>` reads it.
+
+```toml
+[source]
+store = "git"
+url = "ssh://git@github.com/example/tsong-config.git"
+branch = "main"
+folder = "tsong"                          # the repo folder holding tsong.toml
+checkout = "/var/lib/tsong/config.git"    # a bare clone Tsong keeps
+ssh_key = "/etc/tsong/deploy_key"
+known_hosts = "/etc/tsong/known_hosts"
+poll = "5m"
+
+[admin]
+listen = "0.0.0.0:8445"
+
+[admin.webhook]
+host = "github"                           # or "gitlab"
+secret_env = "TSONG_WEBHOOK_SECRET"
+```
+
+`store = "file"` with `path` reads a config file from disk, relative to the bootstrap file, and never reloads.
+
+## Fetching
+
+`GitStore` implements the `ConfigStore` trait (`crates/tsong-config/src/store.rs`), so another store, such as one using a Git host's file API, can be injected later from the bootstrap file. It uses gitoxide (`gix`):
+
+- It keeps a bare clone at `checkout` and fetches only the watched branch.
+- It reads `tsong.toml` from `folder` in the fetched commit's tree. Nothing is checked out. The folder leaves room for route files split out of `tsong.toml`, roadmap item 15.
+- It authenticates with a read-only deploy key over SSH. gix runs the system `ssh` program with the key, `known_hosts`, `StrictHostKeyChecking=yes` and `IdentitiesOnly=yes`, so the OpenSSH client must be installed.
+
+Every `ConfigStore` returns the config with a revision: the commit ID for Git, a SHA-256 of the file for a file store.
+
+Private keys never live in Git. The config refers to a key by a pointer, a file path today and a secret ARN once item 8 lands. A file key path in a config from Git must be absolute, because a relative path would point into the clone.
+
+## Triggers
+
+- A webhook on its own listener, `admin.listen`, at `POST /hooks/config`. The secret is read from the environment variable `admin.webhook.secret_env` at start; Tsong refuses to start without it. GitHub requests are verified by the HMAC-SHA256 in `X-Hub-Signature-256`, GitLab requests by the shared token in `X-Gitlab-Token`, both compared in constant time. A verified push to the watched branch triggers a fetch and answers 202. Any other verified delivery, such as a ping or a push to another branch, answers 204, and an unverified one 401. The payload's commit ID is not trusted; the fetch decides what changed.
+- A poll every `poll` interval, in case a webhook is missed.
+
+## Reload
+
+1. Fetch. If the branch's commit is the one being served, stop.
+2. Parse and validate the config, load its signing keys, and build new state: route table, issuer, validator, gateway, downstream clients and an empty exchange cache.
+3. On any failure, keep serving the old state and log why.
+4. Otherwise send the new state on a `tokio::sync::watch` channel. Each request takes a snapshot of the state when it starts, so requests in flight finish on the old config.
+
+Rebuilding the state clears the exchange cache, drops cached JWKS, picks up new signing keys and builds clients for new read timeouts.
+
+## Subscribers
+
+Eight things react to a reload. Four are part of the state, so rebuilding it handles them: the exchange cache is cleared, cached JWKS are dropped, new signing keys are loaded, and clients for new read timeouts are built. The reloader (`crates/tsong/src/reload.rs`) handles the other four, because a failed reload produces no new state for a watcher to see:
+
+- The audit log writes one JSON line to stdout for each new revision and each failure: the time, commit, author, outcome, and the routes added, removed and changed, keyed by host. A fetch that finds the revision being served writes nothing. Collecting stdout belongs to the platform.
+- `GET /status` on the admin listener reports the revision being served, its author, when it loaded, the count of reloads and failed reloads, and the last failure.
+- The reload counts in `/status` stand in for metrics until observability, roadmap item 9.
+- A change to `issuer.listen` or `gateway.listen` is named in the audit line's `restart_required`. The old addresses stay bound until a restart.
+
+## Deferred
+
+- HTTPS with a token, as an alternative to the deploy key.
+- A store that reads through a Git host's file API.
+- Signed-commit verification.

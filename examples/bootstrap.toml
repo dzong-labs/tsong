@@ -1,0 +1,30 @@
+# A sample bootstrap file, deployed with Tsong: `tsong serve bootstrap.toml`.
+# It says where the config lives, which the config itself can't say.
+
+# ── config source ─────────────────────────────────────
+# A folder on a Git branch, reloaded when the branch moves. Tsong reads
+# tsong.toml from the folder at the branch's tip.
+[source]
+store = "git"
+url = "ssh://git@github.com/example/tsong-config.git"
+branch = "main"
+folder = "tsong"                          # "" for the repository's root
+checkout = "/var/lib/tsong/config.git"    # the bare clone Tsong keeps
+ssh_key = "/etc/tsong/deploy_key"         # a read-only deploy key
+known_hosts = "/etc/tsong/known_hosts"    # the only host keys SSH accepts
+poll = "5m"                               # fetch this often when no webhook arrives
+
+# Or a file on disk, relative to this file, read once:
+# [source]
+# store = "file"
+# path = "tsong.toml"
+
+# ── admin listener ────────────────────────────────────
+# GET /status, and the push webhook at POST /hooks/config. Keep it off the
+# public network: only the Git host needs to reach it.
+[admin]
+listen = "0.0.0.0:8445"
+
+[admin.webhook]
+host = "github"                           # or "gitlab"
+secret_env = "TSONG_WEBHOOK_SECRET"       # the variable holding the webhook secret
