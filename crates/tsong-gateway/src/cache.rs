@@ -16,7 +16,7 @@ use crate::Exchanger;
 
 /// An inbound token's SHA-256 and the route host it was exchanged for.
 /// The cache never holds an inbound token in the clear.
-type Key = (Vec<u8>, String);
+type Key = ([u8; 32], String);
 
 /// An exchanged token and how long the cache keeps it.
 #[derive(Clone)]
@@ -65,7 +65,7 @@ impl ExchangeCache {
     /// The token `inbound` exchanges for at `host`, from the cache or a
     /// new exchange.
     pub async fn token(&self, inbound: &str, host: &str) -> Result<Arc<str>, Arc<ExchangeError>> {
-        let key = (Sha256::digest(inbound.as_bytes()).to_vec(), host.to_owned());
+        let key = (Sha256::digest(inbound.as_bytes()).into(), host.to_owned());
         let minted = self
             .cache
             .try_get_with(key, async {

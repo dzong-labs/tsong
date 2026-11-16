@@ -105,6 +105,7 @@ async fn a_trusted_proxy_chain_is_kept() -> TestResult {
             .header("authorization", "Bearer alice")
             .header("x-forwarded-for", "192.0.2.1, 10.1.9.9")
             .header("x-forwarded-proto", "https")
+            .header("x-forwarded-host", "public.example.com")
             .body(Body::empty())?,
     )?;
     let answer = send(&h, request).await?;
@@ -114,6 +115,30 @@ async fn a_trusted_proxy_chain_is_kept() -> TestResult {
         "192.0.2.1, 10.1.9.9, 10.0.0.5"
     );
     assert_eq!(answer.received_one("x-forwarded-proto")?, "https");
+    assert_eq!(
+        answer.received_one("x-forwarded-host")?,
+        "public.example.com"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn unreadable_hops_left_of_the_client_pass_through() -> TestResult {
+    let h = harness().await?;
+    let request = from(
+        "10.0.0.5:4000",
+        Request::get("/")
+            .header("host", "builds.test")
+            .header("authorization", "Bearer alice")
+            .header(
+                "x-forwarded-for",
+                axum::http::HeaderValue::from_bytes(b"caf\xe9, unknown")?,
+            )
+            .header("x-forwarded-for", "10.1.9.9")
+            .body(Body::empty())?,
+    )?;
+    let answer = send(&h, request).await?;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
     Ok(())
 }
 
@@ -238,12 +263,12 @@ async fn exchange_failures_map_to_statuses() -> TestResult {
         (
             "unavailable",
             StatusCode::SERVICE_UNAVAILABLE,
-            "jwks down\n",
+            "token exchange is unavailable\n",
         ),
         (
             "broken",
             StatusCode::INTERNAL_SERVER_ERROR,
-            "signing failed\n",
+            "token exchange failed\n",
         ),
     ] {
         let answer = send(&h, get("orders.test", "/", Some(token))?).await?;

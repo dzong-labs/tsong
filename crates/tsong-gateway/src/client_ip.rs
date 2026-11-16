@@ -9,8 +9,8 @@ use ipnet::IpNet;
 /// The client's address. It is the connection's peer, unless the peer is
 /// a trusted proxy: then `X-Forwarded-For` is read from the right, each hop
 /// believed while the address before it is a trusted proxy, and the first
-/// address that isn't one is the client. `None` when a hop that must be
-/// believed isn't an IP address.
+/// address that isn't one is the client. Hops left of the client are never
+/// read. `None` when a hop that must be believed isn't an IP address.
 pub fn client_ip(
     peer: IpAddr,
     forwarded_for: GetAll<'_, HeaderValue>,
@@ -21,15 +21,13 @@ pub fn client_ip(
     if !trusted(&client) {
         return Some(client);
     }
-    let mut hops = Vec::new();
-    for value in forwarded_for {
-        hops.extend(value.to_str().ok()?.split(',').map(str::trim));
-    }
-    for hop in hops.into_iter().rev() {
-        if !trusted(&client) {
-            break;
+    for value in forwarded_for.iter().rev() {
+        for hop in value.to_str().ok()?.rsplit(',') {
+            client = hop.trim().parse::<IpAddr>().ok()?.to_canonical();
+            if !trusted(&client) {
+                return Some(client);
+            }
         }
-        client = hop.parse::<IpAddr>().ok()?.to_canonical();
     }
     Some(client)
 }

@@ -33,7 +33,8 @@ const HOP_BY_HOP: [&str; 9] = [
     "upgrade",
 ];
 
-/// Headers the gateway sets itself, so the inbound values never pass.
+/// Headers the gateway sets or strips itself, so the inbound values never
+/// pass. `Forwarded` is stripped and not set.
 const REPLACED: [&str; 6] = [
     "host",
     "authorization",
@@ -115,17 +116,15 @@ fn outbound_headers(
     headers.insert(header::AUTHORIZATION, authorization);
 
     // A trusted proxy's chain is kept; anyone else's could be forged.
-    let mut chain = Vec::new();
+    let mut chain: Vec<u8> = Vec::new();
     if trusted_peer {
         for value in inbound.get_all(X_FORWARDED_FOR) {
-            chain.push(value.to_str().ok()?.to_owned());
+            chain.extend_from_slice(value.as_bytes());
+            chain.extend_from_slice(b", ");
         }
     }
-    chain.push(peer.to_string());
-    headers.insert(
-        X_FORWARDED_FOR,
-        HeaderValue::from_str(&chain.join(", ")).ok()?,
-    );
+    chain.extend_from_slice(peer.to_string().as_bytes());
+    headers.insert(X_FORWARDED_FOR, HeaderValue::from_bytes(&chain).ok()?);
 
     let proto = match inbound.get(X_FORWARDED_PROTO) {
         Some(proto) if trusted_peer => proto.clone(),
@@ -133,9 +132,10 @@ fn outbound_headers(
     };
     headers.insert(X_FORWARDED_PROTO, proto);
 
-    let host = match request.uri().authority() {
-        Some(authority) => HeaderValue::from_str(authority.as_str()).ok(),
-        None => inbound.get(header::HOST).cloned(),
+    let host = match (inbound.get(X_FORWARDED_HOST), request.uri().authority()) {
+        (Some(host), _) if trusted_peer => Some(host.clone()),
+        (_, Some(authority)) => HeaderValue::from_str(authority.as_str()).ok(),
+        (_, None) => inbound.get(header::HOST).cloned(),
     };
     if let Some(host) = host {
         headers.insert(X_FORWARDED_HOST, host);

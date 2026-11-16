@@ -69,6 +69,23 @@ fn a_chain_of_trusted_proxies_ends_at_the_last_one() -> TestResult {
 }
 
 #[test]
+fn hops_left_of_the_client_are_never_read() -> TestResult {
+    let mut headers = HeaderMap::new();
+    headers.append(
+        "x-forwarded-for",
+        axum::http::HeaderValue::from_bytes(b"\xff")?,
+    );
+    headers.append("x-forwarded-for", "unknown, 192.0.2.1".parse()?);
+    let trusted = nets(&["10.0.0.0/24"])?;
+    let peer: IpAddr = "10.0.0.5".parse()?;
+    assert_eq!(
+        client_ip(peer, headers.get_all("x-forwarded-for"), &trusted),
+        ip("192.0.2.1")?
+    );
+    Ok(())
+}
+
+#[test]
 fn a_hop_that_must_be_believed_must_be_an_address() -> TestResult {
     assert_eq!(client("10.0.0.5", &["192.0.2.1, garbage"])?, None);
     assert_eq!(client("10.0.0.5", &["192.0.2.1:443"])?, None);

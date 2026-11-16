@@ -142,9 +142,14 @@ fn exchange_failure(error: &ExchangeError) -> Response {
         ExchangeError::InvalidTarget(_) | ExchangeError::InvalidScope(_) => {
             refuse(StatusCode::FORBIDDEN, &message)
         }
-        ExchangeError::Unavailable(_) => refuse(StatusCode::SERVICE_UNAVAILABLE, &message),
+        // Outages and internal failures carry detail about keys and
+        // issuers, which callers don't need.
+        ExchangeError::Unavailable(_) => refuse(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "token exchange is unavailable",
+        ),
         ExchangeError::Server(_) | ExchangeError::UnsupportedGrantType => {
-            refuse(StatusCode::INTERNAL_SERVER_ERROR, &message)
+            refuse(StatusCode::INTERNAL_SERVER_ERROR, "token exchange failed")
         }
     }
 }

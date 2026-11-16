@@ -82,7 +82,8 @@ The cache is read-through. A miss exchanges the token and stores the result, and
 - The `Authorization` header is replaced with the minted token. The inbound token is never forwarded.
 - Hop-by-hop headers are stripped, as RFC 9110 section 7.6.1 requires of an intermediary.
 - The gateway sends `X-Forwarded-*`, which load balancers and downstream frameworks read by default. It strips any inbound `Forwarded` header (RFC 7239), so a downstream never trusts a value the gateway didn't check.
-- `Host` is set to the downstream's host. `X-Forwarded-Host` carries the original host. `X-Forwarded-For` and `X-Forwarded-Proto` are set.
+- `Host` is set to the downstream's host. `X-Forwarded-Host` carries the original host. `X-Forwarded-For` and `X-Forwarded-Proto` are set. A trusted proxy's `X-Forwarded-For` chain, `X-Forwarded-Proto` and `X-Forwarded-Host` are kept; anyone else's are replaced.
+- Hops left of the client in `X-Forwarded-For` are never read, so an unparsable entry there doesn't fail the request.
 - Request and response bodies stream through a `reqwest` client. A request body known to be empty is not sent. The client follows no redirects and uses no proxy.
 
 The gateway fails closed:
@@ -95,8 +96,8 @@ The gateway fails closed:
 | Missing or malformed bearer token | 401 with `WWW-Authenticate: Bearer` |
 | Inbound token invalid | 401 with `WWW-Authenticate: Bearer` |
 | Audience or scope not allowed for the route | 403 |
-| Issuer or inbound JWKS unavailable | 503 |
-| Exchange failed inside the issuer, such as signing | 500 |
+| Issuer or inbound JWKS unavailable | 503, without the cause |
+| Exchange failed inside the issuer, such as signing | 500, without the cause |
 | Downstream unreachable | 502 |
 
 ## Config lint
