@@ -1,0 +1,36 @@
+# A bootstrap file for running Tsong in local podman: `deploy/podman/run.sh`.
+# It is a stub: it reads the config from a file mounted beside it, and
+# allows health checks from anywhere, which only suits a local machine.
+
+# ── config source ─────────────────────────────────────
+# tsong.toml, mounted beside this file at /etc/tsong. A file is read once.
+[source]
+store = "file"
+path = "tsong.toml"
+
+# For a Git source, mount the deploy key and known_hosts read-only at
+# /etc/tsong/ssh and keep the clone in /var/lib/tsong, the image's one
+# writable path:
+# [source]
+# store = "git"
+# url = "ssh://git@github.com/example/tsong-config.git"
+# branch = "main"
+# folder = "tsong"
+# checkout = "/var/lib/tsong/config.git"
+# ssh_key = "/etc/tsong/ssh/deploy_key"
+# known_hosts = "/etc/tsong/ssh/known_hosts"
+# poll = "5m"
+
+# ── admin listener ────────────────────────────────────
+# GET /status and GET /metrics, for clients in the config's gateway.allow.
+[admin]
+listen = "0.0.0.0:8445"
+
+# ── health listener ───────────────────────────────────
+# GET /health/live and GET /health/ready. Podman's port forwarding hides
+# the caller's address, so locally the allow list is open; in a real
+# deployment it names the load balancer's subnets.
+[health]
+listen = "0.0.0.0:8447"
+allow = ["0.0.0.0/0", "::/0"]
+drain = "5s"    # readiness fails this long on shutdown before the listeners close

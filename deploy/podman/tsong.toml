@@ -1,0 +1,46 @@
+# A stub config for running Tsong in local podman. It starts and serves
+# its discovery document and JWKS, but trusts no issuer and has no route
+# yet, so the gateway answers every request with 404. Fill in the
+# commented sections to exchange real tokens.
+
+[issuer]
+url = "https://tsong.localhost"
+listen = "0.0.0.0:8444"
+token_lifetime = "15m"
+clock_skew = "30s"
+
+[issuer.signing]
+provider = "file"
+algorithm = "ES256"
+
+# run.sh generates this key into deploy/podman/keys, which Git ignores,
+# and mounts it read-only.
+[[issuer.signing.keys]]
+kid = "local-1"
+path = "/etc/tsong/keys/signing.pem"
+state = "active"
+
+[gateway]
+listen = "0.0.0.0:8443"
+# Podman's port forwarding hides the caller's address, so locally every
+# client is allowed. `tsong check` warns about this; a real deployment
+# lists its clients' networks.
+allow = ["0.0.0.0/0", "::/0"]
+
+[gateway.cache]
+max_entries = 10_000
+
+# ── a trusted issuer ──────────────────────────────────
+# [trusted_issuers.local]
+# sub_prefix = "local"
+# issuer = "https://idp.example.com"
+# audiences = ["tsong"]
+# algorithms = ["RS256"]
+
+# ── a route ───────────────────────────────────────────
+# [[routes]]
+# name = "orders"
+# host = "orders.localhost"
+# downstream = "https://orders.example.com:8443"
+# allowed_audiences = ["tsong"]
+# allowed_scopes = ["orders.read"]

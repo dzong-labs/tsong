@@ -377,3 +377,17 @@ fn health_checks_have_their_own_listener_and_allow_list() -> TestResult {
     assert!(parse_error(&unknown)?.contains("path"));
     Ok(())
 }
+
+#[test]
+fn the_drain_defaults_to_five_seconds_and_may_be_zero() -> TestResult {
+    let text =
+        format!("{GIT}\n[health]\nlisten = \"127.0.0.1:8447\"\nallow = [\"10.20.0.0/16\"]\n");
+    let health = Bootstrap::from_toml(&text)?.health.ok_or("no health")?;
+    assert_eq!(health.drain, std::time::Duration::from_secs(5));
+    for (drain, seconds) in [("30s", 30), ("0s", 0)] {
+        let set = text.replace("[health]", &format!("[health]\ndrain = \"{drain}\""));
+        let health = Bootstrap::from_toml(&set)?.health.ok_or("no health")?;
+        assert_eq!(health.drain, std::time::Duration::from_secs(seconds));
+    }
+    Ok(())
+}

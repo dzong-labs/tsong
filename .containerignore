@@ -1,0 +1,8 @@
+# Kept out of the image's build context.
+.git
+target
+mutants.out*
+deploy/podman/keys
+deploy/podman/ssh
+**/*.secret
+tmp

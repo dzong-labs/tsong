@@ -33,4 +33,4 @@ tsong-clock = { workspace = true, features = ["test-util"] }
 tsong-validate = { workspace = true, features = ["test-util"] }
 reqwest.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread", "sync", "time"] }

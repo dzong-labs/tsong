@@ -175,8 +175,20 @@ pub async fn serve_until(
     let stopped = |mut stopping: watch::Receiver<bool>| async move {
         let _ = stopping.wait_for(|stop| *stop).await;
     };
+    // On shutdown, readiness goes first, so the load balancer drains
+    // Tsong before its listeners close. A second Ctrl+C or SIGTERM ends
+    // the drain at once.
+    let drain = bootstrap
+        .health
+        .as_ref()
+        .map_or(Duration::ZERO, |health| health.drain);
     let signal = async move {
         shutdown.await;
+        ready.store(false, Ordering::Release);
+        tokio::select! {
+            () = tokio::time::sleep(drain) => {}
+            () = shutdown_signal() => {}
+        }
         let _ = stop.send(true);
         Ok::<(), std::io::Error>(())
     };
@@ -271,10 +283,30 @@ pub async fn reload_loop(
     }
 }
 
-/// Completes on Ctrl+C. If the signal can't be watched, it never
-/// completes, and the process is stopped some other way.
+/// Completes on Ctrl+C, or on SIGTERM, which container runtimes send to
+/// stop a container. A signal that can't be watched never completes it.
 async fn shutdown_signal() {
-    if tokio::signal::ctrl_c().await.is_err() {
-        std::future::pending::<()>().await;
+    let interrupt = async {
+        if tokio::signal::ctrl_c().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    };
+    tokio::select! {
+        () = interrupt => {}
+        () = terminate() => {}
     }
+}
+
+/// Completes on SIGTERM. Where there is no SIGTERM, or it can't be
+/// watched, it never completes.
+async fn terminate() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        if let Ok(mut terminate) = signal(SignalKind::terminate()) {
+            terminate.recv().await;
+            return;
+        }
+    }
+    std::future::pending::<()>().await;
 }

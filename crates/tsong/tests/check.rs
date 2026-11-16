@@ -213,6 +213,33 @@ async fn serve_keeps_running_until_signalled() -> TestResult {
     Ok(())
 }
 
+/// Container runtimes stop a container with SIGTERM: the binary stops
+/// serving and exits cleanly.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn sigterm_stops_the_server() -> TestResult {
+    let port = free_port()?;
+    let dir = tempfile::tempdir()?;
+    let path = write_config(dir.path(), port, true)?;
+    let child = tokio::process::Command::new(env!("CARGO_BIN_EXE_tsong"))
+        .args(args("serve", &boot(&path)))
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()?;
+    discovery(port).await?;
+    let pid = child.id().ok_or("the server already exited")?;
+    let killed = std::process::Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .status()?;
+    assert!(killed.success());
+    let output = tokio::time::timeout(Duration::from_secs(10), child.wait_with_output()).await??;
+    assert!(output.status.success(), "{output:?}");
+    // Audit lines come first on stdout; the last line is the report.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.lines().last(), Some("stopped"), "{stdout}");
+    Ok(())
+}
+
 /// The gateway's answer on `port` for a host with no route, once it
 /// answers.
 async fn gateway_status(port: u16) -> TestResult<u16> {

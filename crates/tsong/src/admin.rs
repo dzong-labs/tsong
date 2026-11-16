@@ -60,8 +60,8 @@ async fn metrics_handler(State(admin): State<Arc<Admin>>) -> Response {
 }
 
 /// `GET /health/live`, which answers 200 while the process runs, and
-/// `GET /health/ready`, which answers 200 once `ready` is set and 503
-/// until then.
+/// `GET /health/ready`, which answers 200 while `ready` is set: once the
+/// listeners are bound, until shutdown begins. Otherwise it answers 503.
 pub fn health_router(ready: Arc<AtomicBool>) -> Router {
     Router::new()
         .route(
@@ -76,7 +76,7 @@ async fn readiness(State(ready): State<Arc<AtomicBool>>) -> Response {
     if ready.load(Ordering::Acquire) {
         axum::Json(json!({ "ready": true })).into_response()
     } else {
-        let body = json!({ "ready": false, "missing": ["listeners_bound"] });
+        let body = json!({ "ready": false });
         (StatusCode::SERVICE_UNAVAILABLE, axum::Json(body)).into_response()
     }
 }

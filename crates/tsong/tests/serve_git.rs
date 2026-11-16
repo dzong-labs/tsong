@@ -147,6 +147,7 @@ async fn serve_reloads_when_the_branch_moves() -> TestResult {
 [health]
 listen = \"127.0.0.1:{health}\"
 allow = [\"127.0.0.0/8\"]
+drain = \"3s\"
 "
     );
     let (stop, server) = serve(origin.bootstrap("50ms", admin, &checks)?);
@@ -182,7 +183,25 @@ allow = [\"127.0.0.0/8\"]
         Some("https://two.test")
     );
 
+    // On shutdown, readiness fails while the listeners stay open to drain.
     stop.send(()).map_err(|()| "the server stopped early")?;
+    let ready = format!("http://127.0.0.1:{health}/health/ready");
+    let mut status = None;
+    for _ in 0..50 {
+        status = reqwest::get(&ready)
+            .await
+            .ok()
+            .map(|response| response.status().as_u16());
+        if status != Some(200) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(status, Some(503), "readiness should fail while draining");
+    assert!(
+        !server.is_finished(),
+        "the listeners closed before the drain"
+    );
     tokio::time::timeout(Duration::from_secs(10), server).await???;
     Ok(())
 }
