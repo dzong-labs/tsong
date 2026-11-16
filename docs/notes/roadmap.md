@@ -18,7 +18,7 @@ Done means built, tested above the 95% line-coverage floor, and merged. Until so
 6. Exchange cache: a read-through cache keyed on a hash of the inbound token plus the route host, expiring at the minted token's `exp` minus the clock skew, bounded by `gateway.cache.max_entries`. Planned in [[gateway-plan]] and built with item 5. (done)
 7. Config from Git: a bootstrap file names the config source; `GitStore` fetches the branch over SSH and reloads on a webhook or a poll, swapping in fully validated state and keeping the last good config when a new one fails. Planned in [[config-from-git]] (done).
 8. Cloud signing keys: AWS KMS, AWS Secrets Manager, Azure Key Vault and HSM providers behind the `SigningKey` trait (`crates/tsong-keys/src/lib.rs`), alongside the file provider. The config refers to a key by a pointer, such as a path or an ARN, never by its contents.
-9. Observability: an audit log of every exchange that records the issuer and the outcome but never token contents, plus metrics, tracing, and health and readiness endpoints.
+9. Observability: liveness and readiness on their own listener, Prometheus metrics, one audit line per token exchange, and request correlation by `X-Request-Id` and `traceparent`. Planned in [[observability]] (done).
 10. Hooks: pre-exchange and post-exchange plugins, sandboxed in WebAssembly.
 11. Rauthy integration test: exchange a token from a real issuer, Rauthy in podman, in addition to the in-process fake issuer the tests use now.
 12. Issuer behind a path: the router serves `/token`, `/jwks.json` and `/.well-known/openid-configuration` at the root. For an `issuer.url` with a path, such as `https://example.com/tsong`, the discovery document names endpoints under that path. The router doesn't serve them there yet.
@@ -31,3 +31,4 @@ Done means built, tested above the 95% line-coverage floor, and merged. Until so
 19. Git over HTTPS: fetch the config with a token, as an alternative to the SSH deploy key. Until then only ssh urls and local paths are accepted.
 20. Git host file API: a `ConfigStore` that reads the config through a Git host's API instead of a clone, chosen in the bootstrap file.
 21. Signed commits: refuse a config whose commit isn't signed by a trusted key.
+22. Tracing export: record the gateway's and the issuer's spans and export them through OpenTelemetry. Until then trace context is propagated but no spans are recorded.

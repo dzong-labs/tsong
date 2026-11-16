@@ -22,6 +22,19 @@ pub struct Bootstrap {
     /// The Git host's push webhook, on its own listener. Unset, only
     /// polling reloads.
     pub webhook: Option<Webhook>,
+    /// The liveness and readiness checks, on their own listener. Unset,
+    /// there is none.
+    pub health: Option<Health>,
+}
+
+/// The health-check listener, for the load balancer in front of Tsong.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Health {
+    pub listen: SocketAddr,
+    /// The addresses health checks come from. Each connection's peer
+    /// address must be in it; no `X-Forwarded-For` is read.
+    pub allow: Vec<IpNet>,
 }
 
 /// Where the config comes from.
@@ -221,6 +234,13 @@ impl Bootstrap {
             if poll.is_zero() {
                 problems.push("source.poll must be above zero".into());
             }
+        }
+        if self
+            .health
+            .as_ref()
+            .is_some_and(|health| health.allow.is_empty())
+        {
+            problems.push("health.allow is empty, so no health check can arrive".into());
         }
         if let Some(webhook) = &self.webhook {
             if !matches!(self.source, Source::Git(_)) {

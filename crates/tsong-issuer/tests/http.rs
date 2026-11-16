@@ -221,3 +221,25 @@ async fn the_token_endpoint_finds_the_client_through_trusted_proxies() -> TestRe
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn the_token_endpoint_observes_the_request_context() -> TestResult {
+    let h = harness()?;
+    let traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    let mut request = exchange_form(&h, "orders.test")?;
+    request
+        .headers_mut()
+        .insert("x-request-id", "req-42".parse()?);
+    request
+        .headers_mut()
+        .insert("traceparent", traceparent.parse()?);
+    let (status, _, _) = send(&h, request).await?;
+    assert_eq!(status, StatusCode::OK);
+    let event = h.events.last()?;
+    assert_eq!(event.context.request_id.as_deref(), Some("req-42"));
+    assert_eq!(
+        event.context.trace_id.as_deref(),
+        Some("4bf92f3577b34da6a3ce929d0e0e4736")
+    );
+    Ok(())
+}

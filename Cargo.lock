@@ -461,6 +461,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dtoa"
+version = "1.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c3cf4824e2d5f025c7b531afcb2325364084a16806f6d47fbc1f5fbd9960590"
+
+[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2298,6 +2304,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "prometheus-client"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f021d42d29841d029b61b45a25a7ef94feaf1d744913e59665103333a56045b8"
+dependencies = [
+ "dtoa",
+ "itoa",
+ "parking_lot",
+ "prometheus-client-derive-encode",
+]
+
+[[package]]
+name = "prometheus-client-derive-encode"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01e34894696ff94f64a20c2c373a6440903e9c2789a303d68ec6e6f953f890e4"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
+]
+
+[[package]]
 name = "quinn"
 version = "0.11.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3154,6 +3183,7 @@ dependencies = [
  "hmac",
  "http-body-util",
  "ipnet",
+ "prometheus-client",
  "reqwest",
  "serde",
  "serde_json",
@@ -3200,9 +3230,11 @@ dependencies = [
  "axum",
  "base64",
  "futures-util",
+ "getrandom 0.4.3",
  "http-body-util",
  "ipnet",
  "moka",
+ "prometheus-client",
  "reqwest",
  "serde_json",
  "sha2",

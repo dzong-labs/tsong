@@ -17,6 +17,8 @@ use tsong_keys::KeySet;
 use tsong_validate::{HttpFetcher, Validator};
 
 use crate::Error;
+use crate::reload::{Audit, Lines};
+use crate::telemetry::{CountingFetcher, ExchangeAudit, Metrics};
 
 /// Everything built from one config: its signing keys, JWKS cache, route
 /// table, exchange cache and downstream clients, behind the issuer's and
@@ -34,13 +36,38 @@ pub struct State {
 }
 
 impl State {
-    /// Builds the state for `snapshot`, loading its signing keys.
+    /// Builds the state for `snapshot`, loading its signing keys, with
+    /// metrics of its own and no exchange audit.
     pub fn build(snapshot: Snapshot, clock: Arc<dyn Clock>) -> Result<Self, Error> {
+        let quiet: Arc<dyn Audit> = Arc::new(Lines::new(std::io::sink()));
+        Self::build_with(snapshot, clock, &Metrics::default(), quiet)
+    }
+
+    /// Builds the state for `snapshot`, loading its signing keys. It counts
+    /// into `metrics` and audits each exchange to `audit`.
+    pub fn build_with(
+        snapshot: Snapshot,
+        clock: Arc<dyn Clock>,
+        metrics: &Metrics,
+        audit: Arc<dyn Audit>,
+    ) -> Result<Self, Error> {
         let config = Arc::new(snapshot.config);
         let keys = KeySet::from_config(&config.issuer.signing)?;
-        let validator = Validator::new(&config, Arc::new(HttpFetcher::default()), clock.clone());
-        let issuer = Arc::new(Issuer::new(config.clone(), keys, validator, clock.clone()));
-        let gateway = Arc::new(Gateway::new(&config, issuer.clone(), clock)?);
+        let fetcher = CountingFetcher {
+            inner: HttpFetcher::default(),
+            failures: metrics.jwks_failures.clone(),
+        };
+        let validator = Validator::new(&config, Arc::new(fetcher), clock.clone());
+        let observer = ExchangeAudit {
+            audit,
+            exchanges: metrics.exchanges.clone(),
+            clock: clock.clone(),
+        };
+        let issuer = Issuer::new(config.clone(), keys, validator, clock.clone())
+            .with_observer(Arc::new(observer));
+        let issuer = Arc::new(issuer);
+        let gateway = Gateway::new(&config, issuer.clone(), clock, metrics.gateway.clone())?;
+        let gateway = Arc::new(gateway);
         Ok(Self {
             revision: snapshot.revision,
             content: snapshot.content,
