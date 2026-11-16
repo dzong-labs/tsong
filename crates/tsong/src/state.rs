@@ -14,11 +14,11 @@ use tsong_config::{Config, Snapshot};
 use tsong_gateway::Gateway;
 use tsong_issuer::Issuer;
 use tsong_keys::KeySet;
-use tsong_validate::{HttpFetcher, Validator};
+use tsong_validate::{HttpFetcher, JwksFetcher, Validator};
 
 use crate::Error;
 use crate::reload::{Audit, Lines};
-use crate::telemetry::{CountingFetcher, ExchangeAudit, Metrics};
+use crate::telemetry::{ExchangeAudit, Metrics, REFRESH_TICK, Refresher};
 
 /// Everything built from one config: its signing keys, JWKS cache, route
 /// table, exchange cache and downstream clients, behind the issuer's and
@@ -33,31 +33,45 @@ pub struct State {
     pub config: Arc<Config>,
     pub issuer: Router,
     pub gateway: Router,
+    /// Keeps the trusted issuers' keys current while this state lives;
+    /// `None` for a state built without one.
+    _refresher: Option<Refresher>,
 }
 
 impl State {
     /// Builds the state for `snapshot`, loading its signing keys, with
-    /// metrics of its own and no exchange audit.
+    /// metrics of its own, no exchange audit, and no background key
+    /// refresh: keys are fetched over HTTP when a token needs them.
     pub fn build(snapshot: Snapshot, clock: Arc<dyn Clock>) -> Result<Self, Error> {
         let quiet: Arc<dyn Audit> = Arc::new(Lines::new(std::io::sink()));
-        Self::build_with(snapshot, clock, &Metrics::default(), quiet)
+        let fetcher: Arc<dyn JwksFetcher> = Arc::new(HttpFetcher::default());
+        Self::assemble(snapshot, clock, &Metrics::default(), quiet, fetcher, false)
     }
 
     /// Builds the state for `snapshot`, loading its signing keys. It counts
-    /// into `metrics` and audits each exchange to `audit`.
+    /// into `metrics`, audits each exchange to `audit`, fetches keys with
+    /// `fetcher`, and renews them in the background while it lives.
     pub fn build_with(
         snapshot: Snapshot,
         clock: Arc<dyn Clock>,
         metrics: &Metrics,
         audit: Arc<dyn Audit>,
+        fetcher: Arc<dyn JwksFetcher>,
+    ) -> Result<Self, Error> {
+        Self::assemble(snapshot, clock, metrics, audit, fetcher, true)
+    }
+
+    fn assemble(
+        snapshot: Snapshot,
+        clock: Arc<dyn Clock>,
+        metrics: &Metrics,
+        audit: Arc<dyn Audit>,
+        fetcher: Arc<dyn JwksFetcher>,
+        refresh: bool,
     ) -> Result<Self, Error> {
         let config = Arc::new(snapshot.config);
         let keys = KeySet::from_config(&config.issuer.signing)?;
-        let fetcher = CountingFetcher {
-            inner: HttpFetcher::default(),
-            failures: metrics.jwks_failures.clone(),
-        };
-        let validator = Validator::new(&config, Arc::new(fetcher), clock.clone());
+        let validator = Validator::new(&config, fetcher, clock.clone());
         let observer = ExchangeAudit {
             audit,
             exchanges: metrics.exchanges.clone(),
@@ -66,6 +80,9 @@ impl State {
         let issuer = Issuer::new(config.clone(), keys, validator, clock.clone())
             .with_observer(Arc::new(observer));
         let issuer = Arc::new(issuer);
+        let refresher = refresh
+            .then(|| Refresher::spawn(issuer.clone(), metrics.jwks_age.clone(), REFRESH_TICK))
+            .flatten();
         let gateway = Gateway::new(&config, issuer.clone(), clock, metrics.gateway.clone())?;
         let gateway = Arc::new(gateway);
         Ok(Self {
@@ -75,6 +92,7 @@ impl State {
             config,
             issuer: tsong_issuer::router(issuer),
             gateway: tsong_gateway::router(gateway),
+            _refresher: refresher,
         })
     }
 }

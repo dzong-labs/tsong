@@ -25,11 +25,12 @@ use tsong_config::{
 use tsong_gateway::GatewayError;
 use tsong_git::GitStore;
 use tsong_keys::{KeyError, KeySet};
+use tsong_validate::{HttpFetcher, JwksFetcher};
 
 use crate::admin::Hook;
 use crate::reload::{Audit, Lines, Reloader};
 use crate::state::State;
-use crate::telemetry::Metrics;
+use crate::telemetry::{Metrics, ObservedFetcher};
 
 /// How to run the command.
 pub const USAGE: &str =
@@ -105,16 +106,26 @@ pub async fn serve_until(
     let (store, poll) = store(&bootstrap.source);
     let metrics = Arc::new(Metrics::default());
     let audit: Arc<dyn Audit> = Arc::new(Lines::new(std::io::stdout()));
+    let fetcher: Arc<dyn JwksFetcher> = Arc::new(ObservedFetcher::new(
+        HttpFetcher::default(),
+        metrics.jwks_failures.clone(),
+        audit.clone(),
+        clock.clone(),
+    ));
     let first = State::build_with(
         store.load().await?.parse()?,
         clock.clone(),
         &metrics,
         audit.clone(),
+        fetcher.clone(),
     )?;
     let issuer_address = first.config.issuer.listen;
     let gateway_address = first.config.gateway.listen;
-    let reloader =
-        Arc::new(Reloader::new(store, first, audit, clock).with_metrics(metrics.clone()));
+    let reloader = Arc::new(
+        Reloader::new(store, first, audit, clock)
+            .with_metrics(metrics.clone())
+            .with_fetcher(fetcher),
+    );
     let trigger = Arc::new(Notify::new());
     let admin = match &bootstrap.admin {
         Some(admin) => {

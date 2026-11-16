@@ -119,6 +119,12 @@ fn with(changes: Value) -> TestResult<Value> {
     changed(claims(), changes)
 }
 
+/// The test claims, expiring after a day: past any key expiry the tests
+/// wait for.
+fn lasting() -> TestResult<Value> {
+    with(json!({ "exp": NOW + 86_400 }))
+}
+
 /// Why `token` was refused, or a test failure when it was accepted.
 async fn refused(harness: &Harness, token: &str) -> TestResult<ValidateError> {
     match harness.validator.validate(token).await {
@@ -303,8 +309,162 @@ async fn a_failed_fetch_fails_closed_and_is_retried() -> TestResult {
         "fetching the issuer's JWKS: discovery document: down"
     );
     h.fetcher.fail(false);
+    h.clock.advance(Duration::from_secs(9));
+    assert!(matches!(
+        refused(&h, &token).await?,
+        ValidateError::KeysExpired
+    ));
+    assert_eq!(h.fetcher.fetches(), 1, "retried too soon");
+    h.clock.advance(Duration::from_secs(1));
     h.validator.validate(&token).await?;
     assert_eq!(h.fetcher.fetches(), 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn keys_expire_and_a_withdrawn_key_is_refused() -> TestResult {
+    let h = harness()?;
+    let token = h.key.sign(&lasting()?)?;
+    h.validator.validate(&token).await?;
+
+    // The issuer withdraws k1; until the keys expire it stays trusted.
+    let replacement = TestKey::new("k2", 2)?;
+    h.fetcher.set_keys(vec![replacement.jwk()]);
+    h.clock.advance(Duration::from_secs(3599));
+    h.validator.validate(&token).await?;
+    assert_eq!(h.fetcher.fetches(), 1);
+
+    h.clock.advance(Duration::from_secs(1));
+    let error = refused(&h, &token).await?;
+    assert!(
+        matches!(&error, ValidateError::UnknownKey(kid) if kid == "k1"),
+        "{error:?}"
+    );
+    assert_eq!(h.fetcher.fetches(), 2);
+    h.validator
+        .validate(&replacement.sign(&lasting()?)?)
+        .await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn expired_keys_that_cannot_be_refetched_fail_closed_until_a_retry_succeeds() -> TestResult {
+    let h = harness()?;
+    let token = h.key.sign(&lasting()?)?;
+    h.validator.validate(&token).await?;
+    h.fetcher.fail(true);
+    h.clock.advance(Duration::from_secs(3600));
+    assert!(matches!(refused(&h, &token).await?, ValidateError::Jwks(_)));
+    assert!(matches!(
+        refused(&h, &token).await?,
+        ValidateError::KeysExpired
+    ));
+    assert_eq!(
+        ValidateError::KeysExpired.to_string(),
+        "the issuer's keys are missing or expired, and no fetch has succeeded since"
+    );
+    h.clock.advance(Duration::from_secs(10));
+    assert!(matches!(refused(&h, &token).await?, ValidateError::Jwks(_)));
+    assert_eq!(h.fetcher.fetches(), 3);
+    h.fetcher.fail(false);
+    h.clock.advance(Duration::from_secs(10));
+    h.validator.validate(&token).await?;
+    assert_eq!(h.fetcher.fetches(), 4);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_key_replaced_under_the_same_kid_is_refetched_no_sooner_than_allowed() -> TestResult {
+    let h = harness()?;
+    h.validator.validate(&h.key.sign(&claims())?).await?;
+
+    // The issuer replaces k1 with a new key that keeps the kid.
+    let replaced = TestKey::new("k1", 7)?;
+    h.fetcher.set_keys(vec![replaced.jwk()]);
+    let token = replaced.sign(&claims())?;
+    assert!(matches!(
+        refused(&h, &token).await?,
+        ValidateError::Signature
+    ));
+    assert_eq!(h.fetcher.fetches(), 1, "refetched too soon");
+
+    h.clock.advance(Duration::from_secs(60));
+    h.validator.validate(&token).await?;
+    assert_eq!(h.fetcher.fetches(), 2);
+
+    // A forgery refetches once, then not again until jwks_refetch passes.
+    let forger = TestKey::new("k1", 9)?;
+    let forged = forger.sign(&claims())?;
+    h.clock.advance(Duration::from_secs(60));
+    assert!(matches!(
+        refused(&h, &forged).await?,
+        ValidateError::Signature
+    ));
+    assert!(matches!(
+        refused(&h, &forged).await?,
+        ValidateError::Signature
+    ));
+    assert_eq!(h.fetcher.fetches(), 3);
+    Ok(())
+}
+
+#[tokio::test]
+async fn refresh_due_fetches_missing_keys_and_renews_keys_before_they_expire() -> TestResult {
+    let h = harness_with(INTROSPECTED)?;
+    assert_eq!(h.validator.key_ages().await, [(ISSUER.to_owned(), None)]);
+    h.validator.refresh_due().await;
+    assert_eq!(h.fetcher.fetches(), 1, "the introspected issuer is skipped");
+    assert_eq!(
+        h.validator.key_ages().await,
+        [(ISSUER.to_owned(), Some(Duration::ZERO))]
+    );
+
+    // Keys are renewed three quarters of the way through their hour.
+    h.clock.advance(Duration::from_secs(2699));
+    h.validator.refresh_due().await;
+    assert_eq!(h.fetcher.fetches(), 1);
+    assert_eq!(
+        h.validator.key_ages().await,
+        [(ISSUER.to_owned(), Some(Duration::from_secs(2699)))]
+    );
+
+    // A renewal that fails leaves the unexpired keys in use, and is retried
+    // every jwks_retry.
+    h.clock.advance(Duration::from_secs(1));
+    h.fetcher.fail(true);
+    h.validator.refresh_due().await;
+    assert_eq!(h.fetcher.fetches(), 2);
+    let token = h.key.sign(&lasting()?)?;
+    h.validator.validate(&token).await?;
+    h.clock.advance(Duration::from_secs(9));
+    h.validator.refresh_due().await;
+    assert_eq!(h.fetcher.fetches(), 2, "retried too soon");
+    h.fetcher.fail(false);
+    h.clock.advance(Duration::from_secs(1));
+    h.validator.refresh_due().await;
+    assert_eq!(h.fetcher.fetches(), 3);
+    h.validator.validate(&token).await?;
+    assert_eq!(h.fetcher.fetches(), 3);
+    assert_eq!(
+        h.validator.key_ages().await,
+        [(ISSUER.to_owned(), Some(Duration::ZERO))]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_forgery_stays_a_bad_signature_while_the_issuer_is_down() -> TestResult {
+    let h = harness()?;
+    h.validator.validate(&h.key.sign(&claims())?).await?;
+    h.fetcher.fail(true);
+    h.clock.advance(Duration::from_secs(60));
+    let forged = TestKey::new("k1", 9)?.sign(&claims())?;
+    assert!(matches!(
+        refused(&h, &forged).await?,
+        ValidateError::Signature
+    ));
+    assert_eq!(h.fetcher.fetches(), 2, "the forgery tried one refetch");
+    h.validator.validate(&h.key.sign(&claims())?).await?;
     Ok(())
 }
 
@@ -440,5 +600,26 @@ fn scopes_come_from_scope_and_scp() -> TestResult {
     assert_eq!(found, ["d", "e"]);
     let none = object(json!({ "scope": 7 }))?;
     assert!(scopes(&none).is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn keys_younger_than_the_retry_interval_still_expire_on_time() -> TestResult {
+    let key = TestKey::new("k1", 1)?;
+    let fetcher = Arc::new(FakeFetcher::with(vec![key.jwk()]));
+    let clock = Arc::new(ManualClock::at(NOW));
+    let text = CONFIG.replace(
+        "jwks_refetch = \"60s\"",
+        "jwks_refetch = \"60s\"\njwks_max_age = \"5s\"",
+    );
+    let validator = Validator::new(&Config::from_toml(&text)?, fetcher.clone(), clock.clone());
+    let token = key.sign(&claims())?;
+    validator.validate(&token).await?;
+    clock.advance(Duration::from_secs(5));
+    validator.refresh_due().await;
+    assert_eq!(fetcher.fetches(), 2);
+    clock.advance(Duration::from_secs(5));
+    validator.validate(&token).await?;
+    assert_eq!(fetcher.fetches(), 3);
     Ok(())
 }

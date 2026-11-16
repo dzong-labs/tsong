@@ -7,6 +7,13 @@
 //! skew. The config sets the values each check compares against; no check
 //! can be turned off.
 //!
+//! Each issuer's keys expire `jwks_max_age` after they were fetched.
+//! [`Validator::refresh_due`] renews them before then; keys that expire
+//! anyway are refetched by the next token. Until a fetch succeeds, the
+//! issuer's tokens are refused and the fetch is retried every `jwks_retry`. A token with an unknown key ID, or whose
+//! signature fails with a known one, refetches the keys once, no more often
+//! than `jwks_refetch`.
+//!
 //! Opaque tokens need introspection, which isn't built yet: they fail with
 //! [`ValidateError::Unsupported`].
 
@@ -18,7 +25,7 @@ pub mod testkit;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -61,6 +68,8 @@ pub enum ValidateError {
     NotYetValid,
     #[error("fetching the issuer's JWKS: {0}")]
     Jwks(#[from] FetchError),
+    #[error("the issuer's keys are missing or expired, and no fetch has succeeded since")]
+    KeysExpired,
 }
 
 /// Validates inbound tokens against the trusted issuers of one config.
@@ -81,7 +90,39 @@ struct Issuer {
 #[derive(Default)]
 struct Keys {
     by_kid: HashMap<String, Jwk>,
+    /// When the keys were last fetched successfully.
     fetched_at: Option<SystemTime>,
+    /// When a fetch was last tried, successful or not.
+    tried_at: Option<SystemTime>,
+    /// When the last fetch failed, while no fetch has succeeded since.
+    failed_at: Option<SystemTime>,
+}
+
+/// How long ago `then` was, or zero when it is in the future.
+fn age(now: SystemTime, then: SystemTime) -> Duration {
+    now.duration_since(then).unwrap_or(Duration::ZERO)
+}
+
+impl Keys {
+    /// Whether the keys were fetched less than `max_age` ago.
+    fn fresh(&self, now: SystemTime, max_age: Duration) -> bool {
+        self.fetched_at
+            .is_some_and(|fetched_at| age(now, fetched_at) < max_age)
+    }
+
+    /// Whether `jwks_refetch` has passed since the last try, for a refetch
+    /// a token asks for.
+    fn may_refetch(&self, now: SystemTime, trusted: &TrustedIssuer) -> bool {
+        self.tried_at
+            .is_none_or(|tried_at| age(now, tried_at) >= trusted.jwks_refetch)
+    }
+
+    /// Whether `jwks_retry` has passed since the last failure, for fetching
+    /// missing or expired keys.
+    fn may_retry(&self, now: SystemTime, trusted: &TrustedIssuer) -> bool {
+        self.failed_at
+            .is_none_or(|failed_at| age(now, failed_at) >= trusted.jwks_retry)
+    }
 }
 
 impl Validator {
@@ -124,13 +165,19 @@ impl Validator {
         }
         let algorithm = allowed_algorithm(&issuer.trusted, header.alg)?;
         let kid = header.kid.ok_or(ValidateError::MissingKid)?;
-        let jwk = self.key(issuer, &kid).await?;
-        if let Some(key_algorithm) = jwk.common.key_algorithm
-            && key_algorithm != algorithm.1
-        {
-            return Err(ValidateError::Algorithm(format!("{:?}", header.alg)));
+        let (jwk, _) = self.key(issuer, &kid, Refetch::IfUnknown).await?;
+        match verify(token, &jwk, algorithm) {
+            Err(ValidateError::Signature) => {
+                // The issuer may have replaced the key under the same kid.
+                // A refetch that is skipped, fails or drops the kid leaves
+                // the signature refused: a forgery stays a bad signature.
+                let Ok((jwk, true)) = self.key(issuer, &kid, Refetch::Now).await else {
+                    return Err(ValidateError::Signature);
+                };
+                verify(token, &jwk, algorithm)?;
+            }
+            other => other?,
         }
-        verify(token, &jwk, algorithm.0)?;
         self.check_audience(&issuer.trusted, &payload)?;
         self.check_times(&payload)?;
         Ok(Validated::new(issuer.name.clone(), payload))
@@ -150,37 +197,118 @@ impl Validator {
         }
     }
 
-    /// The key `kid` names, refetching the issuer's JWKS when the key is
-    /// unknown and the last fetch is old enough.
-    async fn key(&self, issuer: &Issuer, kid: &str) -> Result<Jwk, ValidateError> {
+    /// The key `kid` names, and whether the keys were refetched to find it.
+    /// Missing or expired keys are fetched first, retried no more often than
+    /// `jwks_retry` after a failure; until a fetch succeeds the key is
+    /// refused. Fresh keys are refetched when `refetch` asks, no more often
+    /// than `jwks_refetch`.
+    async fn key(
+        &self,
+        issuer: &Issuer,
+        kid: &str,
+        refetch: Refetch,
+    ) -> Result<(Jwk, bool), ValidateError> {
+        let trusted = &issuer.trusted;
         let mut keys = issuer.keys.lock().await;
-        if let Some(jwk) = keys.by_kid.get(kid) {
-            return Ok(jwk.clone());
-        }
         let now = self.clock.now();
-        let due = keys.fetched_at.is_none_or(|fetched_at| {
-            now.duration_since(fetched_at)
-                .is_ok_and(|age| age >= issuer.trusted.jwks_refetch)
-        });
-        if due {
-            let set = self.fetcher.fetch(&issuer.trusted).await?;
-            keys.by_kid = set
-                .keys
-                .into_iter()
-                .filter(|jwk| {
-                    matches!(
-                        jwk.common.public_key_use,
-                        None | Some(PublicKeyUse::Signature)
-                    )
-                })
-                .filter_map(|jwk| Some((jwk.common.key_id.clone()?, jwk)))
-                .collect();
-            keys.fetched_at = Some(now);
-        }
-        keys.by_kid
+        let refetched = if !keys.fresh(now, trusted.jwks_max_age) {
+            if !keys.may_retry(now, trusted) {
+                return Err(ValidateError::KeysExpired);
+            }
+            self.refresh(issuer, &mut keys, now).await?;
+            true
+        } else {
+            let wanted = match refetch {
+                Refetch::IfUnknown => !keys.by_kid.contains_key(kid),
+                Refetch::Now => true,
+            };
+            if wanted && keys.may_refetch(now, trusted) {
+                self.refresh(issuer, &mut keys, now).await?;
+                true
+            } else {
+                false
+            }
+        };
+        let jwk = keys
+            .by_kid
             .get(kid)
             .cloned()
-            .ok_or_else(|| ValidateError::UnknownKey(kid.to_owned()))
+            .ok_or_else(|| ValidateError::UnknownKey(kid.to_owned()))?;
+        Ok((jwk, refetched))
+    }
+
+    /// Fetches the issuer's keys into `keys`, keeping the signing keys that
+    /// have a key ID.
+    async fn refresh(
+        &self,
+        issuer: &Issuer,
+        keys: &mut Keys,
+        now: SystemTime,
+    ) -> Result<(), ValidateError> {
+        keys.tried_at = Some(now);
+        let set = match self.fetcher.fetch(&issuer.trusted).await {
+            Ok(set) => set,
+            Err(error) => {
+                keys.failed_at = Some(now);
+                return Err(error.into());
+            }
+        };
+        keys.failed_at = None;
+        keys.by_kid = set
+            .keys
+            .into_iter()
+            .filter(|jwk| {
+                matches!(
+                    jwk.common.public_key_use,
+                    None | Some(PublicKeyUse::Signature)
+                )
+            })
+            .filter_map(|jwk| Some((jwk.common.key_id.clone()?, jwk)))
+            .collect();
+        keys.fetched_at = Some(now);
+        Ok(())
+    }
+
+    /// Refetches the keys of every JWT issuer whose keys are missing or
+    /// three quarters through their `jwks_max_age`, retrying a failure no
+    /// more often than its `jwks_retry`. Run on a schedule, it renews keys
+    /// before they expire, so a brief outage at renewal refuses nothing, and
+    /// it notices an issuer that has come back. Issuers are refreshed at
+    /// once, so one that doesn't answer delays no other. A failure is the
+    /// fetcher's to report; keys it leaves expired refuse their tokens.
+    pub async fn refresh_due(&self) {
+        let refreshes = self
+            .issuers
+            .iter()
+            .filter(|issuer| issuer.trusted.validation == Validation::Jwt)
+            .map(|issuer| async move {
+                let trusted = &issuer.trusted;
+                let mut keys = issuer.keys.lock().await;
+                let now = self.clock.now();
+                let renew_at = trusted.jwks_max_age - trusted.jwks_max_age / 4;
+                if !keys.fresh(now, renew_at) && keys.may_retry(now, trusted) {
+                    let _ = self.refresh(issuer, &mut keys, now).await;
+                }
+            });
+        futures_util::future::join_all(refreshes).await;
+    }
+
+    /// How long ago each JWT issuer's keys were fetched, by its `iss`:
+    /// `None` for keys never fetched.
+    pub async fn key_ages(&self) -> Vec<(String, Option<Duration>)> {
+        let now = self.clock.now();
+        let mut ages = Vec::new();
+        for issuer in &self.issuers {
+            if issuer.trusted.validation != Validation::Jwt {
+                continue;
+            }
+            let fetched_at = issuer.keys.lock().await.fetched_at;
+            ages.push((
+                issuer.trusted.issuer.clone(),
+                fetched_at.map(|fetched_at| age(now, fetched_at)),
+            ));
+        }
+        ages
     }
 
     fn check_audience(
@@ -264,9 +392,28 @@ fn algorithms(allowed: InboundAlgorithm) -> (Algorithm, KeyAlgorithm) {
     }
 }
 
-/// Checks the signature alone; the claims are checked against the config
-/// and the injected clock.
-fn verify(token: &str, jwk: &Jwk, algorithm: Algorithm) -> Result<(), ValidateError> {
+/// When [`Validator::key`] refetches fresh keys.
+#[derive(Clone, Copy)]
+enum Refetch {
+    /// Only when the key ID is unknown.
+    IfUnknown,
+    /// Whether or not the key ID is known.
+    Now,
+}
+
+/// Checks that `jwk` may sign with the header's algorithm, then the
+/// signature alone; the claims are checked against the config and the
+/// injected clock.
+fn verify(
+    token: &str,
+    jwk: &Jwk,
+    (algorithm, key_algorithm): (Algorithm, KeyAlgorithm),
+) -> Result<(), ValidateError> {
+    if let Some(declared) = jwk.common.key_algorithm
+        && declared != key_algorithm
+    {
+        return Err(ValidateError::Algorithm(format!("{algorithm:?}")));
+    }
     let key = DecodingKey::from_jwk(jwk).map_err(|_| ValidateError::Signature)?;
     let mut validation = jsonwebtoken::Validation::new(algorithm);
     validation.validate_exp = false;

@@ -38,10 +38,16 @@ sub_prefix = "okta"   # minted sub is "okta:<sub>"; unique; a-z, 0-9 and -
 issuer = "https://example.okta.com/oauth2/default"
 audiences = ["api://default"]
 algorithms = ["RS256"]
+jwks_max_age = "1h"   # keys are trusted this long, then refetched; tokens are refused until a refetch succeeds
+jwks_retry = "10s"    # how often a failed refetch of expired keys is retried
+jwks_refetch = "30s"  # least time between refetches an unknown kid or a failed signature triggers
+jwks_timeout = "10s"  # longest a discovery or JWKS request may take
 
 [trusted_issuers.entra]
 sub_prefix = "entra"
 issuer = "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0"
+# One trusted issuer per tenant. discovery_url, or jwks_url, replaces the well-known path when an issuer doesn't use it.
+discovery_url = "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0/.well-known/openid-configuration"
 audiences = ["api://tsong"]
 algorithms = ["RS256"]
 

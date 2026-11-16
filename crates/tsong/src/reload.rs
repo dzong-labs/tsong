@@ -11,6 +11,7 @@ use serde_json::json;
 use tokio::sync::watch;
 use tsong_clock::Clock;
 use tsong_config::{Config, ConfigStore, Route};
+use tsong_validate::{HttpFetcher, JwksFetcher};
 
 /// A new revision was swapped in.
 pub const APPLIED: &str = "applied";
@@ -88,6 +89,8 @@ pub struct Reloader {
     audit: Arc<dyn Audit>,
     clock: Arc<dyn Clock>,
     metrics: Arc<Metrics>,
+    /// Fetches trusted issuers' keys for every state it builds.
+    fetcher: Arc<dyn JwksFetcher>,
     /// The content of the last config rejected as invalid. It can't become
     /// valid until it changes, so it is not rejected again.
     invalid: Mutex<Option<String>>,
@@ -114,6 +117,7 @@ impl Reloader {
             state,
             status: Arc::new(Mutex::new(status)),
             metrics: Arc::default(),
+            fetcher: Arc::new(HttpFetcher::default()),
             invalid: Mutex::new(None),
             audit,
             clock,
@@ -124,6 +128,13 @@ impl Reloader {
     /// reloads there.
     pub fn with_metrics(mut self, metrics: Arc<Metrics>) -> Self {
         self.metrics = metrics;
+        self
+    }
+
+    /// This reloader, fetching keys for each state it builds with `fetcher`
+    /// instead of plain HTTP.
+    pub fn with_fetcher(mut self, fetcher: Arc<dyn JwksFetcher>) -> Self {
+        self.fetcher = fetcher;
         self
     }
 
@@ -167,6 +178,7 @@ impl Reloader {
             self.clock.clone(),
             &self.metrics,
             self.audit.clone(),
+            self.fetcher.clone(),
         );
         let next = match built {
             Ok(next) => next,

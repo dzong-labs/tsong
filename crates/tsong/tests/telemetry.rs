@@ -13,7 +13,9 @@ use tower::ServiceExt;
 use tsong::admin::{health_router, status_router};
 use tsong::reload::{Outcome, Reloader};
 use tsong::state::State;
-use tsong::telemetry::{CountingFetcher, ExchangeAudit, IssuerLabel, Metrics, OutcomeLabel};
+use tsong::telemetry::{
+    ExchangeAudit, IssuerLabel, Metrics, ObservedFetcher, OutcomeLabel, Refresher, refresh,
+};
 use tsong_clock::{Clock, ManualClock};
 use tsong_config::{Config, ConfigError, TrustedIssuer};
 use tsong_issuer::{ExchangeContext, ExchangeEvent, ExchangeObserver};
@@ -85,33 +87,160 @@ fn each_exchange_writes_one_audit_line_and_is_counted() -> TestResult {
     Ok(())
 }
 
-#[tokio::test]
-async fn failed_jwks_fetches_are_counted_by_issuer() -> TestResult {
-    let dir = tempfile::tempdir()?;
-    let key = write_key(dir.path())?;
+/// A config trusting `https://okta.test`, with keys that expire after
+/// `max_age`.
+fn okta_config(dir: &std::path::Path, max_age: &str) -> TestResult<Config> {
+    let key = write_key(dir)?;
     let text = format!(
-        "{}\n[trusted_issuers.okta]\nsub_prefix = \"okta\"\nissuer = \"https://okta.test\"\naudiences = [\"tsong\"]\nalgorithms = [\"ES256\"]\n",
+        "{}\n[trusted_issuers.okta]\nsub_prefix = \"okta\"\nissuer = \"https://okta.test\"\naudiences = [\"tsong\"]\nalgorithms = [\"ES256\"]\njwks_max_age = \"{max_age}\"\n",
         config_text(&key, "https://one.test", 8444, "")
     );
-    let config = Config::from_toml(&text)?;
-    let okta: &TrustedIssuer = config.trusted_issuers.get("okta").ok_or("no okta")?;
-    let inner = FakeFetcher::with(vec![]);
-    let metrics = Metrics::default();
-    let fetcher = CountingFetcher {
-        inner,
-        failures: metrics.jwks_failures.clone(),
-    };
-    fetcher.fetch(okta).await?;
-    fetcher.inner.fail(true);
-    assert!(fetcher.fetch(okta).await.is_err());
-    assert!(fetcher.fetch(okta).await.is_err());
-    let failures = metrics
+    Ok(Config::from_toml(&text)?)
+}
+
+fn okta(config: &Config) -> TestResult<&TrustedIssuer> {
+    Ok(config.trusted_issuers.get("okta").ok_or("no okta")?)
+}
+
+fn failures(metrics: &Metrics) -> u64 {
+    metrics
         .jwks_failures
         .get_or_create(&IssuerLabel {
             issuer: "https://okta.test".into(),
         })
-        .get();
-    assert_eq!(failures, 2);
+        .get()
+}
+
+#[tokio::test]
+async fn failed_jwks_fetches_are_counted_and_audited_and_so_is_the_recovery() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let config = okta_config(dir.path(), "1h")?;
+    let okta = okta(&config)?;
+    let lines = Arc::new(Recorded::default());
+    let metrics = Metrics::default();
+    let fetcher = ObservedFetcher::new(
+        FakeFetcher::with(vec![]),
+        metrics.jwks_failures.clone(),
+        lines.clone(),
+        Arc::new(ManualClock::at(NOW)),
+    );
+    fetcher.fetch(okta).await?;
+    fetcher.inner().fail(true);
+    assert!(fetcher.fetch(okta).await.is_err());
+    assert!(fetcher.fetch(okta).await.is_err());
+    fetcher.inner().fail(false);
+    fetcher.fetch(okta).await?;
+    fetcher.fetch(okta).await?;
+    assert_eq!(failures(&metrics), 2);
+    let failed = json!({
+        "event": "jwks_fetch",
+        "at": NOW,
+        "outcome": "failed",
+        "issuer": "https://okta.test",
+        "error": "discovery document: down",
+    });
+    let recovered = json!({
+        "event": "jwks_fetch",
+        "at": NOW,
+        "outcome": "recovered",
+        "issuer": "https://okta.test",
+        "error": null,
+    });
+    assert_eq!(lines.parsed()?, [failed.clone(), failed, recovered]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_refresher_refetches_expired_keys_and_reports_their_age() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let config = okta_config(dir.path(), "1h")?;
+    let clock = Arc::new(ManualClock::at(NOW));
+    let fetcher = Arc::new(FakeFetcher::with(vec![]));
+    let validator = tsong_validate::Validator::new(&config, fetcher.clone(), clock.clone());
+    let keys = tsong_keys::KeySet::from_config(&config.issuer.signing)?;
+    let issuer = tsong_issuer::Issuer::new(Arc::new(config), keys, validator, clock.clone());
+    let metrics = Metrics::default();
+    let age = || {
+        metrics
+            .jwks_age
+            .get_or_create(&IssuerLabel {
+                issuer: "https://okta.test".into(),
+            })
+            .get()
+    };
+
+    let stale = IssuerLabel {
+        issuer: "https://removed.test".into(),
+    };
+    metrics.jwks_age.get_or_create(&stale).set(42);
+
+    fetcher.fail(true);
+    refresh(&issuer, &metrics.jwks_age).await;
+    let encoded = metrics.encode()?;
+    assert!(
+        !encoded.contains("okta.test") && !encoded.contains("removed.test"),
+        "keys never fetched, or an issuer no longer trusted, have no age: {encoded}"
+    );
+
+    fetcher.fail(false);
+    clock.advance(Duration::from_secs(10));
+    refresh(&issuer, &metrics.jwks_age).await;
+    assert_eq!((fetcher.fetches(), age()), (2, 0));
+    clock.advance(Duration::from_secs(2699));
+    refresh(&issuer, &metrics.jwks_age).await;
+    assert_eq!((fetcher.fetches(), age()), (2, 2699));
+    clock.advance(Duration::from_secs(1));
+    refresh(&issuer, &metrics.jwks_age).await;
+    assert_eq!((fetcher.fetches(), age()), (3, 0));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_refresher_runs_on_its_tick_until_dropped() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let config = okta_config(dir.path(), "1s")?;
+    let fetcher = Arc::new(FakeFetcher::with(vec![]));
+    let clock = Arc::new(tsong_clock::SystemClock);
+    let validator = tsong_validate::Validator::new(&config, fetcher.clone(), clock.clone());
+    let keys = tsong_keys::KeySet::from_config(&config.issuer.signing)?;
+    let issuer = tsong_issuer::Issuer::new(Arc::new(config), keys, validator, clock);
+    let metrics = Metrics::default();
+    let refresher = Refresher::spawn(
+        Arc::new(issuer),
+        metrics.jwks_age.clone(),
+        Duration::from_millis(10),
+    )
+    .ok_or("no runtime")?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while fetcher.fetches() < 2 {
+        if tokio::time::Instant::now() > deadline {
+            return Err("the refresher never refetched".into());
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    drop(refresher);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let stopped = fetcher.fetches();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(fetcher.fetches(), stopped, "fetched after it was dropped");
+    Ok(())
+}
+
+#[test]
+fn a_refresher_needs_a_runtime() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let config = okta_config(dir.path(), "1h")?;
+    let clock = Arc::new(ManualClock::at(NOW));
+    let validator =
+        tsong_validate::Validator::new(&config, Arc::new(FakeFetcher::default()), clock.clone());
+    let keys = tsong_keys::KeySet::from_config(&config.issuer.signing)?;
+    let issuer = tsong_issuer::Issuer::new(Arc::new(config), keys, validator, clock);
+    let spawned = Refresher::spawn(
+        Arc::new(issuer),
+        Metrics::default().jwks_age.clone(),
+        Duration::from_secs(1),
+    );
+    assert!(spawned.is_none());
     Ok(())
 }
 

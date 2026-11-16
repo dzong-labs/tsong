@@ -101,6 +101,11 @@ impl Issuer {
         }
     }
 
+    /// The validator subject tokens are checked by.
+    pub fn validator(&self) -> &Validator {
+        &self.validator
+    }
+
     /// This issuer, reporting every exchange to `observer`.
     pub fn with_observer(mut self, observer: Arc<dyn ExchangeObserver>) -> Self {
         self.observer = Some(observer);

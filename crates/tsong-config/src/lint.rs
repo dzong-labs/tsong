@@ -1,12 +1,18 @@
 //! Warnings: settings that are valid but look like a mistake. An empty
 //! allow list denies everything, which looks like an omission; an entry
-//! that accepts anything looks like a decision worth confirming.
+//! that accepts anything looks like a decision worth confirming. Keys
+//! trusted for more than a day leave a key an issuer has withdrawn in use
+//! for that long.
 
 use std::fmt;
+use std::time::Duration;
 
 use ipnet::IpNet;
 
-use crate::{ANY, Config};
+use crate::{ANY, Config, Validation};
+
+/// The longest `jwks_max_age` that doesn't warn.
+const LONGEST_JWKS_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Every warning a config has, one per line.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -26,6 +32,14 @@ impl Config {
     pub fn warnings(&self) -> Warnings {
         let mut warnings = Vec::new();
         ip_list(&mut warnings, "gateway.allow", &self.gateway.allow);
+        for (name, trusted) in &self.trusted_issuers {
+            if trusted.validation == Validation::Jwt && trusted.jwks_max_age > LONGEST_JWKS_MAX_AGE
+            {
+                warnings.push(format!(
+                    "trusted_issuers.{name}.jwks_max_age is over 24h; a key the issuer withdraws stays trusted that long"
+                ));
+            }
+        }
         for route in &self.routes {
             let name = &route.name;
             for (field, values) in [

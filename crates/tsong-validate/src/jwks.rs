@@ -26,7 +26,9 @@ pub enum FetchError {
 }
 
 /// Fetches JWKS over HTTP: from the configured `jwks_url`, or from the
-/// `jwks_uri` in the issuer's OIDC discovery document.
+/// `jwks_uri` in the issuer's OIDC discovery document, found at its
+/// `discovery_url` or the well-known path. Each request takes no longer
+/// than the issuer's `jwks_timeout`.
 #[derive(Debug, Clone, Default)]
 pub struct HttpFetcher {
     client: reqwest::Client,
@@ -46,14 +48,20 @@ impl HttpFetcher {
     /// The JWKS location the issuer's discovery document names. The
     /// document must name the same issuer, and a JWKS on the issuer's
     /// scheme.
-    async fn discover(&self, issuer: &str) -> Result<Url, FetchError> {
-        let url = format!(
-            "{}/.well-known/openid-configuration",
-            issuer.trim_end_matches('/')
-        );
+    async fn discover(&self, trusted: &TrustedIssuer) -> Result<Url, FetchError> {
+        let issuer = trusted.issuer.as_str();
+        let url = match &trusted.discovery_url {
+            Some(url) => url.clone(),
+            None => Url::parse(&format!(
+                "{}/.well-known/openid-configuration",
+                issuer.trim_end_matches('/')
+            ))
+            .map_err(|error| FetchError::Discovery(format!("url: {error}")))?,
+        };
         let discovery: Discovery = self
             .client
             .get(url)
+            .timeout(trusted.jwks_timeout)
             .send()
             .await?
             .error_for_status()?
@@ -82,11 +90,12 @@ impl JwksFetcher for HttpFetcher {
         Box::pin(async move {
             let url = match &issuer.jwks_url {
                 Some(url) => url.clone(),
-                None => self.discover(&issuer.issuer).await?,
+                None => self.discover(issuer).await?,
             };
             Ok(self
                 .client
                 .get(url)
+                .timeout(issuer.jwks_timeout)
                 .send()
                 .await?
                 .error_for_status()?

@@ -117,10 +117,30 @@ impl Config {
             if !is_https(&trusted.issuer) {
                 problems.push(format!("trusted_issuers.{name}.issuer must be https"));
             }
-            if let Some(url) = &trusted.jwks_url
-                && url.scheme() != "https"
-            {
-                problems.push(format!("trusted_issuers.{name}.jwks_url must be https"));
+            for (field, url) in [
+                ("discovery_url", &trusted.discovery_url),
+                ("jwks_url", &trusted.jwks_url),
+            ] {
+                if let Some(url) = url
+                    && url.scheme() != "https"
+                {
+                    problems.push(format!("trusted_issuers.{name}.{field} must be https"));
+                }
+            }
+            if trusted.discovery_url.is_some() && trusted.jwks_url.is_some() {
+                problems.push(format!(
+                    "trusted_issuers.{name} sets both discovery_url and jwks_url; jwks_url skips discovery, so set one"
+                ));
+            }
+            for (field, duration) in [
+                ("jwks_max_age", trusted.jwks_max_age),
+                ("jwks_retry", trusted.jwks_retry),
+                ("jwks_refetch", trusted.jwks_refetch),
+                ("jwks_timeout", trusted.jwks_timeout),
+            ] {
+                if duration.is_zero() {
+                    problems.push(format!("trusted_issuers.{name}.{field} must be above zero"));
+                }
             }
             if let Some(url) = &trusted.introspection_url
                 && url.scheme() != "https"

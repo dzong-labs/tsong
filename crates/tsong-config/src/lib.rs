@@ -153,21 +153,48 @@ pub struct TrustedIssuer {
     /// The algorithms its JWTs may be signed with.
     #[serde(default)]
     pub algorithms: Vec<InboundAlgorithm>,
-    /// Where its JWKS is. Unset, it is found through the issuer's OIDC
-    /// discovery document.
+    /// Where its OIDC discovery document is. Unset, it is
+    /// `<issuer>/.well-known/openid-configuration`. The document must name
+    /// this issuer exactly.
+    pub discovery_url: Option<Url>,
+    /// Where its JWKS is. Unset, it is the `jwks_uri` of the discovery
+    /// document. Set, discovery is skipped, so `discovery_url` may not be
+    /// set too.
     pub jwks_url: Option<Url>,
-    /// The shortest time between JWKS fetches. A token with an unknown key
-    /// ID refetches the JWKS, but no sooner than this.
+    /// How long fetched keys are trusted. Past this they expire and are
+    /// refetched; until a refetch succeeds, the issuer's tokens are refused.
+    #[serde(default = "default_jwks_max_age", with = "duration")]
+    pub jwks_max_age: Duration,
+    /// How often a failed refetch of expired keys is retried.
+    #[serde(default = "default_jwks_retry", with = "duration")]
+    pub jwks_retry: Duration,
+    /// The shortest time between refetches a token triggers: one with an
+    /// unknown key ID, or whose signature fails with a known key.
     #[serde(default = "default_jwks_refetch", with = "duration")]
     pub jwks_refetch: Duration,
+    /// The longest a discovery or JWKS request may take.
+    #[serde(default = "default_jwks_timeout", with = "duration")]
+    pub jwks_timeout: Duration,
     pub introspection_url: Option<Url>,
     pub client_id: Option<String>,
     /// The environment variable holding the introspection client secret.
     pub client_secret_env: Option<String>,
 }
 
+fn default_jwks_max_age() -> Duration {
+    Duration::from_secs(60 * 60)
+}
+
+fn default_jwks_retry() -> Duration {
+    Duration::from_secs(10)
+}
+
 fn default_jwks_refetch() -> Duration {
     Duration::from_secs(30)
+}
+
+fn default_jwks_timeout() -> Duration {
+    Duration::from_secs(10)
 }
 
 /// How an inbound token is validated.
