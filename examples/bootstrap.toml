@@ -44,4 +44,5 @@ secret_env = "TSONG_WEBHOOK_SECRET"       # the variable holding the webhook sec
 [health]
 listen = "0.0.0.0:8447"
 allow = ["10.20.0.0/16"]                  # the load balancer's subnets
-drain = "5s"                              # on shutdown, readiness fails this long before the listeners close
+drain = "5s"                              # on shutdown, readiness fails this long before the listeners close;
+                                          # see docs/notes/shutdown-and-draining.md

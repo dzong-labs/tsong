@@ -53,7 +53,7 @@ tsong serve <bootstrap.toml>
 
 [examples/tsong.toml](examples/tsong.toml) is a sample config, and [examples/bootstrap.toml](examples/bootstrap.toml) a sample bootstrap file. [docs/notes/gateway-plan.md](docs/notes/gateway-plan.md) describes how the gateway works, and [docs/notes/roadmap.md](docs/notes/roadmap.md) lists what comes next: introspection for opaque tokens, actor tokens, and keys from a secrets manager.
 
-`tsong serve` stops on SIGTERM or Ctrl+C. With a `[health]` listener in the bootstrap file, readiness fails first, for `health.drain` (5s by default), so the load balancer stops sending requests before the listeners close; a second signal ends the drain at once. Without one, the listeners close at once.
+`tsong serve` stops on SIGTERM or Ctrl+C. With a `[health]` listener in the bootstrap file, readiness fails first, for `health.drain` (5s by default), so the load balancer stops sending requests before the listeners close; a second signal ends the drain at once. Without one, the listeners close at once. [docs/notes/shutdown-and-draining.md](docs/notes/shutdown-and-draining.md) explains how the drain, the load balancer's health check and the orchestrator's deregistration fit together.
 
 ### Container
 
