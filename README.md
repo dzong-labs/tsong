@@ -1,6 +1,6 @@
 # Tsong
 
-Tsong is an API gateway that sits between callers and your services. Callers bring access tokens from several identity providers. Tsong checks each token and replaces it with a token it signs itself, so your services trust one issuer instead of many.
+Tsong is an API gateway and an RFC 8693 token exchange issuer. It replaces each caller's access token, issued by any of several trusted identity providers, with a token Tsong signs, so your services trust one issuer instead of many.
 
 ## How a request flows
 
