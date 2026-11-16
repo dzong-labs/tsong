@@ -76,7 +76,7 @@ pub async fn run(args: impl IntoIterator<Item = String>) -> Result<String, Error
 /// Loads the config at `path` and its signing keys, and reports its
 /// warnings. With `deny_warnings`, a warning fails the check.
 pub async fn check(path: &Path, deny_warnings: bool) -> Result<String, Error> {
-    let config = FileStore::new(path).load().await?.config;
+    let config = FileStore::new(path).load().await?.parse()?.config;
     let keys = KeySet::from_config(&config.issuer.signing)?;
     let warnings = config.warnings();
     if deny_warnings && !warnings.0.is_empty() {
@@ -100,7 +100,7 @@ pub async fn serve_until(
     let bootstrap = Bootstrap::load(path)?;
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let (store, poll) = store(&bootstrap.source);
-    let first = State::build(store.load().await?, clock.clone())?;
+    let first = State::build(store.load().await?.parse()?, clock.clone())?;
     let issuer_address = first.config.issuer.listen;
     let gateway_address = first.config.gateway.listen;
     let reloader = Arc::new(Reloader::new(

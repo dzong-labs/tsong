@@ -476,13 +476,16 @@ async fn a_file_store_loads_its_file() -> TestResult {
     let path = dir.path().join("tsong.toml");
     std::fs::write(&path, minimal())?;
     let store: Box<dyn ConfigStore> = Box::new(FileStore::new(&path));
-    let snapshot = store.load().await?;
+    let fetched = store.load().await?;
+    assert_eq!(fetched.text, minimal());
+    assert_eq!(fetched.revision, hex(&Sha256::digest(minimal().as_bytes())));
+    assert_eq!(fetched.content, fetched.revision);
+    assert_eq!(fetched.revision.len(), 64);
+    assert_eq!(fetched.author, None);
+    assert_eq!(fetched.base_dir.as_deref(), Some(dir.path()));
+    let snapshot = fetched.parse()?;
     assert_eq!(snapshot.config.issuer.listen.port(), 8444);
-    assert_eq!(
-        snapshot.revision,
-        hex(&Sha256::digest(minimal().as_bytes()))
-    );
-    assert_eq!(snapshot.revision.len(), 64);
+    assert_eq!(snapshot.content, snapshot.revision);
     assert_eq!(snapshot.author, None);
     assert_eq!(
         snapshot
@@ -847,17 +850,33 @@ fn every_problem_is_reported() {
 }
 
 #[test]
-fn relative_key_paths_are_listed_by_kid() -> TestResult {
-    let mut config = Config::from_toml(&minimal())?;
-    assert_eq!(config.relative_key_paths(), ["k1"]);
-    for key in &mut config.issuer.signing.keys {
-        key.path = Some(std::env::temp_dir().join("k1.pem"));
+fn without_a_directory_key_paths_must_be_absolute() -> TestResult {
+    match Config::from_text(&minimal(), None) {
+        Err(ConfigError::Invalid(problems)) => assert_eq!(
+            problems.0,
+            [
+                r#"issuer.signing.keys "k1" path must be absolute, since the config has no directory"#
+            ]
+        ),
+        other => return Err(format!("expected invalid, got {other:?}").into()),
     }
-    assert!(config.relative_key_paths().is_empty());
-    for key in &mut config.issuer.signing.keys {
-        key.path = None;
-    }
-    assert!(config.relative_key_paths().is_empty());
+    let absolute = std::env::temp_dir().join("k1.pem");
+    let text = minimal().replace(
+        r#"path = "k1.pem""#,
+        &format!("path = '{}'", absolute.display()),
+    );
+    let config = Config::from_text(&text, None)?;
+    let path = config.active_key().and_then(|key| key.path.clone());
+    assert_eq!(path, Some(absolute));
+    Ok(())
+}
+
+#[test]
+fn a_directory_resolves_relative_key_paths() -> TestResult {
+    let dir = std::env::temp_dir();
+    let config = Config::from_text(&minimal(), Some(&dir))?;
+    let path = config.active_key().and_then(|key| key.path.clone());
+    assert_eq!(path, Some(dir.join("k1.pem")));
     Ok(())
 }
 
@@ -865,37 +884,4 @@ fn relative_key_paths_are_listed_by_kid() -> TestResult {
 fn hex_is_lowercase_and_two_digits_a_byte() {
     assert_eq!(hex(&[0x00, 0x0f, 0xa0, 0xff]), "000fa0ff");
     assert_eq!(hex(&[]), "");
-}
-
-#[test]
-fn an_error_at_a_revision_names_it_and_keeps_its_root() {
-    let error = ConfigError::AtRevision {
-        revision: "abc123".into(),
-        content: "blob".into(),
-        author: None,
-        source: Box::new(ConfigError::AtRevision {
-            revision: "inner".into(),
-            content: "blob".into(),
-            author: None,
-            source: Box::new(ConfigError::Store("offline".into())),
-        }),
-    };
-    assert_eq!(error.to_string(), "abc123: inner: offline");
-    assert!(matches!(error.root(), ConfigError::Store(message) if message == "offline"));
-    let plain = ConfigError::Store("offline".into());
-    assert!(matches!(plain.root(), ConfigError::Store(_)));
-}
-
-#[test]
-fn unhex_reads_either_case_and_refuses_anything_else() {
-    use tsong_config::unhex;
-    assert_eq!(unhex(b"000fA0ff"), Some(vec![0x00, 0x0f, 0xa0, 0xff]));
-    assert_eq!(unhex(b""), Some(vec![]));
-    assert_eq!(unhex(b"abc"), None);
-    assert_eq!(unhex(b"zz"), None);
-    assert_eq!(unhex("\u{e9}".as_bytes()), None);
-    assert_eq!(
-        unhex(&hex(&[1, 2, 254]).into_bytes()),
-        Some(vec![1, 2, 254])
-    );
 }

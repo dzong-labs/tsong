@@ -122,7 +122,7 @@ async fn the_config_is_read_from_the_folder_at_the_branch_tip() -> TestResult {
     let f = Fixture::new()?;
     let first = f.commit("tsong/tsong.toml", &config(10))?;
     let store = f.store("main", "tsong")?;
-    let snapshot = store.load().await?;
+    let snapshot = store.load().await?.parse()?;
     assert_eq!(snapshot.revision, first);
     assert_eq!(snapshot.config.gateway.cache.max_entries, 10);
     assert_eq!(snapshot.author.as_deref(), Some("Ada <ada@example.test>"));
@@ -130,7 +130,7 @@ async fn the_config_is_read_from_the_folder_at_the_branch_tip() -> TestResult {
     assert_eq!(store.load().await?.revision, first);
 
     let second = f.commit("tsong/tsong.toml", &config(20))?;
-    let snapshot = store.load().await?;
+    let snapshot = store.load().await?.parse()?;
     assert_eq!(snapshot.revision, second);
     assert_eq!(snapshot.config.gateway.cache.max_entries, 20);
     Ok(())
@@ -150,7 +150,7 @@ async fn an_existing_clone_is_reused() -> TestResult {
 async fn an_empty_folder_is_the_repository_root() -> TestResult {
     let f = Fixture::new()?;
     f.commit("tsong.toml", &config(7))?;
-    let snapshot = f.store("main", "")?.load().await?;
+    let snapshot = f.store("main", "")?.load().await?.parse()?;
     assert_eq!(snapshot.config.gateway.cache.max_entries, 7);
     Ok(())
 }
@@ -161,11 +161,14 @@ async fn only_the_watched_branch_is_read() -> TestResult {
     f.commit("tsong/tsong.toml", &config(10))?;
     git(&f.origin, &["checkout", "-q", "-b", "next"])?;
     let next = f.commit("tsong/tsong.toml", &config(30))?;
-    let snapshot = f.store("next", "tsong")?.load().await?;
+    let snapshot = f.store("next", "tsong")?.load().await?.parse()?;
     assert_eq!(snapshot.revision, next);
     assert_eq!(snapshot.config.gateway.cache.max_entries, 30);
     let main = GitStore::new(&f.source("main", "tsong", "main.git"));
-    assert_eq!(main.load().await?.config.gateway.cache.max_entries, 10);
+    assert_eq!(
+        main.load().await?.parse()?.config.gateway.cache.max_entries,
+        10
+    );
     Ok(())
 }
 
@@ -246,27 +249,17 @@ async fn a_config_that_is_not_utf8_is_a_store_error() -> TestResult {
 async fn an_invalid_config_fails_validation() -> TestResult {
     let f = Fixture::new()?;
     f.commit("tsong.toml", &config(0))?;
-    let invalid = f.store("main", "")?.load().await;
-    assert!(matches!(
-        invalid.as_ref().map_err(ConfigError::root),
-        Err(ConfigError::Invalid(_))
-    ));
+    let invalid = f.store("main", "")?.load().await?.parse();
+    assert!(matches!(invalid, Err(ConfigError::Invalid(_))));
     let commit = f.commit("tsong.toml", "not toml [")?;
     let blob = git(&f.origin, &["rev-parse", "HEAD:tsong.toml"])?;
-    match f.store("main", "")?.load().await {
-        Err(ConfigError::AtRevision {
-            revision,
-            content,
-            author,
-            source,
-        }) => {
-            assert_eq!(revision, commit);
-            assert_eq!(content, blob);
-            assert_eq!(author.as_deref(), Some("Ada <ada@example.test>"));
-            assert!(matches!(*source, ConfigError::Parse(_)));
-        }
-        other => return Err(format!("expected a parse error at a revision, got {other:?}").into()),
-    }
+    let fetched = f.store("main", "")?.load().await?;
+    assert_eq!(fetched.text, "not toml [");
+    assert_eq!(fetched.revision, commit);
+    assert_eq!(fetched.content, blob);
+    assert_eq!(fetched.author.as_deref(), Some("Ada <ada@example.test>"));
+    assert_eq!(fetched.base_dir, None);
+    assert!(matches!(fetched.parse(), Err(ConfigError::Parse(_))));
     Ok(())
 }
 
@@ -303,16 +296,12 @@ async fn key_paths_in_a_config_from_git_are_absolute() -> TestResult {
     let key = std::env::temp_dir().join("k1.pem").display().to_string();
     let relative = config(10).replace(&format!("'{key}'"), "\"k1.pem\"");
     f.commit("tsong.toml", &relative)?;
-    match f
-        .store("main", "")?
-        .load()
-        .await
-        .as_ref()
-        .map_err(ConfigError::root)
-    {
+    match f.store("main", "")?.load().await?.parse() {
         Err(ConfigError::Invalid(problems)) => assert_eq!(
             problems.0,
-            [r#"issuer.signing.keys "k1" path must be absolute in a config from Git"#]
+            [
+                r#"issuer.signing.keys "k1" path must be absolute, since the config has no directory"#
+            ]
         ),
         other => return Err(format!("expected invalid, got {other:?}").into()),
     }
@@ -323,23 +312,10 @@ async fn key_paths_in_a_config_from_git_are_absolute() -> TestResult {
 async fn a_deploy_key_sets_the_ssh_command() -> TestResult {
     let f = Fixture::new()?;
     let commit = f.commit("tsong.toml", &config(10))?;
-    let GitSource {
-        url,
-        branch,
-        folder,
-        checkout,
-        poll,
-        ..
-    } = f.source("main", "", "keyed.git");
-    let source = GitSource {
-        url,
-        branch,
-        folder,
-        checkout: checkout.clone(),
-        ssh_key: Some("/etc/tsong/deploy_key".into()),
-        known_hosts: Some("/etc/tsong/known_hosts".into()),
-        poll,
-    };
+    let mut source = f.source("main", "", "keyed.git");
+    source.ssh_key = Some("/etc/tsong/deploy_key".into());
+    source.known_hosts = Some("/etc/tsong/known_hosts".into());
+    let checkout = source.checkout.clone();
     let store = GitStore::new(&source);
     assert_eq!(store.load().await?.revision, commit);
     let repo_config = std::fs::read_to_string(checkout.join("config"))?;

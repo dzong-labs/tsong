@@ -27,7 +27,7 @@ pub use bootstrap::{
 };
 pub use lint::Warnings;
 pub use network::{allowed, client_ip};
-pub use store::{ConfigStore, FileStore, LoadFuture, Snapshot, hex, unhex};
+pub use store::{ConfigStore, Fetched, FileStore, LoadFuture, Snapshot, hex};
 pub use validate::{Problems, RESERVED_CLAIMS};
 
 /// A whole Tsong configuration.
@@ -315,25 +315,6 @@ pub enum ConfigError {
     /// The store couldn't produce the config, such as a failed fetch.
     #[error("{0}")]
     Store(String),
-    /// The config at a known revision failed, so the failure can name it.
-    #[error("{revision}: {source}")]
-    AtRevision {
-        revision: String,
-        /// The config's content ID, as in [`Snapshot::content`].
-        content: String,
-        author: Option<String>,
-        source: Box<ConfigError>,
-    },
-}
-
-impl ConfigError {
-    /// The error beneath any revision it was found at.
-    pub fn root(&self) -> &ConfigError {
-        match self {
-            Self::AtRevision { source, .. } => source.root(),
-            other => other,
-        }
-    }
 }
 
 impl Config {
@@ -347,33 +328,33 @@ impl Config {
     /// Reads, parses and validates a TOML file. Relative key paths are
     /// taken from the file's directory.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
-        Self::from_file_text(&store::read(path)?, path)
+        Self::from_text(&store::read(path)?, Some(&store::directory(path)))
     }
 
-    /// Parses and validates the text of the file at `path`, taking
-    /// relative key paths from the file's directory.
-    pub(crate) fn from_file_text(text: &str, path: &Path) -> Result<Self, ConfigError> {
+    /// Parses and validates a TOML document, taking relative key paths from
+    /// `base_dir`. Without one, as for a config from Git, a relative key
+    /// path is a problem: it has nothing to be relative to.
+    pub fn from_text(text: &str, base_dir: Option<&Path>) -> Result<Self, ConfigError> {
         let mut config = Self::from_toml(text)?;
-        let dir = path.parent().unwrap_or(Path::new(""));
+        let mut problems = Vec::new();
         for key in &mut config.issuer.signing.keys {
-            if let Some(key_path) = &mut key.path {
-                *key_path = dir.join(&*key_path);
+            let Some(key_path) = &mut key.path else {
+                continue;
+            };
+            match base_dir {
+                Some(dir) => *key_path = dir.join(&*key_path),
+                None if key_path.is_relative() => problems.push(format!(
+                    "issuer.signing.keys {:?} path must be absolute, since the config has no directory",
+                    key.kid
+                )),
+                None => {}
             }
         }
-        Ok(config)
-    }
-
-    /// The kids of signing keys whose file path is relative. A config read
-    /// from somewhere other than a file, such as Git, has no directory to
-    /// resolve them against.
-    pub fn relative_key_paths(&self) -> Vec<&str> {
-        self.issuer
-            .signing
-            .keys
-            .iter()
-            .filter(|key| key.path.as_ref().is_some_and(|path| path.is_relative()))
-            .map(|key| key.kid.as_str())
-            .collect()
+        if problems.is_empty() {
+            Ok(config)
+        } else {
+            Err(ConfigError::Invalid(Problems(problems)))
+        }
     }
 
     /// The active signing key: always one, in a validated config.

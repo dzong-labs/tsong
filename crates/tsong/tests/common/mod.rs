@@ -6,10 +6,11 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use p256::ecdsa::SigningKey;
-use p256::pkcs8::{EncodePrivateKey, LineEnding};
+use hmac::{Hmac, KeyInit, Mac};
+use sha2::Sha256;
 use tsong::reload::Audit;
-use tsong_config::{Config, ConfigError, ConfigStore, LoadFuture, Snapshot};
+use tsong_config::{ConfigError, ConfigStore, Fetched, LoadFuture, Snapshot, hex};
+use tsong_validate::testkit::pem;
 
 pub type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -17,10 +18,22 @@ pub const NOW: u64 = 1_000_000;
 
 /// Writes a signing key to `dir` and returns its path.
 pub fn write_key(dir: &Path) -> TestResult<PathBuf> {
-    let pem = SigningKey::from_slice(&[7; 32])?.to_pkcs8_pem(LineEnding::LF)?;
     let path = dir.join("k1.pem");
-    std::fs::write(&path, pem.as_bytes())?;
+    std::fs::write(&path, pem(7)?)?;
     Ok(path)
+}
+
+/// A port nothing listens on, at the moment it is chosen.
+pub fn free_port() -> TestResult<u16> {
+    let free = std::net::TcpListener::bind("127.0.0.1:0")?;
+    Ok(free.local_addr()?.port())
+}
+
+/// GitHub's `X-Hub-Signature-256` for `body` under `secret`.
+pub fn github_signature(secret: &str, body: &str) -> TestResult<String> {
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())?;
+    mac.update(body.as_bytes());
+    Ok(format!("sha256={}", hex(&mac.finalize().into_bytes())))
 }
 
 /// A route on `host` allowing `scopes`.
@@ -41,6 +54,11 @@ allowed_scopes = [{scopes}]
 /// A config issuing as `issuer` on `port`, signing with the key at `key`,
 /// with `routes`.
 pub fn config_text(key: &Path, issuer: &str, port: u16, routes: &str) -> String {
+    config_on(key, issuer, port, 0, routes)
+}
+
+/// `config_text` with the gateway on `gateway_port`.
+pub fn config_on(key: &Path, issuer: &str, port: u16, gateway_port: u16, routes: &str) -> String {
     format!(
         r#"
 [issuer]
@@ -59,7 +77,7 @@ path = '{}'
 state = "active"
 
 [gateway]
-listen = "127.0.0.1:0"
+listen = "127.0.0.1:{gateway_port}"
 allow = ["127.0.0.0/8"]
 
 [gateway.cache]
@@ -69,25 +87,31 @@ max_entries = 10
     )
 }
 
-/// A snapshot of `text` at `revision`.
-pub fn snapshot(text: &str, revision: &str) -> TestResult<Snapshot> {
-    Ok(Snapshot {
-        config: Config::from_toml(text)?,
+/// `text` as a store fetches it at `revision`, with content of its own.
+pub fn fetched(text: &str, revision: &str) -> TestResult<Fetched> {
+    Ok(Fetched {
+        text: text.into(),
         revision: revision.into(),
         content: format!("content of {revision}"),
         author: Some("Ada <ada@example.test>".into()),
+        base_dir: None,
     })
+}
+
+/// `text` parsed and validated at `revision`.
+pub fn snapshot(text: &str, revision: &str) -> TestResult<Snapshot> {
+    Ok(fetched(text, revision)?.parse()?)
 }
 
 /// A store that answers each load with the next queued result, and with a
 /// store error once the queue is empty.
 #[derive(Default)]
 pub struct QueueStore {
-    queue: Mutex<VecDeque<Result<Snapshot, ConfigError>>>,
+    queue: Mutex<VecDeque<Result<Fetched, ConfigError>>>,
 }
 
 impl QueueStore {
-    pub fn push(&self, result: Result<Snapshot, ConfigError>) {
+    pub fn push(&self, result: Result<Fetched, ConfigError>) {
         self.queue
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

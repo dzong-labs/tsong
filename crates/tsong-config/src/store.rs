@@ -1,4 +1,6 @@
 //! Where a config comes from: a file, or a Git branch, behind one trait.
+//! A store only fetches the config's text; parsing and validating it is
+//! the caller's, through [`Fetched::parse`].
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -8,10 +10,10 @@ use sha2::{Digest, Sha256};
 
 use crate::{Config, ConfigError};
 
-/// A validated config and the revision it was read at.
+/// A config's text, and where it was read.
 #[derive(Debug, Clone)]
-pub struct Snapshot {
-    pub config: Config,
+pub struct Fetched {
+    pub text: String,
     /// What identifies where the config was read: a commit ID, or a hash
     /// of a file's contents.
     pub revision: String,
@@ -21,14 +23,39 @@ pub struct Snapshot {
     pub content: String,
     /// Who made this revision, when the store knows.
     pub author: Option<String>,
+    /// The directory relative key paths are taken from. A config with none,
+    /// such as one from Git, must give its key paths in full.
+    pub base_dir: Option<PathBuf>,
+}
+
+/// A validated config and the revision it was read at.
+#[derive(Debug, Clone)]
+pub struct Snapshot {
+    pub config: Config,
+    pub revision: String,
+    pub content: String,
+    pub author: Option<String>,
+}
+
+impl Fetched {
+    /// Parses and validates the text.
+    pub fn parse(self) -> Result<Snapshot, ConfigError> {
+        Ok(Snapshot {
+            config: Config::from_text(&self.text, self.base_dir.as_deref())?,
+            revision: self.revision,
+            content: self.content,
+            author: self.author,
+        })
+    }
 }
 
 /// What [`ConfigStore::load`] returns.
-pub type LoadFuture<'a> = Pin<Box<dyn Future<Output = Result<Snapshot, ConfigError>> + Send + 'a>>;
+pub type LoadFuture<'a> = Pin<Box<dyn Future<Output = Result<Fetched, ConfigError>> + Send + 'a>>;
 
-/// A source of validated configs.
+/// A source of config text.
 pub trait ConfigStore: Send + Sync {
-    /// Loads the current config, validated.
+    /// Fetches the current config's text. The only errors are fetching
+    /// errors: [`ConfigError::Read`] or [`ConfigError::Store`].
     fn load(&self) -> LoadFuture<'_>;
 }
 
@@ -46,14 +73,15 @@ impl FileStore {
 
 impl ConfigStore for FileStore {
     fn load(&self) -> LoadFuture<'_> {
-        let result = read(&self.path).and_then(|text| {
+        let result = read(&self.path).map(|text| {
             let hash = hex(&Sha256::digest(text.as_bytes()));
-            Ok(Snapshot {
-                config: Config::from_file_text(&text, &self.path)?,
+            Fetched {
+                text,
                 revision: hash.clone(),
                 content: hash,
                 author: None,
-            })
+                base_dir: Some(directory(&self.path)),
+            }
         });
         Box::pin(async move { result })
     }
@@ -67,17 +95,9 @@ pub(crate) fn read(path: &Path) -> Result<String, ConfigError> {
     })
 }
 
-/// Hexadecimal text, in either case, as bytes.
-pub fn unhex(text: &[u8]) -> Option<Vec<u8>> {
-    if !text.len().is_multiple_of(2) {
-        return None;
-    }
-    text.chunks(2)
-        .map(|pair| {
-            let digits = std::str::from_utf8(pair).ok()?;
-            u8::from_str_radix(digits, 16).ok()
-        })
-        .collect()
+/// The directory holding the file at `path`.
+pub(crate) fn directory(path: &Path) -> PathBuf {
+    path.parent().unwrap_or(Path::new("")).to_owned()
 }
 
 /// Bytes as lowercase hexadecimal.

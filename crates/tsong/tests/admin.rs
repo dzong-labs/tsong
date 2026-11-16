@@ -1,21 +1,19 @@
-use std::error::Error;
+mod common;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use hmac::{Hmac, KeyInit, Mac};
+use common::{TestResult, github_signature};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
-use sha2::Sha256;
 use tokio::sync::Notify;
 use tower::ServiceExt;
 use tsong::admin::{Hook, status_router, webhook_router};
 use tsong::reload::Status;
 use tsong_config::{GitHost, hex};
-
-type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
 const PUSH_MAIN: &str = r#"{"ref":"refs/heads/main","after":"abc"}"#;
 
@@ -45,12 +43,6 @@ fn webhook(host: GitHost) -> TestResult<Fixture> {
         reload,
         secret,
     })
-}
-
-fn github_signature(secret: &str, body: &str) -> TestResult<String> {
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())?;
-    mac.update(body.as_bytes());
-    Ok(format!("sha256={}", hex(&mac.finalize().into_bytes())))
 }
 
 /// Delivers `body` with `header` set to `value`, returning the status.

@@ -2,7 +2,7 @@
 //! in, or keep the old state and say why. Every attempt that finds a new
 //! revision, or fails, is audited and counted.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde_json::json;
 use tokio::sync::watch;
 use tsong_clock::Clock;
-use tsong_config::{Config, ConfigError, ConfigStore};
+use tsong_config::{Config, ConfigStore, Route};
 
 /// The store couldn't produce the config, such as a failed fetch.
 pub const FETCH_FAILED: &str = "fetch_failed";
@@ -125,18 +125,31 @@ impl Reloader {
         self.status.clone()
     }
 
-    /// Loads the store's config and, when its revision is new and it
-    /// builds, swaps it in.
+    /// Fetches the store's config and, when its content is new and it
+    /// parses, validates and builds, swaps it in.
     pub async fn reload(&self) -> Outcome {
         let current = self.state.borrow().clone();
-        let snapshot = match self.store.load().await {
-            Ok(snapshot) => snapshot,
-            Err(error) => return self.failed_load(&current, &error),
+        let fetched = match self.store.load().await {
+            Ok(fetched) => fetched,
+            Err(error) => return self.reject(&current, None, FETCH_FAILED, error.to_string()),
         };
-        if snapshot.content == current.content {
+        let content = fetched.content.clone();
+        let rejected = self
+            .invalid
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if content == current.content || rejected.as_ref() == Some(&content) {
             return Outcome::Unchanged;
         }
-        let revision = snapshot.revision.clone();
+        let revision = fetched.revision.clone();
+        let snapshot = match fetched.parse() {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                *self.invalid.lock().unwrap_or_else(PoisonError::into_inner) = Some(content);
+                return self.reject(&current, Some(&revision), INVALID_CONFIG, error.to_string());
+            }
+        };
         let next = match State::build(snapshot, self.clock.clone()) {
             Ok(next) => next,
             Err(error) => {
@@ -154,33 +167,6 @@ impl Reloader {
         self.audit.record(&line);
         self.state.send_replace(Arc::new(next));
         Outcome::Applied
-    }
-
-    /// Rejects a config the store couldn't load, unless it is the invalid
-    /// config already rejected.
-    fn failed_load(&self, current: &State, error: &ConfigError) -> Outcome {
-        let reason = match error.root() {
-            ConfigError::Parse(_) | ConfigError::Invalid(_) => INVALID_CONFIG,
-            ConfigError::Read { .. } | ConfigError::Store(_) | ConfigError::AtRevision { .. } => {
-                FETCH_FAILED
-            }
-        };
-        let (revision, content) = match error {
-            ConfigError::AtRevision {
-                revision, content, ..
-            } => (Some(revision.as_str()), Some(content)),
-            _ => (None, None),
-        };
-        if reason == INVALID_CONFIG
-            && let Some(content) = content
-        {
-            let mut invalid = self.invalid.lock().unwrap_or_else(PoisonError::into_inner);
-            if invalid.as_ref() == Some(content) {
-                return Outcome::Unchanged;
-            }
-            *invalid = Some(content.clone());
-        }
-        self.reject(current, revision, reason, error.to_string())
     }
 
     fn reject(
@@ -215,51 +201,55 @@ impl Reloader {
 
 /// The audit line for `next` replacing `previous`, or for the first load.
 fn applied(previous: Option<&Config>, next: &State, status: &Status) -> String {
-    let hosts = |config: Option<&Config>| -> BTreeSet<String> {
-        config
-            .map(|config| {
-                config
-                    .routes
-                    .iter()
-                    .map(|route| route.host.to_ascii_lowercase())
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-    let (old, new) = (hosts(previous), hosts(Some(&next.config)));
-    let route = |config: &Config, host: &str| {
-        config
-            .routes
-            .iter()
-            .find(|route| route.host.eq_ignore_ascii_case(host))
-            .cloned()
-    };
-    let changed: Vec<&String> = match previous {
-        Some(previous) => old
-            .intersection(&new)
-            .filter(|host| route(previous, host) != route(&next.config, host))
-            .collect(),
-        None => Vec::new(),
-    };
-    let restart: Vec<&str> = match previous {
-        Some(previous) => listen_addresses(previous)
-            .into_iter()
-            .zip(listen_addresses(&next.config))
-            .filter(|(old, new)| old != new)
-            .map(|((field, _), _)| field)
-            .collect(),
-        None => Vec::new(),
-    };
+    let old = previous.map(routes_by_host).unwrap_or_default();
+    let new = routes_by_host(&next.config);
+    let added: Vec<&str> = new
+        .keys()
+        .filter(|host| !old.contains_key(*host))
+        .map(String::as_str)
+        .collect();
+    let removed: Vec<&str> = old
+        .keys()
+        .filter(|host| !new.contains_key(*host))
+        .map(String::as_str)
+        .collect();
+    let changed: Vec<&str> = old
+        .iter()
+        .filter(|(host, route)| new.get(*host).is_some_and(|next| next != *route))
+        .map(|(host, _)| host.as_str())
+        .collect();
+    let restart: Vec<&str> = previous
+        .map(|previous| {
+            listen_addresses(previous)
+                .into_iter()
+                .zip(listen_addresses(&next.config))
+                .filter(|(old, new)| old != new)
+                .map(|((field, _), _)| field)
+                .collect()
+        })
+        .unwrap_or_default();
     json!({
         "event": "config_reload",
         "at": status.loaded_at,
         "outcome": "applied",
         "revision": next.revision,
         "author": next.author,
-        "routes_added": new.difference(&old).collect::<Vec<_>>(),
-        "routes_removed": old.difference(&new).collect::<Vec<_>>(),
+        "routes_added": added,
+        "routes_removed": removed,
         "routes_changed": changed,
         "restart_required": restart,
     })
     .to_string()
+}
+
+/// A config's routes keyed by lowercased host, the first route winning a
+/// repeated host, as in `RouteTable`.
+fn routes_by_host(config: &Config) -> BTreeMap<String, &Route> {
+    let mut routes = BTreeMap::new();
+    for route in &config.routes {
+        routes
+            .entry(route.host.to_ascii_lowercase())
+            .or_insert(route);
+    }
+    routes
 }

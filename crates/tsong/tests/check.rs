@@ -1,13 +1,11 @@
-use std::error::Error;
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use p256::ecdsa::SigningKey;
-use p256::pkcs8::{EncodePrivateKey, LineEnding};
+use common::{TestResult, config_on, free_port, write_key};
 use serde_json::{Value, json};
-
-type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
 /// A config in `dir` with the issuer on `port`, with its key file unless
 /// `with_key` is false.
@@ -25,33 +23,14 @@ fn write_config_with(
     extra: &str,
 ) -> TestResult<PathBuf> {
     if with_key {
-        let pem = SigningKey::from_slice(&[7; 32])?.to_pkcs8_pem(LineEnding::LF)?;
-        std::fs::write(dir.join("k1.pem"), pem.as_bytes())?;
+        write_key(dir)?;
     }
-    let config = format!(
-        r#"
-[issuer]
-url = "https://tsong.example.com"
-listen = "127.0.0.1:{port}"
-token_lifetime = "15m"
-clock_skew = "30s"
-
-[issuer.signing]
-provider = "file"
-algorithm = "ES256"
-
-[[issuer.signing.keys]]
-kid = "k1"
-path = "k1.pem"
-state = "active"
-
-[gateway]
-listen = "127.0.0.1:{gateway_port}"
-allow = ["127.0.0.0/8"]
-
-[gateway.cache]
-max_entries = 10
-{extra}"#
+    let config = config_on(
+        Path::new("k1.pem"),
+        "https://tsong.example.com",
+        port,
+        gateway_port,
+        extra,
     );
     let path = dir.join("tsong.toml");
     std::fs::write(&path, config)?;
@@ -77,12 +56,6 @@ fn failure<T: std::fmt::Debug>(result: Result<T, tsong::Error>) -> TestResult<ts
         Ok(value) => Err(format!("expected an error, got {value:?}").into()),
         Err(error) => Ok(error),
     }
-}
-
-/// A port nothing listens on, at the moment it is chosen.
-fn free_port() -> TestResult<u16> {
-    let free = std::net::TcpListener::bind("127.0.0.1:0")?;
-    Ok(free.local_addr()?.port())
 }
 
 /// The issuer's discovery document on `port`, once it answers.

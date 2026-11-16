@@ -13,7 +13,7 @@ use tower::ServiceExt;
 use tsong::reload::{Outcome, Reloader, Status};
 use tsong::state::{State, current};
 use tsong_clock::{Clock, ManualClock};
-use tsong_config::ConfigError;
+use tsong_config::{ConfigError, Fetched};
 
 struct Fixture {
     _dir: tempfile::TempDir,
@@ -103,7 +103,7 @@ async fn the_same_revision_changes_nothing() -> TestResult {
     let f = Fixture::new()?;
     let text = f.text("https://one.test", 8444, "");
     let reloader = f.reloader(&text)?;
-    f.store.push(Ok(snapshot(&text, "r1")?));
+    f.store.push(Ok(fetched(&text, "r1")?));
     assert_eq!(reloader.reload().await, Outcome::Unchanged);
     assert_eq!(f.lines.parsed()?.len(), 1);
     assert_eq!(status(&reloader).reloads, 1);
@@ -126,7 +126,7 @@ async fn a_new_revision_is_swapped_in_and_its_changes_audited() -> TestResult {
         route("c", "c.example.com", "\"read\""),
         route("d", "d.example.com", "\"read\"")
     );
-    f.store.push(Ok(snapshot(
+    f.store.push(Ok(fetched(
         &f.text("https://two.test", 9444, &after),
         "r2",
     )?));
@@ -164,7 +164,7 @@ async fn an_unchanged_route_and_address_are_not_reported() -> TestResult {
     let f = Fixture::new()?;
     let routes = route("a", "a.example.com", "\"read\"");
     let reloader = f.reloader(&f.text("https://one.test", 8444, &routes))?;
-    f.store.push(Ok(snapshot(
+    f.store.push(Ok(fetched(
         &f.text("https://two.test", 8444, &routes),
         "r2",
     )?));
@@ -219,7 +219,7 @@ async fn a_config_whose_state_fails_to_build_is_rejected() -> TestResult {
     let reloader = f.reloader(&f.text("https://one.test", 8444, ""))?;
     let missing = f.key.with_file_name("missing.pem");
     let text = config_text(&missing, "https://two.test", 8444, "");
-    f.store.push(Ok(snapshot(&text, "r2")?));
+    f.store.push(Ok(fetched(&text, "r2")?));
     let Outcome::Rejected(error) = reloader.reload().await else {
         return Err("expected a rejection".into());
     };
@@ -239,28 +239,29 @@ async fn a_config_whose_state_fails_to_build_is_rejected() -> TestResult {
 async fn each_failure_has_a_short_reason_and_the_detail_only_in_the_log() -> TestResult {
     let f = Fixture::new()?;
     let reloader = f.reloader(&f.text("https://one.test", 8444, ""))?;
-    let invalid = tsong_config::Config::from_toml("max_entries = [").err();
-    let parse = match invalid {
-        Some(error @ ConfigError::Parse(_)) => error,
-        other => return Err(format!("expected a parse error, got {other:?}").into()),
-    };
-    let missing = std::path::PathBuf::from("missing.toml");
-    for (error, reason) in [
-        (parse, "invalid_config"),
-        (
-            ConfigError::Invalid(tsong_config::Problems(vec!["a problem".into()])),
+    let unparsable = fetched("max_entries = [", "r2")?;
+    let invalid = fetched(
+        &f.text("https://two.test", 8444, "")
+            .replace("max_entries = 10", "max_entries = 0"),
+        "r3",
+    )?;
+    let mut cases = Vec::new();
+    for text in [unparsable, invalid] {
+        let detail = text.clone().parse().err().map(|error| error.to_string());
+        cases.push((
+            Ok(text),
+            detail.ok_or("expected a failure")?,
             "invalid_config",
-        ),
-        (
-            ConfigError::Read {
-                path: missing,
-                source: std::io::Error::other("gone"),
-            },
-            "fetch_failed",
-        ),
-    ] {
-        let detail = error.to_string();
-        f.store.push(Err(error));
+        ));
+    }
+    let unreadable = ConfigError::Read {
+        path: "missing.toml".into(),
+        source: std::io::Error::other("gone"),
+    };
+    let detail = unreadable.to_string();
+    cases.push((Err(unreadable), detail, "fetch_failed"));
+    for (result, detail, reason) in cases {
+        f.store.push(result);
         assert_eq!(reloader.reload().await, Outcome::Rejected(detail.clone()));
         let line = f.lines.parsed()?.last().cloned().ok_or("no line")?;
         assert_eq!(line.get("reason"), Some(&json!(reason)), "{detail}");
@@ -287,7 +288,7 @@ async fn requests_reach_the_current_state() -> TestResult {
     let gateway = current(reloader.subscribe(), |state| &state.gateway);
     assert_eq!(issuer_of(&issuer).await?, json!("https://one.test"));
     f.store
-        .push(Ok(snapshot(&f.text("https://two.test", 8444, ""), "r2")?));
+        .push(Ok(fetched(&f.text("https://two.test", 8444, ""), "r2")?));
     reloader.reload().await;
     assert_eq!(issuer_of(&issuer).await?, json!("https://two.test"));
     let unrouted = Request::get("/")
@@ -329,7 +330,7 @@ async fn the_loop_reloads_on_each_trigger_and_stops_when_told() -> TestResult {
         })
     };
     f.store
-        .push(Ok(snapshot(&f.text("https://two.test", 8444, ""), "r2")?));
+        .push(Ok(fetched(&f.text("https://two.test", 8444, ""), "r2")?));
     trigger.notify_one();
     reloaded(&reloader, 2).await?;
     stop.send(()).map_err(|()| "the loop stopped early")?;
@@ -342,7 +343,7 @@ async fn the_loop_reloads_on_each_poll() -> TestResult {
     let f = Fixture::new()?;
     let reloader = Arc::new(f.reloader(&f.text("https://one.test", 8444, ""))?);
     f.store
-        .push(Ok(snapshot(&f.text("https://two.test", 8444, ""), "r2")?));
+        .push(Ok(fetched(&f.text("https://two.test", 8444, ""), "r2")?));
     let trigger = Notify::new();
     let polling = tsong::reload_loop(&reloader, &trigger, Duration::from_millis(10), async {
         let _ = reloaded(&reloader, 2).await;
@@ -367,7 +368,7 @@ async fn a_new_revision_with_the_same_content_changes_nothing() -> TestResult {
     let f = Fixture::new()?;
     let text = f.text("https://one.test", 8444, "");
     let reloader = f.reloader(&text)?;
-    let mut unrelated = snapshot(&text, "r2")?;
+    let mut unrelated = fetched(&text, "r2")?;
     unrelated.content = "content of r1".into();
     f.store.push(Ok(unrelated));
     assert_eq!(reloader.reload().await, Outcome::Unchanged);
@@ -376,16 +377,11 @@ async fn a_new_revision_with_the_same_content_changes_nothing() -> TestResult {
     Ok(())
 }
 
-/// A config rejected as invalid at `revision`, with `content`.
-fn invalid_at(revision: &str, content: &str) -> ConfigError {
-    ConfigError::AtRevision {
-        revision: revision.into(),
-        content: content.into(),
-        author: Some("Ada <ada@example.test>".into()),
-        source: Box::new(ConfigError::Invalid(tsong_config::Problems(vec![
-            "a problem".into(),
-        ]))),
-    }
+/// Text that doesn't parse, fetched at `revision` with `content`.
+fn invalid_at(revision: &str, content: &str) -> TestResult<Fetched> {
+    let mut invalid = fetched("not toml [", revision)?;
+    invalid.content = content.into();
+    Ok(invalid)
 }
 
 #[tokio::test]
@@ -393,11 +389,11 @@ async fn an_invalid_config_is_rejected_once_until_it_changes() -> TestResult {
     let f = Fixture::new()?;
     let text = f.text("https://one.test", 8444, "");
     let reloader = f.reloader(&text)?;
-    f.store.push(Err(invalid_at("r2", "bad")));
+    f.store.push(Ok(invalid_at("r2", "bad")?));
     let Outcome::Rejected(detail) = reloader.reload().await else {
         return Err("expected a rejection".into());
     };
-    assert_eq!(detail, "r2: invalid config:\n- a problem\n");
+    assert!(detail.starts_with("parsing: "), "{detail}");
     let line = f
         .lines
         .parsed()?
@@ -407,7 +403,7 @@ async fn an_invalid_config_is_rejected_once_until_it_changes() -> TestResult {
     assert_eq!(line.get("revision"), Some(&json!("r2")));
     assert_eq!(line.get("reason"), Some(&json!("invalid_config")));
 
-    f.store.push(Err(invalid_at("r3", "bad")));
+    f.store.push(Ok(invalid_at("r3", "bad")?));
     assert_eq!(reloader.reload().await, Outcome::Unchanged);
     assert_eq!(
         f.lines.parsed()?.len(),
@@ -416,14 +412,14 @@ async fn an_invalid_config_is_rejected_once_until_it_changes() -> TestResult {
     );
     assert_eq!(status(&reloader).failed_reloads, 1);
 
-    f.store.push(Err(invalid_at("r4", "worse")));
+    f.store.push(Ok(invalid_at("r4", "worse")?));
     assert!(matches!(reloader.reload().await, Outcome::Rejected(_)));
     assert_eq!(status(&reloader).failed_reloads, 2);
 
     f.store
-        .push(Ok(snapshot(&f.text("https://two.test", 8444, ""), "r5")?));
+        .push(Ok(fetched(&f.text("https://two.test", 8444, ""), "r5")?));
     assert_eq!(reloader.reload().await, Outcome::Applied);
-    f.store.push(Err(invalid_at("r6", "worse")));
+    f.store.push(Ok(invalid_at("r6", "worse")?));
     assert!(
         matches!(reloader.reload().await, Outcome::Rejected(_)),
         "a valid config in between clears the memory"
@@ -436,13 +432,7 @@ async fn a_failed_fetch_is_retried_every_time() -> TestResult {
     let f = Fixture::new()?;
     let reloader = f.reloader(&f.text("https://one.test", 8444, ""))?;
     for _ in 0..2 {
-        let at_revision = ConfigError::AtRevision {
-            revision: "r2".into(),
-            content: "c".into(),
-            author: None,
-            source: Box::new(ConfigError::Store("offline".into())),
-        };
-        f.store.push(Err(at_revision));
+        f.store.push(Err(ConfigError::Store("offline".into())));
         assert!(matches!(reloader.reload().await, Outcome::Rejected(_)));
     }
     assert_eq!(status(&reloader).failed_reloads, 2);

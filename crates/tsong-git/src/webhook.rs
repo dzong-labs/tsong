@@ -1,9 +1,9 @@
 //! Verifying a Git host's push webhook, and reading which branch it moved.
 
 use hmac::{Hmac, KeyInit, Mac};
-use serde_json::Value;
+use serde::Deserialize;
 use sha2::Sha256;
-use tsong_config::{GitHost, unhex};
+use tsong_config::GitHost;
 
 /// The header GitHub signs deliveries in.
 pub const GITHUB_SIGNATURE: &str = "x-hub-signature-256";
@@ -51,16 +51,36 @@ fn verify_github(secret: &[u8], signature: &[u8], body: &[u8]) -> bool {
 /// ping. The delivery is JSON, or GitHub's default form encoding with the
 /// JSON in a `payload` field.
 pub fn pushed_branch(body: &[u8]) -> Option<String> {
-    let delivery: Value = match serde_json::from_slice(body) {
-        Ok(delivery) => delivery,
+    let push: Push = match serde_json::from_slice(body) {
+        Ok(push) => push,
         Err(_) => {
             let (_, payload) =
                 url::form_urlencoded::parse(body).find(|(name, _)| name == "payload")?;
             serde_json::from_str(&payload).ok()?
         }
     };
-    let reference = delivery.get("ref")?.as_str()?;
-    Some(reference.strip_prefix("refs/heads/")?.to_owned())
+    Some(push.reference.strip_prefix("refs/heads/")?.to_owned())
+}
+
+/// The one field of a push delivery Tsong reads; the rest, such as the
+/// commits, is skipped without being built.
+#[derive(Deserialize)]
+struct Push {
+    #[serde(rename = "ref")]
+    reference: String,
+}
+
+/// Hexadecimal text, in either case, as bytes.
+fn unhex(text: &[u8]) -> Option<Vec<u8>> {
+    if !text.len().is_multiple_of(2) {
+        return None;
+    }
+    text.chunks(2)
+        .map(|pair| {
+            let digits = std::str::from_utf8(pair).ok()?;
+            u8::from_str_radix(digits, 16).ok()
+        })
+        .collect()
 }
 
 /// Whether `a` and `b` are equal, in time that depends only on their

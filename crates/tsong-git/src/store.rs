@@ -1,16 +1,14 @@
 //! A config store that reads `tsong.toml` from a folder on a Git branch.
 
 use std::fmt::Display;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gix::config::tree::Core;
 use gix::remote::Direction;
-use tsong_config::{
-    CONFIG_FILE, Config, ConfigError, ConfigStore, GitSource, LoadFuture, Problems, Snapshot,
-};
+use tsong_config::{CONFIG_FILE, ConfigError, ConfigStore, Fetched, GitSource, LoadFuture};
 
 /// The longest a fetch may take before it is abandoned.
 pub const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
@@ -20,21 +18,9 @@ pub const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
 /// commit without checking anything out.
 #[derive(Debug, Clone)]
 pub struct GitStore {
-    url: String,
-    branch: String,
-    folder: String,
-    checkout: PathBuf,
+    source: GitSource,
     ssh_command: Option<String>,
     timeout: Duration,
-}
-
-/// What a fetch found: the commit, its author, and the config file's blob
-/// ID and text.
-struct Fetched {
-    commit: String,
-    author: Option<String>,
-    blob: String,
-    text: String,
 }
 
 /// Sets its flag when dropped, so a fetch abandoned by a timeout or a
@@ -55,10 +41,7 @@ impl GitStore {
             _ => None,
         };
         Self {
-            url: source.url.clone(),
-            branch: source.branch.clone(),
-            folder: source.folder.clone(),
-            checkout: source.checkout.clone(),
+            source: source.clone(),
             ssh_command,
             timeout: FETCH_TIMEOUT,
         }
@@ -72,7 +55,7 @@ impl GitStore {
 
     /// The config file's path within the repository.
     fn file(&self) -> String {
-        match self.folder.trim_matches('/') {
+        match self.source.folder.trim_matches('/') {
             "" => CONFIG_FILE.to_owned(),
             folder => format!("{folder}/{CONFIG_FILE}"),
         }
@@ -82,14 +65,15 @@ impl GitStore {
     /// is empty. A clone that exists but can't be opened is an error, not a
     /// reason to start over.
     fn repository(&self) -> Result<gix::Repository, String> {
-        let empty = std::fs::read_dir(&self.checkout)
+        let checkout = &self.source.checkout;
+        let empty = std::fs::read_dir(checkout)
             .map(|mut entries| entries.next().is_none())
             .unwrap_or(false);
-        if self.checkout.exists() && !empty {
-            return gix::open(&self.checkout).map_err(failed("opening the clone"));
+        if checkout.exists() && !empty {
+            return gix::open(checkout).map_err(failed("opening the clone"));
         }
-        std::fs::create_dir_all(&self.checkout).map_err(failed("creating the clone"))?;
-        gix::init_bare(&self.checkout).map_err(failed("creating the clone"))
+        std::fs::create_dir_all(checkout).map_err(failed("creating the clone"))?;
+        gix::init_bare(checkout).map_err(failed("creating the clone"))
     }
 
     /// Fetches the branch and reads the config file from its tip. Blocking;
@@ -103,9 +87,10 @@ impl GitStore {
                 .map_err(failed("setting the ssh command"))?;
             config.commit().map_err(failed("setting the ssh command"))?;
         }
-        let tracking = format!("refs/remotes/origin/{}", self.branch);
-        let refspec = format!("+refs/heads/{}:{tracking}", self.branch);
-        repo.remote_at(self.url.as_str())
+        let branch = &self.source.branch;
+        let tracking = format!("refs/remotes/origin/{branch}");
+        let refspec = format!("+refs/heads/{branch}:{tracking}");
+        repo.remote_at(self.source.url.as_str())
             .map_err(failed("reading the url"))?
             .with_refspecs(Some(refspec.as_str()), Direction::Fetch)
             .map_err(failed("setting the refspec"))?
@@ -131,15 +116,17 @@ impl GitStore {
             .map_err(failed("reading the commit's tree"))?
             .lookup_entry_by_path(file.as_str())
             .map_err(failed("finding the config"))?
-            .ok_or_else(|| format!("{file} is not on {}", self.branch))?;
-        let blob = entry.object().map_err(failed("reading the config"))?;
-        let text =
-            String::from_utf8(blob.data.clone()).map_err(|_| format!("{file} is not UTF-8"))?;
+            .ok_or_else(|| format!("{file} is not on {branch}"))?;
+        let mut blob = entry.object().map_err(failed("reading the config"))?;
+        let content = blob.id.to_string();
+        let text = String::from_utf8(std::mem::take(&mut blob.data))
+            .map_err(|_| format!("{file} is not UTF-8"))?;
         Ok(Fetched {
-            commit: commit.id.to_string(),
-            author,
-            blob: blob.id.to_string(),
             text,
+            revision: commit.id.to_string(),
+            content,
+            author,
+            base_dir: None,
         })
     }
 }
@@ -158,31 +145,7 @@ impl ConfigStore for GitStore {
                 .map_err(|error| ConfigError::Store(format!("fetching: {error}")))?
                 .map_err(ConfigError::Store)?;
             drop(interrupt);
-            let at_revision = |source: ConfigError| ConfigError::AtRevision {
-                revision: fetched.commit.clone(),
-                content: fetched.blob.clone(),
-                author: fetched.author.clone(),
-                source: Box::new(source),
-            };
-            let config = Config::from_toml(&fetched.text).map_err(at_revision)?;
-            let relative = config.relative_key_paths();
-            if !relative.is_empty() {
-                let problems = relative
-                    .into_iter()
-                    .map(|kid| {
-                        format!(
-                            "issuer.signing.keys {kid:?} path must be absolute in a config from Git"
-                        )
-                    })
-                    .collect();
-                return Err(at_revision(ConfigError::Invalid(Problems(problems))));
-            }
-            Ok(Snapshot {
-                config,
-                revision: fetched.commit,
-                content: fetched.blob,
-                author: fetched.author,
-            })
+            Ok(fetched)
         })
     }
 }
