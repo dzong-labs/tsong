@@ -463,6 +463,14 @@ fn keys_trusted_for_more_than_a_day_warn() -> TestResult {
         "{}",
         longer.warnings()
     );
+    let introspected = Config::from_toml(&okta_with(
+        "jwks_max_age = \"25h\"\nvalidation = \"introspection\"\nintrospection_url = \"https://okta.example.com/introspect\"\nclient_id = \"tsong\"\nclient_secret_env = \"SECRET\"",
+    ))?;
+    assert!(
+        !introspected.warnings().0.contains(&warning),
+        "{}",
+        introspected.warnings()
+    );
     Ok(())
 }
 

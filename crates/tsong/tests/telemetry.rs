@@ -169,14 +169,29 @@ async fn the_refresher_refetches_expired_keys_and_reports_their_age() -> TestRes
             .get()
     };
 
+    let stale = IssuerLabel {
+        issuer: "https://removed.test".into(),
+    };
+    metrics.jwks_age.get_or_create(&stale).set(42);
+
+    fetcher.fail(true);
     refresh(&issuer, &metrics.jwks_age).await;
-    assert_eq!((fetcher.fetches(), age()), (1, 0));
-    clock.advance(Duration::from_secs(3599));
-    refresh(&issuer, &metrics.jwks_age).await;
-    assert_eq!((fetcher.fetches(), age()), (1, 3599));
-    clock.advance(Duration::from_secs(1));
+    let encoded = metrics.encode()?;
+    assert!(
+        !encoded.contains("okta.test") && !encoded.contains("removed.test"),
+        "keys never fetched, or an issuer no longer trusted, have no age: {encoded}"
+    );
+
+    fetcher.fail(false);
+    clock.advance(Duration::from_secs(10));
     refresh(&issuer, &metrics.jwks_age).await;
     assert_eq!((fetcher.fetches(), age()), (2, 0));
+    clock.advance(Duration::from_secs(2699));
+    refresh(&issuer, &metrics.jwks_age).await;
+    assert_eq!((fetcher.fetches(), age()), (2, 2699));
+    clock.advance(Duration::from_secs(1));
+    refresh(&issuer, &metrics.jwks_age).await;
+    assert_eq!((fetcher.fetches(), age()), (3, 0));
     Ok(())
 }
 

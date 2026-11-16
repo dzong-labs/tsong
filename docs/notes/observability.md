@@ -45,7 +45,7 @@ Like the webhook's, the list is deployed, never loaded from Git, and checked aga
 | `tsong_downstream_seconds` | `route` | Time to a downstream's response headers, 1ms to about 16s |
 | `tsong_exchanges_total` | `outcome` | Token exchanges: `issued`, or the OAuth error code |
 | `tsong_jwks_fetch_failures_total` | `issuer` | Failed JWKS fetches, by the trusted issuer's `iss` |
-| `tsong_jwks_age_seconds` | `issuer` | Seconds since the trusted issuer's keys were fetched. Past its `jwks_max_age`, its tokens are refused |
+| `tsong_jwks_age_seconds` | `issuer` | Seconds since the trusted issuer's keys were fetched, for the config being served. Past its `jwks_max_age`, its tokens are refused. An issuer whose keys were never fetched has no series |
 | `tsong_config_reloads_total` | `outcome` | Reloads that found a new revision: `applied`, `fetch_failed`, `invalid_config` or `build_failed` |
 
 Labelling by route costs one series per route and status, and one histogram per route. That cost grows with the route count.

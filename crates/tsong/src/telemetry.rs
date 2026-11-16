@@ -41,7 +41,9 @@ pub struct Metrics {
     pub exchanges: Family<OutcomeLabel, Counter>,
     /// Failed JWKS fetches, by trusted issuer.
     pub jwks_failures: Family<IssuerLabel, Counter>,
-    /// Seconds since each trusted issuer's keys were fetched.
+    /// Seconds since each trusted issuer's keys were fetched, for the
+    /// config being served. An issuer whose keys were never fetched has no
+    /// series.
     pub jwks_age: Family<IssuerLabel, Gauge>,
     /// Config reloads that found a new revision, by outcome.
     pub reloads: Family<OutcomeLabel, Counter>,
@@ -129,7 +131,9 @@ impl ExchangeObserver for ExchangeAudit {
 }
 
 /// A JWKS fetcher that counts each failed fetch by issuer and audits it,
-/// and audits the first fetch that succeeds after a failure.
+/// and audits the first fetch that succeeds after a failure. One serves
+/// every config the process loads, so a reload doesn't forget an issuer
+/// that is failing.
 pub struct ObservedFetcher<F> {
     inner: F,
     failures: Family<IssuerLabel, Counter>,
@@ -208,9 +212,10 @@ impl<F: JwksFetcher> JwksFetcher for ObservedFetcher<F> {
 /// How often the refresher looks for expired keys.
 pub const REFRESH_TICK: Duration = Duration::from_secs(1);
 
-/// Keeps one config's trusted-issuer keys current: each tick it refetches
-/// expired keys and reports every issuer's key age. It stops when dropped,
-/// which a reload does once the old state's requests finish.
+/// Keeps one config's trusted-issuer keys current: each tick it renews keys
+/// that are due and reports every issuer's key age. It stops when dropped,
+/// which happens when a reload swaps in a new state; requests still
+/// finishing on the old state use its keys as they are.
 pub struct Refresher(tokio::task::JoinHandle<()>);
 
 impl Refresher {
@@ -237,12 +242,15 @@ impl Drop for Refresher {
     }
 }
 
-/// Refetches `issuer`'s expired keys once, then sets each trusted issuer's
-/// key age in `ages`.
+/// Renews `issuer`'s keys that are due, then replaces `ages` with each
+/// trusted issuer's key age. Issuers whose keys were never fetched, and
+/// issuers an earlier config trusted, are left out.
 pub async fn refresh(issuer: &Issuer, ages: &Family<IssuerLabel, Gauge>) {
     let validator = issuer.validator();
     validator.refresh_due().await;
-    for (iss, age) in validator.key_ages().await {
+    let current = validator.key_ages().await;
+    ages.clear();
+    for (iss, age) in current {
         if let Some(age) = age {
             ages.get_or_create(&IssuerLabel { issuer: iss })
                 .set(i64::try_from(age.as_secs()).unwrap_or(i64::MAX));

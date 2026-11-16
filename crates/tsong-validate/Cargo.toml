@@ -12,6 +12,7 @@ workspace = true
 test-util = ["dep:p256", "dep:tsong-keys", "jsonwebtoken/use_pem"]
 
 [dependencies]
+futures-util = { workspace = true, features = ["alloc"] }
 base64.workspace = true
 jsonwebtoken.workspace = true
 p256 = { workspace = true, optional = true }

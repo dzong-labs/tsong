@@ -3304,6 +3304,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64",
+ "futures-util",
  "jsonwebtoken",
  "p256",
  "reqwest",

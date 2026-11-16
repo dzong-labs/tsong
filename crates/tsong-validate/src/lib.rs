@@ -7,10 +7,10 @@
 //! skew. The config sets the values each check compares against; no check
 //! can be turned off.
 //!
-//! Each issuer's keys expire `jwks_max_age` after they were fetched. Expired
-//! keys are refetched, by [`Validator::refresh_due`] or by the next token;
-//! until a refetch succeeds, the issuer's tokens are refused and the refetch
-//! is retried every `jwks_retry`. A token with an unknown key ID, or whose
+//! Each issuer's keys expire `jwks_max_age` after they were fetched.
+//! [`Validator::refresh_due`] renews them before then; keys that expire
+//! anyway are refetched by the next token. Until a fetch succeeds, the
+//! issuer's tokens are refused and the fetch is retried every `jwks_retry`. A token with an unknown key ID, or whose
 //! signature fails with a known one, refetches the keys once, no more often
 //! than `jwks_refetch`.
 //!
@@ -68,7 +68,7 @@ pub enum ValidateError {
     NotYetValid,
     #[error("fetching the issuer's JWKS: {0}")]
     Jwks(#[from] FetchError),
-    #[error("the issuer's keys have expired and a refetch has not succeeded")]
+    #[error("the issuer's keys are missing or expired, and no fetch has succeeded since")]
     KeysExpired,
 }
 
@@ -165,11 +165,15 @@ impl Validator {
         }
         let algorithm = allowed_algorithm(&issuer.trusted, header.alg)?;
         let kid = header.kid.ok_or(ValidateError::MissingKid)?;
-        let jwk = self.key(issuer, &kid, Refetch::IfUnknown).await?;
+        let (jwk, _) = self.key(issuer, &kid, Refetch::IfUnknown).await?;
         match verify(token, &jwk, algorithm) {
             Err(ValidateError::Signature) => {
                 // The issuer may have replaced the key under the same kid.
-                let jwk = self.key(issuer, &kid, Refetch::Now).await?;
+                // A refetch that is skipped, fails or drops the kid leaves
+                // the signature refused: a forgery stays a bad signature.
+                let Ok((jwk, true)) = self.key(issuer, &kid, Refetch::Now).await else {
+                    return Err(ValidateError::Signature);
+                };
                 verify(token, &jwk, algorithm)?;
             }
             other => other?,
@@ -193,25 +197,26 @@ impl Validator {
         }
     }
 
-    /// The key `kid` names. Expired keys are refetched first, retried no
-    /// more often than `jwks_retry` after a failure; while they stay expired
-    /// the key is refused. Fresh
-    /// keys are refetched when `refetch` asks, no more often than
-    /// `jwks_refetch`.
+    /// The key `kid` names, and whether the keys were refetched to find it.
+    /// Missing or expired keys are fetched first, retried no more often than
+    /// `jwks_retry` after a failure; until a fetch succeeds the key is
+    /// refused. Fresh keys are refetched when `refetch` asks, no more often
+    /// than `jwks_refetch`.
     async fn key(
         &self,
         issuer: &Issuer,
         kid: &str,
         refetch: Refetch,
-    ) -> Result<Jwk, ValidateError> {
+    ) -> Result<(Jwk, bool), ValidateError> {
         let trusted = &issuer.trusted;
         let mut keys = issuer.keys.lock().await;
         let now = self.clock.now();
-        if !keys.fresh(now, trusted.jwks_max_age) {
+        let refetched = if !keys.fresh(now, trusted.jwks_max_age) {
             if !keys.may_retry(now, trusted) {
                 return Err(ValidateError::KeysExpired);
             }
             self.refresh(issuer, &mut keys, now).await?;
+            true
         } else {
             let wanted = match refetch {
                 Refetch::IfUnknown => !keys.by_kid.contains_key(kid),
@@ -219,12 +224,17 @@ impl Validator {
             };
             if wanted && keys.may_refetch(now, trusted) {
                 self.refresh(issuer, &mut keys, now).await?;
+                true
+            } else {
+                false
             }
-        }
-        keys.by_kid
+        };
+        let jwk = keys
+            .by_kid
             .get(kid)
             .cloned()
-            .ok_or_else(|| ValidateError::UnknownKey(kid.to_owned()))
+            .ok_or_else(|| ValidateError::UnknownKey(kid.to_owned()))?;
+        Ok((jwk, refetched))
     }
 
     /// Fetches the issuer's keys into `keys`, keeping the signing keys that
@@ -260,24 +270,27 @@ impl Validator {
     }
 
     /// Refetches the keys of every JWT issuer whose keys are missing or
-    /// expired, retrying a failure no more often than its `jwks_retry`. Run
-    /// on a schedule, it
-    /// keeps keys current without waiting for a token, and notices an
-    /// issuer that has come back. A failure leaves that issuer's tokens
-    /// refused; the fetcher reports it.
+    /// three quarters through their `jwks_max_age`, retrying a failure no
+    /// more often than its `jwks_retry`. Run on a schedule, it renews keys
+    /// before they expire, so a brief outage at renewal refuses nothing, and
+    /// it notices an issuer that has come back. Issuers are refreshed at
+    /// once, so one that doesn't answer delays no other. A failure is the
+    /// fetcher's to report; keys it leaves expired refuse their tokens.
     pub async fn refresh_due(&self) {
-        for issuer in &self.issuers {
-            let trusted = &issuer.trusted;
-            if trusted.validation != Validation::Jwt {
-                continue;
-            }
-            let mut keys = issuer.keys.lock().await;
-            let now = self.clock.now();
-            if !keys.fresh(now, trusted.jwks_max_age) && keys.may_retry(now, trusted) {
-                // A failure is the fetcher's to report; the keys stay expired.
-                let _ = self.refresh(issuer, &mut keys, now).await;
-            }
-        }
+        let refreshes = self
+            .issuers
+            .iter()
+            .filter(|issuer| issuer.trusted.validation == Validation::Jwt)
+            .map(|issuer| async move {
+                let trusted = &issuer.trusted;
+                let mut keys = issuer.keys.lock().await;
+                let now = self.clock.now();
+                let renew_at = trusted.jwks_max_age - trusted.jwks_max_age / 4;
+                if !keys.fresh(now, renew_at) && keys.may_retry(now, trusted) {
+                    let _ = self.refresh(issuer, &mut keys, now).await;
+                }
+            });
+        futures_util::future::join_all(refreshes).await;
     }
 
     /// How long ago each JWT issuer's keys were fetched, by its `iss`:

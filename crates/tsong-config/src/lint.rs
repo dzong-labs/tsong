@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use ipnet::IpNet;
 
-use crate::{ANY, Config};
+use crate::{ANY, Config, Validation};
 
 /// The longest `jwks_max_age` that doesn't warn.
 const LONGEST_JWKS_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
@@ -33,7 +33,8 @@ impl Config {
         let mut warnings = Vec::new();
         ip_list(&mut warnings, "gateway.allow", &self.gateway.allow);
         for (name, trusted) in &self.trusted_issuers {
-            if trusted.jwks_max_age > LONGEST_JWKS_MAX_AGE {
+            if trusted.validation == Validation::Jwt && trusted.jwks_max_age > LONGEST_JWKS_MAX_AGE
+            {
                 warnings.push(format!(
                     "trusted_issuers.{name}.jwks_max_age is over 24h; a key the issuer withdraws stays trusted that long"
                 ));

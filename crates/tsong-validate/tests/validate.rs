@@ -361,7 +361,7 @@ async fn expired_keys_that_cannot_be_refetched_fail_closed_until_a_retry_succeed
     ));
     assert_eq!(
         ValidateError::KeysExpired.to_string(),
-        "the issuer's keys have expired and a refetch has not succeeded"
+        "the issuer's keys are missing or expired, and no fetch has succeeded since"
     );
     h.clock.advance(Duration::from_secs(10));
     assert!(matches!(refused(&h, &token).await?, ValidateError::Jwks(_)));
@@ -409,7 +409,7 @@ async fn a_key_replaced_under_the_same_kid_is_refetched_no_sooner_than_allowed()
 }
 
 #[tokio::test]
-async fn refresh_due_refetches_missing_and_expired_keys_only() -> TestResult {
+async fn refresh_due_fetches_missing_keys_and_renews_keys_before_they_expire() -> TestResult {
     let h = harness_with(INTROSPECTED)?;
     assert_eq!(h.validator.key_ages().await, [(ISSUER.to_owned(), None)]);
     h.validator.refresh_due().await;
@@ -419,18 +419,23 @@ async fn refresh_due_refetches_missing_and_expired_keys_only() -> TestResult {
         [(ISSUER.to_owned(), Some(Duration::ZERO))]
     );
 
-    h.clock.advance(Duration::from_secs(3599));
+    // Keys are renewed three quarters of the way through their hour.
+    h.clock.advance(Duration::from_secs(2699));
     h.validator.refresh_due().await;
     assert_eq!(h.fetcher.fetches(), 1);
     assert_eq!(
         h.validator.key_ages().await,
-        [(ISSUER.to_owned(), Some(Duration::from_secs(3599)))]
+        [(ISSUER.to_owned(), Some(Duration::from_secs(2699)))]
     );
 
+    // A renewal that fails leaves the unexpired keys in use, and is retried
+    // every jwks_retry.
     h.clock.advance(Duration::from_secs(1));
     h.fetcher.fail(true);
     h.validator.refresh_due().await;
     assert_eq!(h.fetcher.fetches(), 2);
+    let token = h.key.sign(&lasting()?)?;
+    h.validator.validate(&token).await?;
     h.clock.advance(Duration::from_secs(9));
     h.validator.refresh_due().await;
     assert_eq!(h.fetcher.fetches(), 2, "retried too soon");
@@ -438,8 +443,28 @@ async fn refresh_due_refetches_missing_and_expired_keys_only() -> TestResult {
     h.clock.advance(Duration::from_secs(1));
     h.validator.refresh_due().await;
     assert_eq!(h.fetcher.fetches(), 3);
-    h.validator.validate(&h.key.sign(&lasting()?)?).await?;
+    h.validator.validate(&token).await?;
     assert_eq!(h.fetcher.fetches(), 3);
+    assert_eq!(
+        h.validator.key_ages().await,
+        [(ISSUER.to_owned(), Some(Duration::ZERO))]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_forgery_stays_a_bad_signature_while_the_issuer_is_down() -> TestResult {
+    let h = harness()?;
+    h.validator.validate(&h.key.sign(&claims())?).await?;
+    h.fetcher.fail(true);
+    h.clock.advance(Duration::from_secs(60));
+    let forged = TestKey::new("k1", 9)?.sign(&claims())?;
+    assert!(matches!(
+        refused(&h, &forged).await?,
+        ValidateError::Signature
+    ));
+    assert_eq!(h.fetcher.fetches(), 2, "the forgery tried one refetch");
+    h.validator.validate(&h.key.sign(&claims())?).await?;
     Ok(())
 }
 
