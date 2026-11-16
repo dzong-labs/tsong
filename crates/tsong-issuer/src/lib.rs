@@ -179,7 +179,7 @@ impl Issuer {
                     validated.issuer()
                 ))
             })?;
-        let subject = self.renamed_sub(&validated).unwrap_or(original_sub);
+        let subject = self.subject(&validated, original_sub)?;
 
         let now = self.clock.unix_seconds();
         let lifetime = self.config.issuer.token_lifetime.as_secs();
@@ -249,12 +249,33 @@ impl Issuer {
         claims
     }
 
-    /// The `sub` a rename gives the token, such as Entra's `oid`, when the
-    /// inbound token has that claim as a string.
-    fn renamed_sub<'a>(&self, validated: &'a Validated) -> Option<&'a str> {
-        let renames = self.config.claims.rename.get(validated.issuer())?;
-        let (from, _) = renames.iter().find(|(_, to)| *to == "sub")?;
-        validated.claims().get(from)?.as_str()
+    /// The subject the minted `sub` is made from: the claim a rename maps to
+    /// `sub`, such as Entra's `oid`, or else `original_sub`. A token without
+    /// the renamed claim as a string is refused rather than falling back, so
+    /// one prefix never mixes two kinds of identifier.
+    fn subject<'a>(
+        &self,
+        validated: &'a Validated,
+        original_sub: &'a str,
+    ) -> Result<&'a str, ExchangeError> {
+        let renamed = self
+            .config
+            .claims
+            .rename
+            .get(validated.issuer())
+            .and_then(|renames| renames.iter().find(|(_, to)| *to == "sub"));
+        match renamed {
+            None => Ok(original_sub),
+            Some((from, _)) => validated
+                .claims()
+                .get(from)
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    ExchangeError::InvalidRequest(format!(
+                        "the subject token has no {from}, which supplies its subject"
+                    ))
+                }),
+        }
     }
 
     /// Whether a token request from the connection's `peer`, with these

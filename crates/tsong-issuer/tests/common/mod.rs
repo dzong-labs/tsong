@@ -56,8 +56,10 @@ algorithms = ["ES256"]
 copy = ["email", "groups"]
 
 [claims.rename.test]
-oid = "sub"
 uid = "user"
+
+[claims.rename.other]
+oid = "sub"
 
 [[routes]]
 name = "orders"
