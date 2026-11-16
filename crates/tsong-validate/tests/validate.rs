@@ -39,6 +39,7 @@ allow = ["127.0.0.0/8"]
 max_entries = 10
 
 [trusted_issuers.test]
+sub_prefix = "test"
 issuer = "https://issuer.test"
 audiences = ["tsong", "tsong-alt"]
 algorithms = ["ES256", "ES384"]
@@ -47,6 +48,7 @@ jwks_refetch = "60s"
 
 const INTROSPECTED: &str = r#"
 [trusted_issuers.gitlab]
+sub_prefix = "gitlab"
 issuer = "https://gitlab.test"
 audiences = ["tsong"]
 validation = "introspection"

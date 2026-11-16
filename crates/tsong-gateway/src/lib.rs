@@ -206,9 +206,7 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
 fn exchange_failure(error: &ExchangeError) -> Response {
     let message = error.to_string();
     match error {
-        ExchangeError::InvalidGrant(_) | ExchangeError::InvalidRequest(_) => {
-            unauthorized(&message, Some("invalid_token"))
-        }
+        ExchangeError::InvalidRequest(_) => unauthorized(&message, Some("invalid_token")),
         ExchangeError::InvalidTarget(_)
         | ExchangeError::InvalidScope(_)
         | ExchangeError::AccessDenied => refuse(StatusCode::FORBIDDEN, &message),

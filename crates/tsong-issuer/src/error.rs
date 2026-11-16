@@ -1,4 +1,6 @@
-//! Exchange failures, as RFC 6749 section 5.2 error responses.
+//! Exchange failures, as RFC 6749 section 5.2 error responses. A subject
+//! token that is invalid or unacceptable is `invalid_request`, as RFC 8693
+//! section 2.2.2 requires.
 
 use tsong_keys::KeyError;
 use tsong_validate::ValidateError;
@@ -10,8 +12,6 @@ pub enum ExchangeError {
     UnsupportedGrantType,
     #[error("{0}")]
     InvalidRequest(String),
-    #[error("{0}")]
-    InvalidGrant(String),
     #[error("{0}")]
     InvalidTarget(String),
     #[error("{0}")]
@@ -30,7 +30,6 @@ impl ExchangeError {
         match self {
             Self::UnsupportedGrantType => "unsupported_grant_type",
             Self::InvalidRequest(_) => "invalid_request",
-            Self::InvalidGrant(_) => "invalid_grant",
             Self::InvalidTarget(_) => "invalid_target",
             Self::InvalidScope(_) => "invalid_scope",
             Self::AccessDenied => "access_denied",
@@ -53,9 +52,8 @@ impl ExchangeError {
 impl From<ValidateError> for ExchangeError {
     fn from(error: ValidateError) -> Self {
         match error {
-            ValidateError::Unsupported(_) => Self::InvalidRequest(error.to_string()),
             ValidateError::Jwks(_) => Self::Unavailable(error.to_string()),
-            _ => Self::InvalidGrant(error.to_string()),
+            _ => Self::InvalidRequest(error.to_string()),
         }
     }
 }

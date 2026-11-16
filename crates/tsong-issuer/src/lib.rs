@@ -5,8 +5,10 @@
 //! that route. The route filters the subject token: it must carry one of the
 //! route's allowed audiences, and only scopes the route allows. The minted
 //! token keeps the subject token's audiences and scopes, and adds the
-//! route's `append_audience`. [`router`] serves the token endpoint, the JWKS
-//! and the discovery document over HTTP.
+//! route's `append_audience`. Its `sub` is the trusted issuer's
+//! `sub_prefix`, a `:`, and the subject, and its RFC 9493 `sub_id` keeps the
+//! subject token's own `iss` and `sub`. [`router`] serves the token
+//! endpoint, the JWKS and the discovery document over HTTP.
 
 mod context;
 mod error;
@@ -164,11 +166,20 @@ impl Issuer {
             )));
         }
         let granted = granted_scopes(route, &validated, request.scope.as_deref())?;
-        let subject = self
-            .renamed_sub(&validated)
-            .or_else(|| validated.subject())
-            .ok_or_else(|| ExchangeError::InvalidGrant("the subject token has no sub".into()))?
-            .to_owned();
+        let original_sub = validated
+            .subject()
+            .ok_or_else(|| ExchangeError::InvalidRequest("the subject token has no sub".into()))?;
+        let trusted = self
+            .config
+            .trusted_issuers
+            .get(validated.issuer())
+            .ok_or_else(|| {
+                ExchangeError::Server(format!(
+                    "trusted issuer {:?} is not configured",
+                    validated.issuer()
+                ))
+            })?;
+        let subject = self.renamed_sub(&validated).unwrap_or(original_sub);
 
         let now = self.clock.unix_seconds();
         let lifetime = self.config.issuer.token_lifetime.as_secs();
@@ -177,13 +188,20 @@ impl Issuer {
             .unwrap_or(0)
             .min(now.saturating_add(lifetime));
         if exp <= now {
-            return Err(ExchangeError::InvalidGrant(
+            return Err(ExchangeError::InvalidRequest(
                 "the subject token has expired".into(),
             ));
         }
 
         let mut claims = self.mapped_claims(&validated);
-        claims.insert("sub".into(), json!(subject));
+        claims.insert(
+            "sub".into(),
+            json!(format!("{}:{subject}", trusted.sub_prefix)),
+        );
+        claims.insert(
+            "sub_id".into(),
+            json!({ "format": "iss_sub", "iss": trusted.issuer, "sub": original_sub }),
+        );
         claims.insert("iss".into(), json!(self.config.issuer.url));
         claims.insert(
             "aud".into(),

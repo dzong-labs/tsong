@@ -34,16 +34,19 @@ max_entries = 100_000
 
 # ── trusted inbound issuers ───────────────────────────
 [trusted_issuers.okta]
+sub_prefix = "okta"   # minted sub is "okta:<sub>"; unique; a-z, 0-9 and -
 issuer = "https://example.okta.com/oauth2/default"
 audiences = ["api://default"]
 algorithms = ["RS256"]
 
 [trusted_issuers.entra]
+sub_prefix = "entra"
 issuer = "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0"
 audiences = ["api://tsong"]
 algorithms = ["RS256"]
 
 [trusted_issuers.gitlab]
+sub_prefix = "gitlab"
 issuer = "https://gitlab.example.com"
 audiences = ["tsong"]
 validation = "introspection"

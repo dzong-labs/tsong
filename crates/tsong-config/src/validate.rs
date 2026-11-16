@@ -10,13 +10,23 @@ use crate::{Config, KeyProvider, KeyState, Validation};
 
 /// Claims Tsong sets on every token it issues, which claim mapping may not
 /// write.
-pub const RESERVED_CLAIMS: [&str; 9] = [
-    "iss", "aud", "exp", "iat", "nbf", "jti", "scope", "act", "cnf",
+pub const RESERVED_CLAIMS: [&str; 10] = [
+    "iss", "aud", "exp", "iat", "nbf", "jti", "scope", "act", "cnf", "sub_id",
 ];
 
 /// Whether `text` is an https URL.
 fn is_https(text: &str) -> bool {
     Url::parse(text).is_ok_and(|url| url.scheme() == "https")
+}
+
+/// Whether `text` is a usable subject prefix: not empty, and only
+/// lowercase letters, digits and `-`. With no `:` in a prefix, the first
+/// `:` of a minted `sub` always ends the prefix.
+fn is_sub_prefix(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
 /// Every problem a config has, one per line.
@@ -92,7 +102,18 @@ impl Config {
     }
 
     fn check_trusted_issuers(&self, problems: &mut Vec<String>) {
+        let mut prefixes = BTreeSet::new();
         for (name, trusted) in &self.trusted_issuers {
+            let prefix = trusted.sub_prefix.as_str();
+            if !is_sub_prefix(prefix) {
+                problems.push(format!(
+                    "trusted_issuers.{name}.sub_prefix must be lowercase letters, digits and -, not {prefix:?}"
+                ));
+            } else if !prefixes.insert(prefix) {
+                problems.push(format!(
+                    "trusted_issuers.{name}.sub_prefix {prefix:?} is used by another trusted issuer"
+                ));
+            }
             if !is_https(&trusted.issuer) {
                 problems.push(format!("trusted_issuers.{name}.issuer must be https"));
             }
