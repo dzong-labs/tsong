@@ -393,33 +393,37 @@ fn granted_scopes(
             )));
         }
     }
-    if let Some(missing) = route.missing_scope(|scope| held.contains(scope)) {
-        return Err(ExchangeError::InvalidScope(format!(
-            "route {:?} requires scope {missing:?}",
-            route.name
-        )));
-    }
-    let Some(requested) = requested else {
-        return Ok(held.into_iter().map(str::to_owned).collect());
+    let granted = match requested {
+        None => held.iter().map(|scope| (*scope).to_owned()).collect(),
+        Some(requested) => {
+            let mut granted = Vec::new();
+            for scope in requested.split_whitespace() {
+                if !held.contains(scope) {
+                    return Err(ExchangeError::InvalidScope(format!(
+                        "the subject token lacks scope {scope:?}"
+                    )));
+                }
+                if !granted.iter().any(|kept| kept == scope) {
+                    granted.push(scope.to_owned());
+                }
+            }
+            granted.sort();
+            granted
+        }
     };
-    let mut granted = Vec::new();
-    for scope in requested.split_whitespace() {
-        if !held.contains(scope) {
-            return Err(ExchangeError::InvalidScope(format!(
-                "the subject token lacks scope {scope:?}"
-            )));
-        }
-        if !granted.iter().any(|kept| kept == scope) {
-            granted.push(scope.to_owned());
-        }
-    }
+    // The minted token keeps every scope the route requires: the subject
+    // token must hold them, and a requested scope may not drop them.
     if let Some(missing) = route.missing_scope(|scope| granted.iter().any(|kept| kept == scope)) {
-        return Err(ExchangeError::InvalidScope(format!(
-            "the requested scope drops {missing:?}, which route {:?} requires",
-            route.name
-        )));
+        let reason = if requested.is_some() && held.contains(missing) {
+            format!(
+                "the requested scope drops {missing:?}, which route {:?} requires",
+                route.name
+            )
+        } else {
+            format!("route {:?} requires scope {missing:?}", route.name)
+        };
+        return Err(ExchangeError::InvalidScope(reason));
     }
-    granted.sort();
     Ok(granted)
 }
 

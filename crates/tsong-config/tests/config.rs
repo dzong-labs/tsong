@@ -930,6 +930,30 @@ fn required_scopes_must_be_allowed_and_named() -> TestResult {
 }
 
 #[test]
+fn required_scopes_are_single_scopes_named_once() -> TestResult {
+    // Under "*" every scope is allowed, so only the shape check stands
+    // between these and a route that refuses every token.
+    let malformed = ROUTE
+        .replace(
+            "allowed_scopes",
+            "required_scopes = [\"\", \"orders.read billing.read\", \"a\", \"a\"]\nallowed_scopes",
+        )
+        .replace(
+            r#"allowed_scopes = ["orders.read"]"#,
+            r#"allowed_scopes = ["*"]"#,
+        );
+    assert_eq!(
+        problems(&with_route(&malformed))?,
+        [
+            r#"route "orders" required scope "" must be one scope, without spaces"#,
+            r#"route "orders" required scope "orders.read billing.read" must be one scope, without spaces"#,
+            r#"route "orders" repeats required scope "a""#,
+        ]
+    );
+    Ok(())
+}
+
+#[test]
 fn an_empty_scope_list_refuses_everything_and_a_star_accepts_anything() -> TestResult {
     let empty = orders(&[], &[])?;
     assert_eq!(empty.refused_scope(std::iter::empty()), Err(None));

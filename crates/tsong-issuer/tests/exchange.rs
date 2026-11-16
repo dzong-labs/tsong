@@ -239,6 +239,23 @@ async fn a_requested_scope_keeps_the_required_scopes() -> TestResult {
             r#"the requested scope drops "billing.read", which route "billing" requires"#.into()
         )
     );
+
+    // A token that never held the scope is told so, narrowed or not.
+    let lacking = changed(
+        request(
+            &h,
+            "billing.test",
+            subject(json!({ "scope": "billing.read" })),
+        ),
+        |r| r.scope = Some("billing.read".into()),
+    );
+    assert_eq!(
+        refused(&h, lacking).await?,
+        (
+            "invalid_scope",
+            r#"route "billing" requires scope "orders.read""#.into()
+        )
+    );
     Ok(())
 }
 

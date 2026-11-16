@@ -63,7 +63,7 @@ The token endpoint stays reachable on its own, so the issuer enforces the route,
 2. Validates the subject token against the global trusted issuers. Every trusted issuer may exchange into every route.
 3. Checks the inbound `aud` against `allowed_audiences`, and the inbound scopes against `allowed_scopes` and `required_scopes`. A failure is `invalid_target` for the audience and `invalid_scope` for the scopes.
 4. Mints a token whose `aud` is the inbound `aud` followed by `append_audience`, without duplicates.
-5. Sets the minted `scope` to the inbound scopes. A `scope` parameter on the request narrows them, and asking for a scope the inbound token lacks is `invalid_scope`.
+5. Sets the minted `scope` to the inbound scopes. A `scope` parameter on the request narrows them. Asking for a scope the inbound token lacks, or narrowing away one the route requires, is `invalid_scope`.
 
 The gateway calls the issuer through an `Exchanger` trait. The MVP implementation calls the `Issuer` in-process. An HTTP implementation can come later.
 
