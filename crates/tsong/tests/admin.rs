@@ -65,6 +65,7 @@ async fn status_reports_the_reloads() -> TestResult {
     let status = Arc::new(Mutex::new(Status {
         revision: "r7".into(),
         loaded_at: 42,
+        fetched_at: 50,
         reloads: 3,
         failed_reloads: 1,
         last_failure: Some("fetch_failed".into()),
@@ -79,6 +80,7 @@ async fn status_reports_the_reloads() -> TestResult {
         json!({
             "revision": "r7",
             "loaded_at": 42,
+            "fetched_at": 50,
             "reloads": 3,
             "failed_reloads": 1,
             "last_failure": "fetch_failed",

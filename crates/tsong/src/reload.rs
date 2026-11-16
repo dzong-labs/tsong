@@ -24,7 +24,7 @@ pub const INVALID_CONFIG: &str = "invalid_config";
 pub const BUILD_FAILED: &str = "build_failed";
 
 use crate::state::{State, listen_addresses};
-use crate::telemetry::{Metrics, OutcomeLabel};
+use crate::telemetry::{Metrics, OutcomeLabel, RevisionLabel};
 
 /// Where audit lines go: stdout in production, collected by the platform.
 pub trait Audit: Send + Sync {
@@ -61,6 +61,10 @@ pub struct Status {
     pub revision: String,
     /// When it was loaded, in Unix seconds.
     pub loaded_at: u64,
+    /// When the store was last read successfully, in Unix seconds, whether
+    /// or not it had a new revision. While the store can't be read, this
+    /// falls behind and the last good config keeps serving.
+    pub fetched_at: u64,
     /// Reloads that swapped in a new revision, the first load included.
     pub reloads: u64,
     /// Reloads that kept the old state.
@@ -104,9 +108,11 @@ impl Reloader {
         audit: Arc<dyn Audit>,
         clock: Arc<dyn Clock>,
     ) -> Self {
+        let now = clock.unix_seconds();
         let status = Status {
             revision: first.revision.clone(),
-            loaded_at: clock.unix_seconds(),
+            loaded_at: now,
+            fetched_at: now,
             reloads: 1,
             ..Status::default()
         };
@@ -124,10 +130,14 @@ impl Reloader {
         }
     }
 
-    /// This reloader, building each state with `metrics` and counting its
-    /// reloads there.
+    /// This reloader, building each state with `metrics`, counting its
+    /// reloads there, and reporting there when the store was last read and
+    /// which revision is served.
     pub fn with_metrics(mut self, metrics: Arc<Metrics>) -> Self {
         self.metrics = metrics;
+        let status = self.lock().clone();
+        self.publish_fetched(status.fetched_at);
+        self.publish_revision(&status.revision);
         self
     }
 
@@ -156,6 +166,9 @@ impl Reloader {
             Ok(fetched) => fetched,
             Err(error) => return self.reject(&current, None, FETCH_FAILED, error.to_string()),
         };
+        let now = self.clock.unix_seconds();
+        self.lock().fetched_at = now;
+        self.publish_fetched(now);
         let content = fetched.content.clone();
         let rejected = self
             .invalid
@@ -196,6 +209,7 @@ impl Reloader {
             applied(Some(&current.config), &next, &status)
         };
         self.audit.record(&line);
+        self.publish_revision(&next.revision);
         self.state.send_replace(Arc::new(next));
         Outcome::Applied
     }
@@ -224,6 +238,22 @@ impl Reloader {
         });
         self.audit.record(&line.to_string());
         Outcome::Rejected(error)
+    }
+
+    fn publish_fetched(&self, at: u64) {
+        self.metrics
+            .config_fetched
+            .set(i64::try_from(at).unwrap_or(i64::MAX));
+    }
+
+    fn publish_revision(&self, revision: &str) {
+        let revisions = &self.metrics.config_revision;
+        revisions.clear();
+        revisions
+            .get_or_create(&RevisionLabel {
+                revision: revision.to_owned(),
+            })
+            .set(1);
     }
 
     fn count(&self, outcome: &str) {

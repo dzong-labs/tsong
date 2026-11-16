@@ -336,6 +336,80 @@ async fn reloads_are_counted_by_outcome() -> TestResult {
 }
 
 #[tokio::test]
+async fn the_last_fetch_and_the_served_revision_are_reported() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let key = write_key(dir.path())?;
+    let store = Arc::new(QueueStore::default());
+    let clock = Arc::new(ManualClock::at(NOW));
+    let first = State::build(
+        snapshot(&config_text(&key, "https://one.test", 8444, ""), "r1")?,
+        clock.clone(),
+    )?;
+    let metrics = Arc::new(Metrics::default());
+    let reloader = Reloader::new(
+        Box::new(Shared(store.clone())),
+        first,
+        Arc::new(Recorded::default()),
+        clock.clone(),
+    )
+    .with_metrics(metrics.clone());
+    let fetched_at = || metrics.config_fetched.get();
+    let revisions = || -> TestResult<Vec<String>> {
+        let text = metrics.encode()?;
+        Ok(text
+            .lines()
+            .filter(|line| line.starts_with("tsong_config_revision_info{"))
+            .map(str::to_owned)
+            .collect())
+    };
+    let now = i64::try_from(NOW)?;
+    assert_eq!(fetched_at(), now);
+    assert_eq!(
+        revisions()?,
+        [r#"tsong_config_revision_info{revision="r1"} 1"#]
+    );
+
+    // A store that can't be read leaves the last fetch where it was.
+    clock.advance(Duration::from_secs(60));
+    store.push(Err(ConfigError::Store("offline".into())));
+    assert!(matches!(reloader.reload().await, Outcome::Rejected(_)));
+    assert_eq!(fetched_at(), now);
+    assert_eq!(status_of(&reloader).fetched_at, NOW);
+
+    // A read with nothing new still counts as a fetch.
+    clock.advance(Duration::from_secs(60));
+    store.push(Ok(fetched(
+        &config_text(&key, "https://one.test", 8444, ""),
+        "r1",
+    )?));
+    assert_eq!(reloader.reload().await, Outcome::Unchanged);
+    assert_eq!(fetched_at(), now + 120);
+    assert_eq!(status_of(&reloader).fetched_at, NOW + 120);
+    assert_eq!(status_of(&reloader).loaded_at, NOW);
+
+    clock.advance(Duration::from_secs(60));
+    store.push(Ok(fetched(
+        &config_text(&key, "https://two.test", 8444, ""),
+        "r2",
+    )?));
+    assert_eq!(reloader.reload().await, Outcome::Applied);
+    assert_eq!(fetched_at(), now + 180);
+    assert_eq!(
+        revisions()?,
+        [r#"tsong_config_revision_info{revision="r2"} 1"#]
+    );
+    Ok(())
+}
+
+fn status_of(reloader: &Reloader) -> tsong::reload::Status {
+    reloader
+        .status()
+        .lock()
+        .map(|status| status.clone())
+        .unwrap_or_else(|poisoned| poisoned.into_inner().clone())
+}
+
+#[tokio::test]
 async fn metrics_are_served_on_the_admin_listener() -> TestResult {
     let metrics = Arc::new(Metrics::default());
     metrics.gateway.cache_misses.inc();

@@ -73,8 +73,8 @@ Rebuilding the state clears the exchange cache, drops cached JWKS, picks up new 
 Eight things react to a reload. Four are part of the state, so rebuilding it handles them: the exchange cache is cleared, cached JWKS are dropped, new signing keys are loaded, and clients for new read timeouts are built. The reloader (`crates/tsong/src/reload.rs`) handles the other four, because a failed reload produces no new state for a watcher to see:
 
 - The audit log writes one JSON line to stdout for each new revision and each failure: the time, commit, author, outcome, and the routes added, removed and changed, keyed by host. A fetch that finds the revision being served writes nothing. Collecting stdout belongs to the platform.
-- `GET /status` on the admin listener reports the revision being served, when it loaded, the count of reloads and failed reloads, and the last failure as a short reason: `fetch_failed`, `invalid_config` or `build_failed`. The detail stays in the audit log.
-- The reload counts in `/status` stand in for metrics until observability, roadmap item 9.
+- `GET /status` on the admin listener reports the revision being served, when it loaded, when the store was last read, the count of reloads and failed reloads, and the last failure as a short reason: `fetch_failed`, `invalid_config` or `build_failed`. The detail stays in the audit log.
+- A store that can't be read leaves the last good config serving, for as long as the outage lasts; Tsong doesn't fail closed on a Git outage. `tsong_config_last_fetch_timestamp_seconds` shows how stale that config may be, and `tsong_config_revision_info` shows which revision each replica serves. Both are in [[observability]].
 - A change to `issuer.listen` or `gateway.listen` is named in the audit line's `restart_required`. The old addresses stay bound until a restart.
 
 ## Deferred

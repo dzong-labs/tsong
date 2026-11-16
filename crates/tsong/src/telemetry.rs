@@ -27,6 +27,12 @@ pub struct OutcomeLabel {
     pub outcome: String,
 }
 
+/// A config revision, as a label.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct RevisionLabel {
+    pub revision: String,
+}
+
 /// A trusted issuer's `iss`, as a label.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct IssuerLabel {
@@ -47,6 +53,12 @@ pub struct Metrics {
     pub jwks_age: Family<IssuerLabel, Gauge>,
     /// Config reloads that found a new revision, by outcome.
     pub reloads: Family<OutcomeLabel, Counter>,
+    /// When the config store was last read successfully, in Unix seconds.
+    /// Alert on `time() - tsong_config_last_fetch_timestamp_seconds`.
+    pub config_fetched: Gauge,
+    /// The revision being served: one series, set to 1. Replicas serving
+    /// different revisions show as more than one series across the fleet.
+    pub config_revision: Family<RevisionLabel, Gauge>,
 }
 
 impl Default for Metrics {
@@ -77,6 +89,18 @@ impl Default for Metrics {
             "Config reloads that found a new revision, by outcome",
             reloads.clone(),
         );
+        let config_fetched = Gauge::default();
+        registry.register(
+            "tsong_config_last_fetch_timestamp_seconds",
+            "When the config store was last read successfully, in Unix seconds",
+            config_fetched.clone(),
+        );
+        let config_revision = Family::<RevisionLabel, Gauge>::default();
+        registry.register(
+            "tsong_config_revision_info",
+            "The config revision being served",
+            config_revision.clone(),
+        );
         Self {
             registry,
             gateway,
@@ -84,6 +108,8 @@ impl Default for Metrics {
             jwks_failures,
             jwks_age,
             reloads,
+            config_fetched,
+            config_revision,
         }
     }
 }

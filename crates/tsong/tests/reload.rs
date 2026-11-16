@@ -89,6 +89,7 @@ async fn the_first_load_is_audited_and_counted() -> TestResult {
         Status {
             revision: "r1".into(),
             loaded_at: NOW,
+            fetched_at: NOW,
             reloads: 1,
             failed_reloads: 0,
             last_failure: None,
