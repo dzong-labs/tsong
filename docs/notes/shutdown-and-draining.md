@@ -26,7 +26,7 @@ A second signal during the drain ends it at once. Without a `[health]` listener 
 
 **Deregistration.** Some orchestrators remove a replica from the load balancer's targets before they send SIGTERM. ECS behind a load balancer does this for a deploy, a scale-in or a replaced task. The target is deregistered first, and in-flight requests get the deregistration delay to finish. Only then does the task get SIGTERM. The health check plays no part. By the time Tsong drains, no new requests arrive.
 
-**The health check.** Other stops reach Tsong without deregistration: Kubernetes removes the endpoint and sends SIGTERM at the same time, and a container stopped by hand is never deregistered. Then only the health check moves traffic. A health check on `/health/ready` sees 503 as the drain starts, while the replica still serves. A health check on `/health/live` sees nothing until the process has exited. Until the load balancer's unhealthy threshold is reached, requests routed to the stopped replica fail.
+**The health check.** Other stops reach Tsong without deregistration. Kubernetes removes the endpoint and sends SIGTERM at the same time. A container stopped by hand is never deregistered. Then only the health check moves traffic. A health check on `/health/ready` sees 503 as the drain starts, while the replica still serves. A health check on `/health/live` sees nothing until the process has exited. Until the load balancer's unhealthy threshold is reached, requests routed to the stopped replica fail.
 
 So point the load balancer's health check at `/health/ready`. Both endpoints are cheap: each reads one flag in memory and calls no dependency.
 
@@ -34,7 +34,7 @@ So point the load balancer's health check at `/health/ready`. Both endpoints are
 
 - `health.drain` must last at least the health check's interval times its unhealthy threshold, plus a margin. With a 10s interval and a threshold of 2, a 5s drain ends before the load balancer has noticed. A 25s drain covers it.
 - The runtime's stop timeout must exceed `health.drain`, or the runtime kills Tsong mid-drain. `deploy/podman/run.sh` stops with a 15s timeout against the stub's 5s drain.
-- Where the orchestrator deregisters first, its deregistration delay covers the in-flight requests, and the drain only guards against a stop that skipped deregistration.
+- Where the orchestrator deregisters first, its deregistration delay covers the in-flight requests. The drain then only guards against a stop that skipped deregistration.
 
 ## The two endpoints
 
