@@ -84,6 +84,9 @@ pub struct Reloader {
     status: Arc<Mutex<Status>>,
     audit: Arc<dyn Audit>,
     clock: Arc<dyn Clock>,
+    /// The content of the last config rejected as invalid. It can't become
+    /// valid until it changes, so it is not rejected again.
+    invalid: Mutex<Option<String>>,
 }
 
 impl Reloader {
@@ -106,6 +109,7 @@ impl Reloader {
             store,
             state,
             status: Arc::new(Mutex::new(status)),
+            invalid: Mutex::new(None),
             audit,
             clock,
         }
@@ -127,15 +131,9 @@ impl Reloader {
         let current = self.state.borrow().clone();
         let snapshot = match self.store.load().await {
             Ok(snapshot) => snapshot,
-            Err(error) => {
-                let reason = match error {
-                    ConfigError::Parse(_) | ConfigError::Invalid(_) => INVALID_CONFIG,
-                    ConfigError::Read { .. } | ConfigError::Store(_) => FETCH_FAILED,
-                };
-                return self.reject(&current, None, reason, error.to_string());
-            }
+            Err(error) => return self.failed_load(&current, &error),
         };
-        if snapshot.revision == current.revision {
+        if snapshot.content == current.content {
             return Outcome::Unchanged;
         }
         let revision = snapshot.revision.clone();
@@ -145,6 +143,7 @@ impl Reloader {
                 return self.reject(&current, Some(&revision), BUILD_FAILED, error.to_string());
             }
         };
+        *self.invalid.lock().unwrap_or_else(PoisonError::into_inner) = None;
         let line = {
             let mut status = self.lock();
             status.revision = next.revision.clone();
@@ -155,6 +154,33 @@ impl Reloader {
         self.audit.record(&line);
         self.state.send_replace(Arc::new(next));
         Outcome::Applied
+    }
+
+    /// Rejects a config the store couldn't load, unless it is the invalid
+    /// config already rejected.
+    fn failed_load(&self, current: &State, error: &ConfigError) -> Outcome {
+        let reason = match error.root() {
+            ConfigError::Parse(_) | ConfigError::Invalid(_) => INVALID_CONFIG,
+            ConfigError::Read { .. } | ConfigError::Store(_) | ConfigError::AtRevision { .. } => {
+                FETCH_FAILED
+            }
+        };
+        let (revision, content) = match error {
+            ConfigError::AtRevision {
+                revision, content, ..
+            } => (Some(revision.as_str()), Some(content)),
+            _ => (None, None),
+        };
+        if reason == INVALID_CONFIG
+            && let Some(content) = content
+        {
+            let mut invalid = self.invalid.lock().unwrap_or_else(PoisonError::into_inner);
+            if invalid.as_ref() == Some(content) {
+                return Outcome::Unchanged;
+            }
+            *invalid = Some(content.clone());
+        }
+        self.reject(current, revision, reason, error.to_string())
     }
 
     fn reject(

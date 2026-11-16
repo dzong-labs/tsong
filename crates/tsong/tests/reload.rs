@@ -361,3 +361,136 @@ fn lines_are_written_one_to_a_line() {
     lines.record(r#"{"b":2}"#);
     assert_eq!(lines.into_inner(), b"{\"a\":1}\n{\"b\":2}\n");
 }
+
+#[tokio::test]
+async fn a_new_revision_with_the_same_content_changes_nothing() -> TestResult {
+    let f = Fixture::new()?;
+    let text = f.text("https://one.test", 8444, "");
+    let reloader = f.reloader(&text)?;
+    let mut unrelated = snapshot(&text, "r2")?;
+    unrelated.content = "content of r1".into();
+    f.store.push(Ok(unrelated));
+    assert_eq!(reloader.reload().await, Outcome::Unchanged);
+    assert_eq!(f.lines.parsed()?.len(), 1);
+    assert_eq!(status(&reloader).revision, "r1");
+    Ok(())
+}
+
+/// A config rejected as invalid at `revision`, with `content`.
+fn invalid_at(revision: &str, content: &str) -> ConfigError {
+    ConfigError::AtRevision {
+        revision: revision.into(),
+        content: content.into(),
+        author: Some("Ada <ada@example.test>".into()),
+        source: Box::new(ConfigError::Invalid(tsong_config::Problems(vec![
+            "a problem".into(),
+        ]))),
+    }
+}
+
+#[tokio::test]
+async fn an_invalid_config_is_rejected_once_until_it_changes() -> TestResult {
+    let f = Fixture::new()?;
+    let text = f.text("https://one.test", 8444, "");
+    let reloader = f.reloader(&text)?;
+    f.store.push(Err(invalid_at("r2", "bad")));
+    let Outcome::Rejected(detail) = reloader.reload().await else {
+        return Err("expected a rejection".into());
+    };
+    assert_eq!(detail, "r2: invalid config:\n- a problem\n");
+    let line = f
+        .lines
+        .parsed()?
+        .get(1)
+        .cloned()
+        .ok_or("no rejection line")?;
+    assert_eq!(line.get("revision"), Some(&json!("r2")));
+    assert_eq!(line.get("reason"), Some(&json!("invalid_config")));
+
+    f.store.push(Err(invalid_at("r3", "bad")));
+    assert_eq!(reloader.reload().await, Outcome::Unchanged);
+    assert_eq!(
+        f.lines.parsed()?.len(),
+        2,
+        "the same invalid config isn't audited again"
+    );
+    assert_eq!(status(&reloader).failed_reloads, 1);
+
+    f.store.push(Err(invalid_at("r4", "worse")));
+    assert!(matches!(reloader.reload().await, Outcome::Rejected(_)));
+    assert_eq!(status(&reloader).failed_reloads, 2);
+
+    f.store
+        .push(Ok(snapshot(&f.text("https://two.test", 8444, ""), "r5")?));
+    assert_eq!(reloader.reload().await, Outcome::Applied);
+    f.store.push(Err(invalid_at("r6", "worse")));
+    assert!(
+        matches!(reloader.reload().await, Outcome::Rejected(_)),
+        "a valid config in between clears the memory"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_failed_fetch_is_retried_every_time() -> TestResult {
+    let f = Fixture::new()?;
+    let reloader = f.reloader(&f.text("https://one.test", 8444, ""))?;
+    for _ in 0..2 {
+        let at_revision = ConfigError::AtRevision {
+            revision: "r2".into(),
+            content: "c".into(),
+            author: None,
+            source: Box::new(ConfigError::Store("offline".into())),
+        };
+        f.store.push(Err(at_revision));
+        assert!(matches!(reloader.reload().await, Outcome::Rejected(_)));
+    }
+    assert_eq!(status(&reloader).failed_reloads, 2);
+    assert_eq!(
+        status(&reloader).last_failure.as_deref(),
+        Some("fetch_failed")
+    );
+    Ok(())
+}
+
+/// A store whose load never finishes, like a fetch stuck on a dead
+/// connection.
+struct Stalled;
+
+impl tsong_config::ConfigStore for Stalled {
+    fn load(&self) -> tsong_config::LoadFuture<'_> {
+        Box::pin(std::future::pending())
+    }
+}
+
+#[tokio::test]
+async fn shutdown_does_not_wait_for_a_stalled_reload() -> TestResult {
+    let f = Fixture::new()?;
+    let clock: Arc<dyn Clock> = f.clock.clone();
+    let first = State::build(
+        snapshot(&f.text("https://one.test", 8444, ""), "r1")?,
+        clock.clone(),
+    )?;
+    let reloader = Arc::new(Reloader::new(
+        Box::new(Stalled),
+        first,
+        f.lines.clone(),
+        clock,
+    ));
+    let trigger = Arc::new(Notify::new());
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let task = {
+        let (reloader, trigger) = (reloader.clone(), trigger.clone());
+        tokio::spawn(async move {
+            tsong::reload_loop(&reloader, &trigger, Duration::from_secs(3600), async {
+                let _ = stopped.await;
+            })
+            .await;
+        })
+    };
+    trigger.notify_one();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    stop.send(()).map_err(|()| "the loop stopped early")?;
+    tokio::time::timeout(Duration::from_secs(5), task).await??;
+    Ok(())
+}

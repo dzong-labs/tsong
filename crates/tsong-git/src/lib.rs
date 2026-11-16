@@ -4,4 +4,4 @@
 mod store;
 pub mod webhook;
 
-pub use store::{GitStore, ssh_command};
+pub use store::{FETCH_TIMEOUT, GitStore, Interrupt, ssh_command};

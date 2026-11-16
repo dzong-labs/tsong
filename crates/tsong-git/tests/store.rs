@@ -204,7 +204,28 @@ async fn a_checkout_that_is_not_a_directory_is_a_store_error() -> TestResult {
     std::fs::create_dir_all(&f.clones)?;
     std::fs::write(f.clones.join("clone.git"), "not a repository")?;
     let error = store_error(&f.store("main", "")?).await?;
-    assert!(error.starts_with("creating the clone: "), "{error}");
+    assert!(error.starts_with("opening the clone: "), "{error}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_empty_checkout_directory_becomes_the_clone() -> TestResult {
+    let f = Fixture::new()?;
+    let commit = f.commit("tsong.toml", &config(10))?;
+    std::fs::create_dir_all(f.clones.join("clone.git"))?;
+    assert_eq!(f.store("main", "")?.load().await?.revision, commit);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_clone_that_cannot_be_opened_is_reported_as_such() -> TestResult {
+    let f = Fixture::new()?;
+    f.commit("tsong.toml", &config(10))?;
+    let clone = f.clones.join("clone.git");
+    std::fs::create_dir_all(&clone)?;
+    std::fs::write(clone.join("stray"), "not a repository")?;
+    let error = store_error(&f.store("main", "")?).await?;
+    assert!(error.starts_with("opening the clone: "), "{error}");
     Ok(())
 }
 
@@ -225,15 +246,54 @@ async fn a_config_that_is_not_utf8_is_a_store_error() -> TestResult {
 async fn an_invalid_config_fails_validation() -> TestResult {
     let f = Fixture::new()?;
     f.commit("tsong.toml", &config(0))?;
+    let invalid = f.store("main", "")?.load().await;
     assert!(matches!(
-        f.store("main", "")?.load().await,
+        invalid.as_ref().map_err(ConfigError::root),
         Err(ConfigError::Invalid(_))
     ));
-    f.commit("tsong.toml", "not toml [")?;
-    assert!(matches!(
-        f.store("main", "")?.load().await,
-        Err(ConfigError::Parse(_))
-    ));
+    let commit = f.commit("tsong.toml", "not toml [")?;
+    let blob = git(&f.origin, &["rev-parse", "HEAD:tsong.toml"])?;
+    match f.store("main", "")?.load().await {
+        Err(ConfigError::AtRevision {
+            revision,
+            content,
+            author,
+            source,
+        }) => {
+            assert_eq!(revision, commit);
+            assert_eq!(content, blob);
+            assert_eq!(author.as_deref(), Some("Ada <ada@example.test>"));
+            assert!(matches!(*source, ConfigError::Parse(_)));
+        }
+        other => return Err(format!("expected a parse error at a revision, got {other:?}").into()),
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_content_id_is_the_config_files_blob() -> TestResult {
+    let f = Fixture::new()?;
+    let first = f.commit("tsong.toml", &config(10))?;
+    let store = f.store("main", "")?;
+    let before = store.load().await?;
+    assert_eq!(before.revision, first);
+    assert_eq!(
+        before.content,
+        git(&f.origin, &["rev-parse", "HEAD:tsong.toml"])?
+    );
+    let unrelated = f.commit("docs/readme.md", "not the config")?;
+    let after = store.load().await?;
+    assert_eq!(after.revision, unrelated);
+    assert_eq!(after.content, before.content);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_fetch_that_runs_too_long_is_abandoned() -> TestResult {
+    let f = Fixture::new()?;
+    f.commit("tsong.toml", &config(10))?;
+    let store = f.store("main", "")?.with_timeout(std::time::Duration::ZERO);
+    assert_eq!(store_error(&store).await?, "fetching: timed out after 0ns");
     Ok(())
 }
 
@@ -243,7 +303,13 @@ async fn key_paths_in_a_config_from_git_are_absolute() -> TestResult {
     let key = std::env::temp_dir().join("k1.pem").display().to_string();
     let relative = config(10).replace(&format!("'{key}'"), "\"k1.pem\"");
     f.commit("tsong.toml", &relative)?;
-    match f.store("main", "")?.load().await {
+    match f
+        .store("main", "")?
+        .load()
+        .await
+        .as_ref()
+        .map_err(ConfigError::root)
+    {
         Err(ConfigError::Invalid(problems)) => assert_eq!(
             problems.0,
             [r#"issuer.signing.keys "k1" path must be absolute in a config from Git"#]
@@ -291,7 +357,29 @@ fn the_ssh_command_pins_the_key_and_hosts() {
             Path::new("/etc/tsong/deploy key"),
             Path::new("/etc/tsong/it's/known_hosts")
         ),
-        "ssh -i '/etc/tsong/deploy key' -o IdentitiesOnly=yes -o BatchMode=yes \
-         -o StrictHostKeyChecking=yes -o UserKnownHostsFile='/etc/tsong/it'\\''s/known_hosts'"
+        "ssh -F /dev/null -i '/etc/tsong/deploy key' -o IdentitiesOnly=yes -o BatchMode=yes \
+         -o StrictHostKeyChecking=yes -o UserKnownHostsFile='/etc/tsong/it'\\''s/known_hosts' \
+         -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=15 \
+         -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
+    );
+}
+
+#[test]
+fn dropping_the_interrupt_tells_the_fetch_to_stop() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let flag = Arc::new(AtomicBool::new(false));
+    let interrupt = tsong_git::Interrupt(flag.clone());
+    assert!(!flag.load(Ordering::Relaxed));
+    drop(interrupt);
+    assert!(flag.load(Ordering::Relaxed));
+}
+
+#[test]
+fn a_fetch_gets_two_minutes() {
+    assert_eq!(
+        tsong_git::FETCH_TIMEOUT,
+        std::time::Duration::from_secs(120)
     );
 }

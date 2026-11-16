@@ -74,6 +74,7 @@ pub fn snapshot(text: &str, revision: &str) -> TestResult<Snapshot> {
     Ok(Snapshot {
         config: Config::from_toml(text)?,
         revision: revision.into(),
+        content: format!("content of {revision}"),
         author: Some("Ada <ada@example.test>".into()),
     })
 }

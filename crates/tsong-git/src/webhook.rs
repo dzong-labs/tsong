@@ -3,7 +3,7 @@
 use hmac::{Hmac, KeyInit, Mac};
 use serde_json::Value;
 use sha2::Sha256;
-use tsong_config::GitHost;
+use tsong_config::{GitHost, unhex};
 
 /// The header GitHub signs deliveries in.
 pub const GITHUB_SIGNATURE: &str = "x-hub-signature-256";
@@ -48,9 +48,17 @@ fn verify_github(secret: &[u8], signature: &[u8], body: &[u8]) -> bool {
 
 /// The branch a push delivery moved, from its `ref`, such as `main` for
 /// `refs/heads/main`. `None` for anything else, such as a tag push or a
-/// ping.
+/// ping. The delivery is JSON, or GitHub's default form encoding with the
+/// JSON in a `payload` field.
 pub fn pushed_branch(body: &[u8]) -> Option<String> {
-    let delivery: Value = serde_json::from_slice(body).ok()?;
+    let delivery: Value = match serde_json::from_slice(body) {
+        Ok(delivery) => delivery,
+        Err(_) => {
+            let (_, payload) =
+                url::form_urlencoded::parse(body).find(|(name, _)| name == "payload")?;
+            serde_json::from_str(&payload).ok()?
+        }
+    };
     let reference = delivery.get("ref")?.as_str()?;
     Some(reference.strip_prefix("refs/heads/")?.to_owned())
 }
@@ -59,17 +67,4 @@ pub fn pushed_branch(body: &[u8]) -> Option<String> {
 /// lengths.
 fn constant_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
-}
-
-/// Hexadecimal text as bytes.
-fn unhex(text: &[u8]) -> Option<Vec<u8>> {
-    if !text.len().is_multiple_of(2) {
-        return None;
-    }
-    text.chunks(2)
-        .map(|pair| {
-            let digits = std::str::from_utf8(pair).ok()?;
-            u8::from_str_radix(digits, 16).ok()
-        })
-        .collect()
 }

@@ -866,3 +866,36 @@ fn hex_is_lowercase_and_two_digits_a_byte() {
     assert_eq!(hex(&[0x00, 0x0f, 0xa0, 0xff]), "000fa0ff");
     assert_eq!(hex(&[]), "");
 }
+
+#[test]
+fn an_error_at_a_revision_names_it_and_keeps_its_root() {
+    let error = ConfigError::AtRevision {
+        revision: "abc123".into(),
+        content: "blob".into(),
+        author: None,
+        source: Box::new(ConfigError::AtRevision {
+            revision: "inner".into(),
+            content: "blob".into(),
+            author: None,
+            source: Box::new(ConfigError::Store("offline".into())),
+        }),
+    };
+    assert_eq!(error.to_string(), "abc123: inner: offline");
+    assert!(matches!(error.root(), ConfigError::Store(message) if message == "offline"));
+    let plain = ConfigError::Store("offline".into());
+    assert!(matches!(plain.root(), ConfigError::Store(_)));
+}
+
+#[test]
+fn unhex_reads_either_case_and_refuses_anything_else() {
+    use tsong_config::unhex;
+    assert_eq!(unhex(b"000fA0ff"), Some(vec![0x00, 0x0f, 0xa0, 0xff]));
+    assert_eq!(unhex(b""), Some(vec![]));
+    assert_eq!(unhex(b"abc"), None);
+    assert_eq!(unhex(b"zz"), None);
+    assert_eq!(unhex("\u{e9}".as_bytes()), None);
+    assert_eq!(
+        unhex(&hex(&[1, 2, 254]).into_bytes()),
+        Some(vec![1, 2, 254])
+    );
+}

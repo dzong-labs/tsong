@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -38,6 +38,9 @@ async fn status_handler(State(status): State<Arc<Mutex<Status>>>) -> Response {
     axum::Json(status).into_response()
 }
 
+/// The largest delivery accepted: GitHub caps push payloads at 25 MB.
+pub const MAX_DELIVERY: usize = 25 * 1024 * 1024;
+
 struct Deliveries {
     hook: Hook,
     reload: Arc<Notify>,
@@ -48,6 +51,7 @@ struct Deliveries {
 pub fn webhook_router(hook: Hook, reload: Arc<Notify>) -> Router {
     Router::new()
         .route("/hooks/config", post(webhook))
+        .layer(DefaultBodyLimit::max(MAX_DELIVERY))
         .with_state(Arc::new(Deliveries { hook, reload }))
 }
 

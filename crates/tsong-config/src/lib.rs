@@ -27,7 +27,7 @@ pub use bootstrap::{
 };
 pub use lint::Warnings;
 pub use network::{allowed, client_ip};
-pub use store::{ConfigStore, FileStore, LoadFuture, Snapshot, hex};
+pub use store::{ConfigStore, FileStore, LoadFuture, Snapshot, hex, unhex};
 pub use validate::{Problems, RESERVED_CLAIMS};
 
 /// A whole Tsong configuration.
@@ -315,6 +315,25 @@ pub enum ConfigError {
     /// The store couldn't produce the config, such as a failed fetch.
     #[error("{0}")]
     Store(String),
+    /// The config at a known revision failed, so the failure can name it.
+    #[error("{revision}: {source}")]
+    AtRevision {
+        revision: String,
+        /// The config's content ID, as in [`Snapshot::content`].
+        content: String,
+        author: Option<String>,
+        source: Box<ConfigError>,
+    },
+}
+
+impl ConfigError {
+    /// The error beneath any revision it was found at.
+    pub fn root(&self) -> &ConfigError {
+        match self {
+            Self::AtRevision { source, .. } => source.root(),
+            other => other,
+        }
+    }
 }
 
 impl Config {
@@ -328,11 +347,7 @@ impl Config {
     /// Reads, parses and validates a TOML file. Relative key paths are
     /// taken from the file's directory.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
-        let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
-            path: path.to_owned(),
-            source,
-        })?;
-        Self::from_file_text(&text, path)
+        Self::from_file_text(&store::read(path)?, path)
     }
 
     /// Parses and validates the text of the file at `path`, taking

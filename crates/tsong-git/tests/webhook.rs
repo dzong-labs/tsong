@@ -78,9 +78,12 @@ fn gitlab_deliveries_carry_the_secret() -> TestResult {
 #[test]
 fn a_missing_header_or_secret_fails() -> TestResult {
     let secret = secret()?;
+    // An empty secret, emptied from a generated one.
+    let mut empty = self::secret()?;
+    empty.clear();
     for host in [GitHost::GitHub, GitHost::GitLab] {
         assert!(!verify(host, &secret, None, BODY));
-        assert!(!verify(host, b"", Some(b""), BODY));
+        assert!(!verify(host, &empty, Some(&empty), BODY));
     }
     Ok(())
 }
@@ -111,4 +114,14 @@ fn a_push_names_its_branch() {
     ] {
         assert_eq!(pushed_branch(body), None);
     }
+}
+
+#[test]
+fn a_form_encoded_push_names_its_branch() {
+    let form = b"payload=%7B%22ref%22%3A%22refs%2Fheads%2Fmain%22%7D";
+    assert_eq!(pushed_branch(form).as_deref(), Some("main"));
+    let other_field = b"other=%7B%22ref%22%3A%22refs%2Fheads%2Fmain%22%7D";
+    assert_eq!(pushed_branch(other_field), None);
+    let not_json = b"payload=not+json";
+    assert_eq!(pushed_branch(not_json), None);
 }

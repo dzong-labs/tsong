@@ -167,3 +167,17 @@ async fn a_gitlab_push_carries_the_token() -> TestResult {
     assert_eq!(wrong, StatusCode::UNAUTHORIZED);
     Ok(())
 }
+
+#[tokio::test]
+async fn a_large_push_is_read_whole() -> TestResult {
+    let f = webhook(GitHost::GitHub)?;
+    let padding = "x".repeat(3 * 1024 * 1024);
+    let body = format!(r#"{{"ref":"refs/heads/main","padding":"{padding}"}}"#);
+    let signature = github_signature(&f.secret, &body)?;
+    let status = deliver(&f, "x-hub-signature-256", &signature, &body).await?;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let too_large = "x".repeat(tsong::admin::MAX_DELIVERY + 1);
+    let status = deliver(&f, "x-hub-signature-256", &signature, &too_large).await?;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    Ok(())
+}

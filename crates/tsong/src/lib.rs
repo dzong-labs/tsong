@@ -215,7 +215,8 @@ async fn optional(
     }
 }
 
-/// Reloads on each trigger and each poll until `stopped` completes.
+/// Reloads on each trigger and each poll until `stopped` completes, even
+/// when a reload is in progress.
 pub async fn reload_loop(
     reloader: &Reloader,
     trigger: &Notify,
@@ -229,7 +230,11 @@ pub async fn reload_loop(
             () = trigger.notified() => {}
             () = tokio::time::sleep(poll) => {}
         }
-        reloader.reload().await;
+        // A shutdown cancels a reload in progress, which interrupts its fetch.
+        tokio::select! {
+            () = &mut stopped => return,
+            _ = reloader.reload() => {}
+        }
     }
 }
 

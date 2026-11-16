@@ -108,7 +108,10 @@ fn a_file_bootstrap_takes_its_path_from_its_own_directory() -> TestResult {
     let Source::Git(GitSource { checkout, .. }) = Bootstrap::load(&git)?.source else {
         return Err("expected a git source".into());
     };
-    assert_eq!(checkout, PathBuf::from("/var/lib/tsong/config.git"));
+    // An absolute path stays as written; the join is a no-op wherever "/" is
+    // absolute, which is every platform Tsong runs on.
+    let absolute = PathBuf::from("/var/lib/tsong/config.git");
+    assert_eq!(checkout, dir.path().join(&absolute));
     assert!(matches!(
         Bootstrap::load(&dir.path().join("missing.toml")),
         Err(BootstrapError::Read { .. })
@@ -305,6 +308,54 @@ fn a_local_url_takes_neither_key_alone() -> TestResult {
             ["source.ssh_key and source.known_hosts are for an ssh url"],
             "{field} alone"
         );
+    }
+    Ok(())
+}
+
+#[test]
+fn a_git_source_takes_relative_paths_from_the_bootstrap_directory() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("bootstrap.toml");
+    let relative = GIT
+        .replace(
+            "ssh://git@github.com/example/config.git",
+            "repos/config.git",
+        )
+        .replace("/var/lib/tsong/config.git", "clone.git")
+        .replace(
+            "ssh_key = \"/etc/tsong/deploy_key\"
+known_hosts = \"/etc/tsong/known_hosts\"
+",
+            "",
+        );
+    std::fs::write(&path, &relative)?;
+    let Source::Git(git) = Bootstrap::load(&path)?.source else {
+        return Err("expected a git source".into());
+    };
+    assert_eq!(git.checkout, dir.path().join("clone.git"));
+    assert_eq!(
+        git.url,
+        dir.path().join("repos/config.git").display().to_string()
+    );
+
+    let keyed = GIT
+        .replace("/etc/tsong/deploy_key", "keys/deploy_key")
+        .replace("/etc/tsong/known_hosts", "keys/known_hosts");
+    std::fs::write(&path, &keyed)?;
+    let Source::Git(git) = Bootstrap::load(&path)?.source else {
+        return Err("expected a git source".into());
+    };
+    assert_eq!(git.ssh_key, Some(dir.path().join("keys/deploy_key")));
+    assert_eq!(git.known_hosts, Some(dir.path().join("keys/known_hosts")));
+    assert_eq!(git.url, "ssh://git@github.com/example/config.git");
+
+    for url in ["file:///srv/config.git", "file://relative/config.git"] {
+        let file_url = relative.replace("url = \"repos/config.git\"", &format!("url = {url:?}"));
+        std::fs::write(&path, &file_url)?;
+        let Source::Git(git) = Bootstrap::load(&path)?.source else {
+            return Err("expected a git source".into());
+        };
+        assert_eq!(git.url, url, "a file url is left as written");
     }
     Ok(())
 }

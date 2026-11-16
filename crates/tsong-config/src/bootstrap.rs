@@ -156,8 +156,22 @@ impl Bootstrap {
             source,
         })?;
         let mut bootstrap = Self::from_toml(&text)?;
-        if let Source::File { path: file } = &mut bootstrap.source {
-            *file = path.parent().unwrap_or(Path::new("")).join(&*file);
+        let dir = path.parent().unwrap_or(Path::new(""));
+        match &mut bootstrap.source {
+            Source::File { path: file } => *file = dir.join(&*file),
+            Source::Git(git) => {
+                git.checkout = dir.join(&git.checkout);
+                for file in [&mut git.ssh_key, &mut git.known_hosts]
+                    .into_iter()
+                    .flatten()
+                {
+                    *file = dir.join(&*file);
+                }
+                let local = transport(&git.url) == Transport::Local;
+                if local && !git.url.starts_with("file://") && Path::new(&git.url).is_relative() {
+                    git.url = dir.join(&git.url).display().to_string();
+                }
+            }
         }
         Ok(bootstrap)
     }

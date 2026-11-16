@@ -24,6 +24,9 @@ use crate::Error;
 /// over from the old config.
 pub struct State {
     pub revision: String,
+    /// The config's content ID: a reload whose content matches changes
+    /// nothing.
+    pub content: String,
     pub author: Option<String>,
     pub config: Arc<Config>,
     pub issuer: Router,
@@ -40,6 +43,7 @@ impl State {
         let gateway = Arc::new(Gateway::new(&config, issuer.clone(), clock)?);
         Ok(Self {
             revision: snapshot.revision,
+            content: snapshot.content,
             author: snapshot.author,
             config,
             issuer: tsong_issuer::router(issuer),
