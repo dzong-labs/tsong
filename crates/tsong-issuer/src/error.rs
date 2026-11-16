@@ -1,6 +1,6 @@
 //! Exchange failures, as RFC 6749 section 5.2 error responses. A subject
-//! token that is invalid or unacceptable is `invalid_request`, as RFC 8693
-//! section 2.2.2 requires.
+//! token that fails validation, or lacks the subject the minted token needs,
+//! is `invalid_request`, as RFC 8693 section 2.2.2 requires.
 
 use tsong_keys::KeyError;
 use tsong_validate::ValidateError;

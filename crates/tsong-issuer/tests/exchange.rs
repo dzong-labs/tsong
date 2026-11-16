@@ -318,7 +318,7 @@ async fn a_renamed_claim_supplies_the_subject_and_sub_id_keeps_the_original() ->
 #[tokio::test]
 async fn a_token_without_its_renamed_subject_is_refused() -> TestResult {
     let h = harness()?;
-    for oid in [Value::Null, json!(7)] {
+    for oid in [Value::Null, json!(7), json!("")] {
         let other = subject(json!({ "iss": "https://other.test", "oid": oid }));
         assert_eq!(
             refused(&h, request(&h, "orders.test", other)).await?,
@@ -352,6 +352,7 @@ async fn a_subject_is_required() -> TestResult {
     for changes in [
         json!({ "sub": null }),
         json!({ "sub": 7 }),
+        json!({ "sub": "" }),
         json!({ "iss": "https://other.test", "oid": "object-7", "sub": null }),
     ] {
         assert_eq!(

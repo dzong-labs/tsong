@@ -168,6 +168,7 @@ impl Issuer {
         let granted = granted_scopes(route, &validated, request.scope.as_deref())?;
         let original_sub = validated
             .subject()
+            .filter(|sub| !sub.is_empty())
             .ok_or_else(|| ExchangeError::InvalidRequest("the subject token has no sub".into()))?;
         let trusted = self
             .config
@@ -251,8 +252,8 @@ impl Issuer {
 
     /// The subject the minted `sub` is made from: the claim a rename maps to
     /// `sub`, such as Entra's `oid`, or else `original_sub`. A token without
-    /// the renamed claim as a string is refused rather than falling back, so
-    /// one prefix never mixes two kinds of identifier.
+    /// the renamed claim as a non-empty string is refused rather than falling
+    /// back, so one prefix never mixes two kinds of identifier.
     fn subject<'a>(
         &self,
         validated: &'a Validated,
@@ -270,6 +271,7 @@ impl Issuer {
                 .claims()
                 .get(from)
                 .and_then(Value::as_str)
+                .filter(|subject| !subject.is_empty())
                 .ok_or_else(|| {
                     ExchangeError::InvalidRequest(format!(
                         "the subject token has no {from}, which supplies its subject"

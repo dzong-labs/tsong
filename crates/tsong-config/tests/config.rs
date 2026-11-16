@@ -389,6 +389,23 @@ y = \"sub_id\"
 }
 
 #[test]
+fn a_rename_writes_each_claim_from_one_claim() -> TestResult {
+    let text = format!(
+        "{}{OKTA}[claims.rename.okta]
+oid = \"sub\"
+upn = \"sub\"
+uid = \"user\"
+",
+        minimal()
+    );
+    assert_eq!(
+        problems(&text)?,
+        [r#"claims.rename.okta writes claim "sub" from more than one claim"#]
+    );
+    Ok(())
+}
+
+#[test]
 fn a_sub_prefix_is_required() -> TestResult {
     let text = format!(
         "{}{}",

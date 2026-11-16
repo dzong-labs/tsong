@@ -164,10 +164,15 @@ impl Config {
             }
         }
         for (name, renames) in &self.claims.rename {
+            let mut targets = BTreeSet::new();
             for target in renames.values() {
                 if RESERVED_CLAIMS.contains(&target.as_str()) {
                     problems.push(format!(
                         "claims.rename.{name} may not write reserved claim {target:?}"
+                    ));
+                } else if !targets.insert(target.as_str()) {
+                    problems.push(format!(
+                        "claims.rename.{name} writes claim {target:?} from more than one claim"
                     ));
                 }
             }
