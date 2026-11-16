@@ -2,7 +2,7 @@
 
 Tsong is an API gateway and an RFC 8693 token exchange issuer. It replaces each caller's access token, issued by any of several trusted identity providers, with a token signed by Tsong, so your services trust one issuer instead of many.
 
-## How a request flows
+## Request flow
 
 1. A caller sends a request with `Authorization: Bearer <token>`. The token comes from an identity provider Tsong is configured to trust, called a trusted issuer, such as Entra or Okta.
 2. Tsong picks a route by the request's host name. The route names the service the request goes to.
