@@ -74,7 +74,7 @@ Eight things react to a reload. Four are part of the state, so rebuilding it han
 
 - The audit log writes one JSON line to stdout for each new revision and each failure: the time, commit, author, outcome, and the routes added, removed and changed, keyed by host. A fetch that finds the revision being served writes nothing. Collecting stdout belongs to the platform.
 - `GET /status` on the admin listener reports the revision being served, when it loaded, when the store was last read, the count of reloads and failed reloads, and the last failure as a short reason: `fetch_failed`, `invalid_config` or `build_failed`. The detail stays in the audit log.
-- A store that can't be read leaves the last good config serving, for as long as the outage lasts; Tsong doesn't fail closed on a Git outage. `tsong_config_last_fetch_timestamp_seconds` shows how stale that config may be, and `tsong_config_revision_info` shows which revision each replica serves. Both are in [[observability]].
+- A store that can't be read leaves the last good config serving, for as long as the outage lasts; Tsong doesn't fail closed on a Git outage. `tsong_config_last_fetch_timestamp_seconds` shows how stale that config may be, `tsong_config_tip_rejected` shows a branch tip that won't load, and `tsong_config_revision_info` shows which revision each replica serves. A commit that leaves `tsong.toml` alone rebuilds nothing, but becomes the revision reported. Both are in [[observability]].
 - A change to `issuer.listen` or `gateway.listen` is named in the audit line's `restart_required`. The old addresses stay bound until a restart.
 
 ## Deferred

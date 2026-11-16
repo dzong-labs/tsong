@@ -59,6 +59,9 @@ pub struct Metrics {
     /// The revision being served: one series, set to 1. Replicas serving
     /// different revisions show as more than one series across the fleet.
     pub config_revision: Family<RevisionLabel, Gauge>,
+    /// 1 while the newest config read from the store was rejected as
+    /// invalid or failed to build, so an older one is still served.
+    pub config_tip_rejected: Gauge,
 }
 
 impl Default for Metrics {
@@ -101,6 +104,12 @@ impl Default for Metrics {
             "The config revision being served",
             config_revision.clone(),
         );
+        let config_tip_rejected = Gauge::default();
+        registry.register(
+            "tsong_config_tip_rejected",
+            "1 while the newest config read was rejected and an older one is served",
+            config_tip_rejected.clone(),
+        );
         Self {
             registry,
             gateway,
@@ -110,6 +119,7 @@ impl Default for Metrics {
             reloads,
             config_fetched,
             config_revision,
+            config_tip_rejected,
         }
     }
 }

@@ -374,7 +374,7 @@ async fn the_last_fetch_and_the_served_revision_are_reported() -> TestResult {
     store.push(Err(ConfigError::Store("offline".into())));
     assert!(matches!(reloader.reload().await, Outcome::Rejected(_)));
     assert_eq!(fetched_at(), now);
-    assert_eq!(status_of(&reloader).fetched_at, NOW);
+    assert_eq!(status(&reloader).fetched_at, NOW);
 
     // A read with nothing new still counts as a fetch.
     clock.advance(Duration::from_secs(60));
@@ -384,8 +384,8 @@ async fn the_last_fetch_and_the_served_revision_are_reported() -> TestResult {
     )?));
     assert_eq!(reloader.reload().await, Outcome::Unchanged);
     assert_eq!(fetched_at(), now + 120);
-    assert_eq!(status_of(&reloader).fetched_at, NOW + 120);
-    assert_eq!(status_of(&reloader).loaded_at, NOW);
+    assert_eq!(status(&reloader).fetched_at, NOW + 120);
+    assert_eq!(status(&reloader).loaded_at, NOW);
 
     clock.advance(Duration::from_secs(60));
     store.push(Ok(fetched(
@@ -398,15 +398,31 @@ async fn the_last_fetch_and_the_served_revision_are_reported() -> TestResult {
         revisions()?,
         [r#"tsong_config_revision_info{revision="r2"} 1"#]
     );
-    Ok(())
-}
 
-fn status_of(reloader: &Reloader) -> tsong::reload::Status {
-    reloader
-        .status()
-        .lock()
-        .map(|status| status.clone())
-        .unwrap_or_else(|poisoned| poisoned.into_inner().clone())
+    // An invalid tip is flagged while r2 keeps serving, read after read.
+    let tip_rejected = || metrics.config_tip_rejected.get();
+    assert_eq!(tip_rejected(), 0);
+    store.push(Ok(fetched("not toml [", "r3")?));
+    assert!(matches!(reloader.reload().await, Outcome::Rejected(_)));
+    assert_eq!(tip_rejected(), 1);
+    store.push(Ok(fetched("not toml [", "r3")?));
+    assert_eq!(reloader.reload().await, Outcome::Unchanged);
+    assert_eq!(tip_rejected(), 1);
+    assert_eq!(status(&reloader).revision, "r2");
+
+    // A commit that restores r2's config, or touches only other files, is
+    // the revision served.
+    let mut same = fetched(&config_text(&key, "https://two.test", 8444, ""), "r2")?;
+    same.revision = "r4".into();
+    store.push(Ok(same));
+    assert_eq!(reloader.reload().await, Outcome::Unchanged);
+    assert_eq!(tip_rejected(), 0);
+    assert_eq!(status(&reloader).revision, "r4");
+    assert_eq!(
+        revisions()?,
+        [r#"tsong_config_revision_info{revision="r4"} 1"#]
+    );
+    Ok(())
 }
 
 #[tokio::test]

@@ -57,7 +57,8 @@ impl<W: Write + Send> Audit for Lines<W> {
 /// What `GET /status` reports.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Status {
-    /// The revision being served.
+    /// The revision being served: the newest commit read whose config is
+    /// the one in use, even when that commit changed only other files.
     pub revision: String,
     /// When it was loaded, in Unix seconds.
     pub loaded_at: u64,
@@ -137,7 +138,7 @@ impl Reloader {
         self.metrics = metrics;
         let status = self.lock().clone();
         self.publish_fetched(status.fetched_at);
-        self.publish_revision(&status.revision);
+        self.publish_revision(None, &status.revision);
         self
     }
 
@@ -175,7 +176,14 @@ impl Reloader {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
-        if content == current.content || rejected.as_ref() == Some(&content) {
+        if content == current.content {
+            // A commit that leaves the config alone is still the one served.
+            let old = std::mem::replace(&mut self.lock().revision, fetched.revision.clone());
+            self.publish_revision(Some(&old), &fetched.revision);
+            self.metrics.config_tip_rejected.set(0);
+            return Outcome::Unchanged;
+        }
+        if rejected.as_ref() == Some(&content) {
             return Outcome::Unchanged;
         }
         let revision = fetched.revision.clone();
@@ -200,16 +208,17 @@ impl Reloader {
             }
         };
         *self.invalid.lock().unwrap_or_else(PoisonError::into_inner) = None;
-        let line = {
+        let (line, old) = {
             let mut status = self.lock();
-            status.revision = next.revision.clone();
+            let old = std::mem::replace(&mut status.revision, next.revision.clone());
             status.loaded_at = self.clock.unix_seconds();
             status.reloads += 1;
             self.count(APPLIED);
-            applied(Some(&current.config), &next, &status)
+            (applied(Some(&current.config), &next, &status), old)
         };
         self.audit.record(&line);
-        self.publish_revision(&next.revision);
+        self.publish_revision(Some(&old), &next.revision);
+        self.metrics.config_tip_rejected.set(0);
         self.state.send_replace(Arc::new(next));
         Outcome::Applied
     }
@@ -226,6 +235,9 @@ impl Reloader {
             status.failed_reloads += 1;
             self.count(reason);
             status.last_failure = Some(reason.to_owned());
+        }
+        if reason != FETCH_FAILED {
+            self.metrics.config_tip_rejected.set(1);
         }
         let line = json!({
             "event": "config_reload",
@@ -246,14 +258,22 @@ impl Reloader {
             .set(i64::try_from(at).unwrap_or(i64::MAX));
     }
 
-    fn publish_revision(&self, revision: &str) {
+    /// Reports `new` as the revision served in place of `old`. The new
+    /// series is set before the old one goes, so a scrape always sees one.
+    fn publish_revision(&self, old: Option<&str>, new: &str) {
         let revisions = &self.metrics.config_revision;
-        revisions.clear();
         revisions
             .get_or_create(&RevisionLabel {
-                revision: revision.to_owned(),
+                revision: new.to_owned(),
             })
             .set(1);
+        if let Some(old) = old
+            && old != new
+        {
+            revisions.remove(&RevisionLabel {
+                revision: old.to_owned(),
+            });
+        }
     }
 
     fn count(&self, outcome: &str) {
