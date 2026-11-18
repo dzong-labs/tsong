@@ -1,0 +1,4 @@
+[advisories]
+# humantime is unmaintained, with no known vulnerability. Tsong uses it
+# only to parse durations in its own config.
+ignore = ["RUSTSEC-2026-0542"]
