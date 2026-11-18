@@ -76,8 +76,12 @@ impl Config {
     fn check_keys(&self, problems: &mut Vec<String>) {
         let signing = &self.issuer.signing;
         let mut active = BTreeSet::new();
+        let mut repeated = BTreeSet::new();
         for key in &signing.keys {
-            if key.state == KeyState::Active && !active.insert(key.algorithm) {
+            if key.state == KeyState::Active
+                && !active.insert(key.algorithm)
+                && repeated.insert(key.algorithm)
+            {
                 problems.push(format!(
                     "issuer.signing.keys has more than one active {} key",
                     key.algorithm

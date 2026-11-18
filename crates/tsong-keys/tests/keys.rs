@@ -422,3 +422,25 @@ fn a_file_key_entry_needs_a_path() -> TestResult {
     assert_eq!(error.to_string(), r#"key "k1" has no path"#);
     Ok(())
 }
+
+/// Polls `future` once, outside any async runtime.
+fn poll_once<F: std::future::Future>(future: F) -> std::task::Poll<F::Output> {
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    std::pin::pin!(future).as_mut().poll(&mut context)
+}
+
+#[test]
+fn each_key_signs_outside_an_async_runtime() -> TestResult {
+    for (algorithm, pem) in [
+        (SigningAlgorithm::ES256, pem(7)?),
+        (SigningAlgorithm::EdDSA, ed25519_pem()?),
+        (SigningAlgorithm::RS256, rsa_pem()?),
+    ] {
+        let key = FileKey::from_pem("k1", algorithm, &pem)?;
+        match poll_once(key.sign(b"header.payload")) {
+            std::task::Poll::Ready(signed) => assert!(!signed?.is_empty(), "{algorithm}"),
+            std::task::Poll::Pending => return Err(format!("{algorithm} is pending").into()),
+        }
+    }
+    Ok(())
+}

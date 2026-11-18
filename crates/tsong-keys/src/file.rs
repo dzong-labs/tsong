@@ -160,21 +160,28 @@ impl SigningKey for FileKey {
                 Box::pin(async move { Ok(signature) })
             }
             // An RSA signature takes milliseconds, more for a large key, so
-            // it runs on the blocking pool rather than an async worker.
+            // under Tokio it runs on the blocking pool rather than an async
+            // worker. Outside a runtime it signs in place.
             Key::Rsa(pair, encoding) => {
                 let (pair, encoding) = (Arc::clone(pair), *encoding);
+                let sign = move |message: &[u8]| {
+                    let mut signature = vec![0; pair.public_modulus_len()];
+                    pair.sign(encoding, &SystemRandom::new(), message, &mut signature)
+                        .map(|()| signature)
+                };
+                let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+                    let signed = sign(message).map_err(failed);
+                    return Box::pin(async move { signed });
+                };
                 let message = message.to_vec();
                 Box::pin(async move {
-                    tokio::task::spawn_blocking(move || {
-                        let mut signature = vec![0; pair.public_modulus_len()];
-                        pair.sign(encoding, &SystemRandom::new(), &message, &mut signature)
-                            .map(|()| signature)
-                    })
-                    .await
-                    .map_err(|_| KeyError::Sign {
-                        kid: self.kid.clone(),
-                    })?
-                    .map_err(failed)
+                    runtime
+                        .spawn_blocking(move || sign(&message))
+                        .await
+                        .map_err(|_| KeyError::Sign {
+                            kid: self.kid.clone(),
+                        })?
+                        .map_err(failed)
                 })
             }
         }

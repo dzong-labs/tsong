@@ -241,11 +241,19 @@ fn one_key_per_algorithm_is_active() -> TestResult {
         problems(&two)?,
         ["issuer.signing.keys has more than one active ES256 key"]
     );
-    let rsa = ACTIVE_KEY.replace("k1", "k2").replace(
-        "state",
-        "algorithm = \"RS256\"
-state",
+    let three = format!(
+        "{ISSUER}{ACTIVE_KEY}{}{}{GATEWAY}",
+        ACTIVE_KEY.replace("k1", "k2"),
+        ACTIVE_KEY.replace("k1", "k3")
     );
+    assert_eq!(
+        problems(&three)?,
+        ["issuer.signing.keys has more than one active ES256 key"],
+        "reported once per algorithm"
+    );
+    let rsa = ACTIVE_KEY
+        .replace("k1", "k2")
+        .replace("state", "algorithm = \"RS256\"\nstate");
     let config = Config::from_toml(&format!("{ISSUER}{ACTIVE_KEY}{rsa}{GATEWAY}"))?;
     let algorithms: Vec<_> = config
         .issuer
@@ -276,17 +284,14 @@ fn a_route_signs_es256_unless_it_names_an_algorithm() -> TestResult {
         route(&config, 0)?.signing_algorithm,
         SigningAlgorithm::ES256
     );
-    let rsa = ACTIVE_KEY.replace("k1", "k2").replace(
-        "state",
-        "algorithm = \"RS256\"
-state",
-    );
+    let rsa = ACTIVE_KEY
+        .replace("k1", "k2")
+        .replace("state", "algorithm = \"RS256\"\nstate");
     let text = format!(
         "{}{rsa}",
         route_with(
             "allowed_scopes",
-            "signing_algorithm = \"RS256\"
-allowed_scopes"
+            "signing_algorithm = \"RS256\"\nallowed_scopes"
         )
     );
     let config = Config::from_toml(&text)?;
@@ -301,8 +306,7 @@ allowed_scopes"
 fn a_route_s_algorithm_needs_an_active_key() -> TestResult {
     let text = route_with(
         "allowed_scopes",
-        "signing_algorithm = \"EdDSA\"
-allowed_scopes",
+        "signing_algorithm = \"EdDSA\"\nallowed_scopes",
     );
     assert_eq!(
         problems(&text)?,
@@ -313,11 +317,7 @@ allowed_scopes",
         ACTIVE_KEY
             .replace("k1", "k2")
             .replace("active", "retiring")
-            .replace(
-                "state",
-                "algorithm = \"EdDSA\"
-state"
-            )
+            .replace("state", "algorithm = \"EdDSA\"\nstate")
     );
     assert_eq!(
         problems(&retiring)?,
@@ -332,13 +332,7 @@ fn every_signing_algorithm_parses_by_its_jws_name() -> TestResult {
     for name in [
         "RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "EdDSA",
     ] {
-        let key = ACTIVE_KEY.replace(
-            "state",
-            &format!(
-                "algorithm = \"{name}\"
-state"
-            ),
-        );
+        let key = ACTIVE_KEY.replace("state", &format!("algorithm = \"{name}\"\nstate"));
         let config = Config::from_toml(&format!("{ISSUER}{key}{GATEWAY}"))?;
         let parsed = config
             .issuer
@@ -350,17 +344,9 @@ state"
         assert_eq!(parsed.name(), name);
         assert_eq!(parsed.to_string(), name);
     }
-    let none = ACTIVE_KEY.replace(
-        "state",
-        "algorithm = \"none\"
-state",
-    );
+    let none = ACTIVE_KEY.replace("state", "algorithm = \"none\"\nstate");
     assert!(Config::from_toml(&format!("{ISSUER}{none}{GATEWAY}")).is_err());
-    let hmac = ACTIVE_KEY.replace(
-        "state",
-        "algorithm = \"HS256\"
-state",
-    );
+    let hmac = ACTIVE_KEY.replace("state", "algorithm = \"HS256\"\nstate");
     assert!(Config::from_toml(&format!("{ISSUER}{hmac}{GATEWAY}")).is_err());
     Ok(())
 }
@@ -369,8 +355,7 @@ state",
 fn the_retired_signing_algorithm_field_is_refused() {
     let old = ISSUER.replace(
         "provider = \"file\"",
-        "provider = \"file\"
-algorithm = \"ES256\"",
+        "provider = \"file\"\nalgorithm = \"ES256\"",
     );
     assert!(Config::from_toml(&format!("{old}{ACTIVE_KEY}{GATEWAY}")).is_err());
 }
