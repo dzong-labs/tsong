@@ -35,7 +35,6 @@ clock_skew = "30s"
 
 [issuer.signing]
 provider = "file"
-algorithm = "ES256"
 
 [[issuer.signing.keys]]
 kid = "tsong-1"

@@ -76,7 +76,7 @@ async fn check_reports_a_good_config() -> TestResult {
     let path = write_config(dir.path(), 0, true)?;
     assert_eq!(
         tsong::run(args("check", &path)).await?,
-        format!("{}: ok, signing with k1", path.display())
+        format!("{}: ok, signing with ES256 k1", path.display())
     );
     Ok(())
 }
@@ -100,7 +100,7 @@ async fn check_reports_warnings_and_passes() -> TestResult {
         format!(
             "warning: route \"orders\": allowed_audiences has \"*\"; any value is accepted\n\
              warning: route \"orders\": allowed_scopes is empty; every request will be denied\n\
-             {}: ok, signing with k1",
+             {}: ok, signing with ES256 k1",
             path.display()
         )
     );
@@ -129,7 +129,7 @@ async fn deny_warnings_fails_a_check_with_warnings() -> TestResult {
     let clean = write_config(dir.path(), 0, true)?;
     assert_eq!(
         tsong::run(deny(&clean)).await?,
-        format!("{}: ok, signing with k1", clean.display())
+        format!("{}: ok, signing with ES256 k1", clean.display())
     );
     Ok(())
 }
@@ -295,7 +295,7 @@ fn the_binary_exits_by_outcome() -> TestResult {
         .args(args("check", &path))
         .output()?;
     assert!(good.status.success());
-    assert!(String::from_utf8(good.stdout)?.ends_with("signing with k1\n"));
+    assert!(String::from_utf8(good.stdout)?.ends_with("signing with ES256 k1\n"));
 
     let bad = Command::new(env!("CARGO_BIN_EXE_tsong")).output()?;
     assert!(!bad.status.success());

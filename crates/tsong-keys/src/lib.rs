@@ -2,8 +2,9 @@
 //!
 //! [`SigningKey`] signs bytes and describes its public half; it never hands
 //! out private key material, so the same trait fits a key file, a cloud KMS
-//! or an HSM. [`KeySet`] holds the active key and the retiring ones, and
-//! publishes them all as a JWKS. [`FileKey`] is the first provider.
+//! or an HSM. [`KeySet`] holds an active key per algorithm and the retiring
+//! ones, and publishes them all as a JWKS. [`FileKey`] is the first
+//! provider.
 
 mod file;
 mod set;
@@ -29,8 +30,8 @@ pub trait SigningKey: Send + Sync {
     /// The public key as a JWK, with `kid`, `use` and `alg` set.
     fn public_jwk(&self) -> serde_json::Value;
 
-    /// Signs `message`, returning the signature in JWS form: for ES256, the
-    /// 64-byte `r || s`.
+    /// Signs `message`, returning the signature in JWS form: for ECDSA,
+    /// the fixed-width `r || s`.
     fn sign<'a>(&'a self, message: &'a [u8]) -> SignFuture<'a>;
 }
 
@@ -39,14 +40,16 @@ pub trait SigningKey: Send + Sync {
 pub enum KeyError {
     #[error("reading key {kid:?}: {source}")]
     Read { kid: String, source: std::io::Error },
-    #[error("key {kid:?} is not a PKCS#8 PEM P-256 private key")]
-    Decode { kid: String },
+    #[error("key {kid:?} is not a PKCS#8 PEM {expected} private key")]
+    Decode { kid: String, expected: &'static str },
     #[error("key {kid:?} has no path")]
     MissingPath { kid: String },
+    #[error("key {kid:?} failed to sign")]
+    Sign { kid: String },
     #[error("no key is active")]
     NoActiveKey,
-    #[error("more than one key is active")]
-    ManyActiveKeys,
+    #[error("more than one {0} key is active")]
+    ManyActiveKeys(SigningAlgorithm),
     #[error("kid {0:?} appears more than once")]
     DuplicateKid(String),
 }

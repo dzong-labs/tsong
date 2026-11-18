@@ -221,7 +221,13 @@ impl Issuer {
             claims.insert("scope".into(), json!(scope));
         }
 
-        let access_token = mint::sign(self.keys.active(), &claims).await?;
+        let key = self.keys.active(route.signing_algorithm).ok_or_else(|| {
+            ExchangeError::Server(format!(
+                "no active key signs {}, which route {:?} uses",
+                route.signing_algorithm, route.name
+            ))
+        })?;
+        let access_token = mint::sign(key, &claims).await?;
         seen.scope.clone_from(&scope);
         Ok(TokenResponse {
             access_token,

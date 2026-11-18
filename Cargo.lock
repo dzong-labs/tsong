@@ -3268,12 +3268,14 @@ dependencies = [
 name = "tsong-issuer"
 version = "0.1.0"
 dependencies = [
+ "aws-lc-rs",
  "axum",
  "base64",
  "getrandom 0.4.3",
  "http-body-util",
  "jsonwebtoken",
  "p256",
+ "pem",
  "serde",
  "serde_json",
  "thiserror",
@@ -3289,8 +3291,11 @@ dependencies = [
 name = "tsong-keys"
 version = "0.1.0"
 dependencies = [
+ "aws-lc-rs",
  "base64",
+ "jsonwebtoken",
  "p256",
+ "pem",
  "serde_json",
  "tempfile",
  "thiserror",

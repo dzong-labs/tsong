@@ -10,11 +10,17 @@ clock_skew = "30s"
 
 [issuer.signing]
 provider = "file"
-algorithm = "ES256"
 
 [[issuer.signing.keys]]
 kid = "2026-11"
+algorithm = "ES256"             # the default; one active key per algorithm
 path = "/etc/tsong/keys/2026-11.pem"
+state = "active"
+
+[[issuer.signing.keys]]
+kid = "2026-11-rsa"
+algorithm = "RS256"             # for routes whose services need RSA
+path = "/etc/tsong/keys/2026-11-rsa.pem"
 state = "active"
 
 [[issuer.signing.keys]]
@@ -88,3 +94,4 @@ allowed_audiences = ["tsong"]
 allowed_scopes = ["api", "read_api"]
 allow = ["10.20.0.0/16"]                     # narrows gateway.allow for this route
 read_timeout = "5m"                          # long-running builds
+signing_algorithm = "RS256"                  # ES256 unless set

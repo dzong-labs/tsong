@@ -68,7 +68,6 @@ pub struct Issuer {
 #[serde(deny_unknown_fields)]
 pub struct Signing {
     pub provider: KeyProvider,
-    pub algorithm: SigningAlgorithm,
     pub keys: Vec<KeyEntry>,
 }
 
@@ -80,10 +79,43 @@ pub enum KeyProvider {
     File,
 }
 
-/// An algorithm Tsong signs with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// An algorithm Tsong signs with: the asymmetric JWS algorithms, as
+/// inbound validation accepts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
 pub enum SigningAlgorithm {
+    RS256,
+    RS384,
+    RS512,
+    PS256,
+    PS384,
+    PS512,
+    #[default]
     ES256,
+    ES384,
+    EdDSA,
+}
+
+impl SigningAlgorithm {
+    /// The JWS `alg` name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::RS256 => "RS256",
+            Self::RS384 => "RS384",
+            Self::RS512 => "RS512",
+            Self::PS256 => "PS256",
+            Self::PS384 => "PS384",
+            Self::PS512 => "PS512",
+            Self::ES256 => "ES256",
+            Self::ES384 => "ES384",
+            Self::EdDSA => "EdDSA",
+        }
+    }
+}
+
+impl std::fmt::Display for SigningAlgorithm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
 }
 
 /// One signing key.
@@ -91,6 +123,9 @@ pub enum SigningAlgorithm {
 #[serde(deny_unknown_fields)]
 pub struct KeyEntry {
     pub kid: String,
+    /// The algorithm the key signs with. Unset, ES256.
+    #[serde(default)]
+    pub algorithm: SigningAlgorithm,
     pub state: KeyState,
     /// The key's file, for the file provider.
     pub path: Option<PathBuf>,
@@ -100,7 +135,7 @@ pub struct KeyEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum KeyState {
-    /// Signs new tokens. Exactly one key is active.
+    /// Signs new tokens. At most one key per algorithm is active.
     Active,
     /// Published in JWKS until the tokens it signed expire; never signs.
     Retiring,
@@ -261,6 +296,10 @@ pub struct Route {
     /// accepts. Empty or unset requires none.
     #[serde(default)]
     pub required_scopes: Vec<String>,
+    /// The algorithm tokens minted for the route are signed with. A key
+    /// for it must be active. Unset, ES256.
+    #[serde(default)]
+    pub signing_algorithm: SigningAlgorithm,
     /// Client ranges allowed to this route, checked after the gateway's
     /// `allow`. Unset, the gateway's list alone applies. Empty denies
     /// every client.
@@ -403,12 +442,13 @@ impl Config {
         }
     }
 
-    /// The active signing key: always one, in a validated config.
-    pub fn active_key(&self) -> Option<&KeyEntry> {
+    /// The active signing key for `algorithm`: at most one, in a
+    /// validated config.
+    pub fn active_key(&self, algorithm: SigningAlgorithm) -> Option<&KeyEntry> {
         self.issuer
             .signing
             .keys
             .iter()
-            .find(|key| key.state == KeyState::Active)
+            .find(|key| key.state == KeyState::Active && key.algorithm == algorithm)
     }
 }

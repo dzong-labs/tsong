@@ -3,7 +3,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::{Map, Value, json};
-use tsong_keys::{SigningAlgorithm, SigningKey};
+use tsong_keys::SigningKey;
 
 use crate::ExchangeError;
 
@@ -14,7 +14,7 @@ pub(crate) async fn sign(
     claims: &Map<String, Value>,
 ) -> Result<String, ExchangeError> {
     let header = json!({
-        "alg": algorithm(key.algorithm()),
+        "alg": key.algorithm().name(),
         "typ": "at+jwt",
         "kid": key.kid(),
     });
@@ -25,12 +25,6 @@ pub(crate) async fn sign(
     );
     let signature = key.sign(input.as_bytes()).await?;
     Ok(format!("{input}.{}", URL_SAFE_NO_PAD.encode(signature)))
-}
-
-fn algorithm(algorithm: SigningAlgorithm) -> &'static str {
-    match algorithm {
-        SigningAlgorithm::ES256 => "ES256",
-    }
 }
 
 /// A fresh token ID: 128 random bits.

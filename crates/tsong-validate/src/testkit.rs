@@ -9,7 +9,7 @@ use p256::ecdsa::SigningKey as EcKey;
 use p256::pkcs8::{EncodePrivateKey, LineEnding};
 use serde_json::{Value, json};
 use tsong_config::TrustedIssuer;
-use tsong_keys::{FileKey, SigningKey};
+use tsong_keys::{FileKey, SigningAlgorithm, SigningKey};
 
 use crate::{FetchError, FetchFuture, JwksFetcher};
 
@@ -36,7 +36,7 @@ impl TestKey {
         Ok(Self {
             kid: kid.into(),
             encoding: EncodingKey::from_ec_pem(pem.as_bytes())?,
-            jwk: FileKey::from_pem(kid, &pem)?.public_jwk(),
+            jwk: FileKey::from_pem(kid, SigningAlgorithm::ES256, &pem)?.public_jwk(),
         })
     }
 

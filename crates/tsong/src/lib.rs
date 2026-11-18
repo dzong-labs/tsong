@@ -86,10 +86,14 @@ pub async fn check(path: &Path, deny_warnings: bool) -> Result<String, Error> {
     if deny_warnings && !warnings.0.is_empty() {
         return Err(Error::Warnings(warnings));
     }
+    let signers: Vec<_> = keys
+        .active_keys()
+        .map(|key| format!("{} {}", key.algorithm(), key.kid()))
+        .collect();
     Ok(format!(
         "{warnings}{}: ok, signing with {}",
         path.display(),
-        keys.active().kid(),
+        signers.join(", "),
     ))
 }
 
