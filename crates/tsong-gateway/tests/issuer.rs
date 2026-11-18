@@ -13,7 +13,7 @@ use tower::ServiceExt;
 use tsong_clock::ManualClock;
 use tsong_gateway::Gateway;
 use tsong_issuer::Issuer;
-use tsong_keys::{FileKey, KeySet};
+use tsong_keys::{FileKey, KeySet, SigningAlgorithm};
 use tsong_validate::Validator;
 use tsong_validate::testkit::{FakeFetcher, TestKey, pem};
 
@@ -31,10 +31,14 @@ async fn the_issuer_mints_the_token_the_downstream_receives() -> TestResult {
     let fetcher = Arc::new(FakeFetcher::with(vec![inbound.jwk()]));
     let clock = Arc::new(ManualClock::at(NOW));
     let validator = Validator::new(&config, fetcher, clock.clone());
-    let key = Arc::new(FileKey::from_pem("tsong-1", &pem(5)?)?);
+    let key = Arc::new(FileKey::from_pem(
+        "tsong-1",
+        SigningAlgorithm::ES256,
+        &pem(5)?,
+    )?);
     let issuer = Issuer::new(
         config.clone(),
-        KeySet::new(key, vec![])?,
+        KeySet::new(vec![key], vec![])?,
         validator,
         clock.clone(),
     );

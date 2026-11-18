@@ -10,7 +10,7 @@ use tsong_config::Config;
 use tsong_issuer::{
     ACCESS_TOKEN, ExchangeEvent, ExchangeObserver, Issuer, TOKEN_EXCHANGE, TokenRequest,
 };
-use tsong_keys::{FileKey, KeySet};
+use tsong_keys::{FileKey, KeySet, SigningAlgorithm};
 use tsong_validate::Validator;
 use tsong_validate::testkit::{FakeFetcher, TestKey, pem};
 
@@ -25,7 +25,6 @@ clock_skew = "30s"
 
 [issuer.signing]
 provider = "file"
-algorithm = "ES256"
 
 [[issuer.signing.keys]]
 kid = "tsong-1"
@@ -134,7 +133,12 @@ pub struct Harness {
 pub type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
 pub fn harness_with_keys(keys: KeySet) -> TestResult<Harness> {
-    let config = Arc::new(Config::from_toml(CONFIG)?);
+    harness_with_config(CONFIG, keys)
+}
+
+/// The issuer for the config `text`, signing with `keys`.
+pub fn harness_with_config(text: &str, keys: KeySet) -> TestResult<Harness> {
+    let config = Arc::new(Config::from_toml(text)?);
     let inbound = TestKey::new("in-1", 1)?;
     let fetcher = Arc::new(FakeFetcher::with(vec![inbound.jwk()]));
     let clock = Arc::new(ManualClock::at(NOW));
@@ -151,8 +155,12 @@ pub fn harness_with_keys(keys: KeySet) -> TestResult<Harness> {
 }
 
 pub fn harness() -> TestResult<Harness> {
-    let key = Arc::new(FileKey::from_pem("tsong-1", &pem(5)?)?);
-    harness_with_keys(KeySet::new(key, vec![])?)
+    let key = Arc::new(FileKey::from_pem(
+        "tsong-1",
+        SigningAlgorithm::ES256,
+        &pem(5)?,
+    )?);
+    harness_with_keys(KeySet::new(vec![key], vec![])?)
 }
 
 /// The fields of a JSON object, or a test failure for anything else.

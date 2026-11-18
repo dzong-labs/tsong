@@ -21,7 +21,6 @@ clock_skew = "30s"
 
 [issuer.signing]
 provider = "file"
-algorithm = "ES256"
 "#;
 
 const ACTIVE_KEY: &str = r#"
@@ -89,13 +88,23 @@ fn sample_loads() -> TestResult {
     assert_eq!(config.issuer.token_lifetime, Duration::from_secs(15 * 60));
     assert_eq!(config.issuer.clock_skew, Duration::from_secs(30));
     assert_eq!(config.issuer.signing.provider, KeyProvider::File);
-    assert_eq!(config.issuer.signing.algorithm, SigningAlgorithm::ES256);
     assert_eq!(
-        config.active_key().map(|key| key.kid.as_str()),
+        config
+            .active_key(SigningAlgorithm::ES256)
+            .map(|key| key.kid.as_str()),
         Some("2026-11")
     );
     let states: Vec<_> = config.issuer.signing.keys.iter().map(|k| k.state).collect();
-    assert_eq!(states, [KeyState::Active, KeyState::Retiring]);
+    assert_eq!(
+        states,
+        [KeyState::Active, KeyState::Active, KeyState::Retiring]
+    );
+    assert_eq!(
+        config
+            .active_key(SigningAlgorithm::RS256)
+            .map(|key| key.kid.as_str()),
+        Some("2026-11-rsa")
+    );
     assert_eq!(config.gateway.cache.max_entries, 100_000);
     assert_eq!(config.gateway.trusted_proxies.len(), 1);
     assert_eq!(config.trusted_issuers.len(), 3);
@@ -151,7 +160,9 @@ fn load_takes_relative_key_paths_from_the_config_directory() -> TestResult {
     std::fs::write(&path, minimal())?;
     let config = Config::load(&path)?;
     assert_eq!(
-        config.active_key().and_then(|key| key.path.as_deref()),
+        config
+            .active_key(SigningAlgorithm::ES256)
+            .and_then(|key| key.path.as_deref()),
         Some(&*dir.path().join("k1.pem"))
     );
     Ok(())
@@ -207,14 +218,20 @@ fn clock_skew_must_be_shorter_than_token_lifetime() -> TestResult {
 }
 
 #[test]
-fn exactly_one_key_is_active() -> TestResult {
+fn one_key_per_algorithm_is_active() -> TestResult {
     let none = format!(
         "{ISSUER}{}{GATEWAY}",
         ACTIVE_KEY.replace("active", "retiring")
     );
+    assert_eq!(problems(&none)?, ["issuer.signing.keys has no active key"]);
+    let routed = format!(
+        "{ISSUER}{}{GATEWAY}{OKTA}{ROUTE}",
+        ACTIVE_KEY.replace("active", "retiring")
+    );
     assert_eq!(
-        problems(&none)?,
-        ["issuer.signing.keys must have exactly one active key, not 0"]
+        problems(&routed)?,
+        ["issuer.signing.keys has no active key"],
+        "the routes add nothing to the missing key"
     );
     let two = format!(
         "{ISSUER}{ACTIVE_KEY}{}{GATEWAY}",
@@ -222,9 +239,125 @@ fn exactly_one_key_is_active() -> TestResult {
     );
     assert_eq!(
         problems(&two)?,
-        ["issuer.signing.keys must have exactly one active key, not 2"]
+        ["issuer.signing.keys has more than one active ES256 key"]
+    );
+    let three = format!(
+        "{ISSUER}{ACTIVE_KEY}{}{}{GATEWAY}",
+        ACTIVE_KEY.replace("k1", "k2"),
+        ACTIVE_KEY.replace("k1", "k3")
+    );
+    assert_eq!(
+        problems(&three)?,
+        ["issuer.signing.keys has more than one active ES256 key"],
+        "reported once per algorithm"
+    );
+    let rsa = ACTIVE_KEY
+        .replace("k1", "k2")
+        .replace("state", "algorithm = \"RS256\"\nstate");
+    let config = Config::from_toml(&format!("{ISSUER}{ACTIVE_KEY}{rsa}{GATEWAY}"))?;
+    let algorithms: Vec<_> = config
+        .issuer
+        .signing
+        .keys
+        .iter()
+        .map(|key| key.algorithm)
+        .collect();
+    assert_eq!(
+        algorithms,
+        [SigningAlgorithm::ES256, SigningAlgorithm::RS256],
+        "a key without an algorithm signs ES256"
+    );
+    assert_eq!(
+        config
+            .active_key(SigningAlgorithm::RS256)
+            .map(|key| key.kid.as_str()),
+        Some("k2")
+    );
+    assert!(config.active_key(SigningAlgorithm::PS256).is_none());
+    Ok(())
+}
+
+#[test]
+fn a_route_signs_es256_unless_it_names_an_algorithm() -> TestResult {
+    let config = Config::from_toml(&with_route(ROUTE))?;
+    assert_eq!(
+        route(&config, 0)?.signing_algorithm,
+        SigningAlgorithm::ES256
+    );
+    let rsa = ACTIVE_KEY
+        .replace("k1", "k2")
+        .replace("state", "algorithm = \"RS256\"\nstate");
+    let text = format!(
+        "{}{rsa}",
+        route_with(
+            "allowed_scopes",
+            "signing_algorithm = \"RS256\"\nallowed_scopes"
+        )
+    );
+    let config = Config::from_toml(&text)?;
+    assert_eq!(
+        route(&config, 0)?.signing_algorithm,
+        SigningAlgorithm::RS256
     );
     Ok(())
+}
+
+#[test]
+fn a_route_s_algorithm_needs_an_active_key() -> TestResult {
+    let text = route_with(
+        "allowed_scopes",
+        "signing_algorithm = \"EdDSA\"\nallowed_scopes",
+    );
+    assert_eq!(
+        problems(&text)?,
+        [r#"route "orders" signs with EdDSA, which no active key in issuer.signing.keys does"#]
+    );
+    let retiring = format!(
+        "{text}{}",
+        ACTIVE_KEY
+            .replace("k1", "k2")
+            .replace("active", "retiring")
+            .replace("state", "algorithm = \"EdDSA\"\nstate")
+    );
+    assert_eq!(
+        problems(&retiring)?,
+        [r#"route "orders" signs with EdDSA, which no active key in issuer.signing.keys does"#],
+        "a retiring key doesn't sign"
+    );
+    Ok(())
+}
+
+#[test]
+fn every_signing_algorithm_parses_by_its_jws_name() -> TestResult {
+    for name in [
+        "RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "EdDSA",
+    ] {
+        let key = ACTIVE_KEY.replace("state", &format!("algorithm = \"{name}\"\nstate"));
+        let config = Config::from_toml(&format!("{ISSUER}{key}{GATEWAY}"))?;
+        let parsed = config
+            .issuer
+            .signing
+            .keys
+            .first()
+            .map(|key| key.algorithm)
+            .ok_or("no key")?;
+        assert_eq!(parsed.name(), name);
+        assert_eq!(parsed.to_string(), name);
+    }
+    let none = ACTIVE_KEY.replace("state", "algorithm = \"none\"\nstate");
+    assert!(Config::from_toml(&format!("{ISSUER}{none}{GATEWAY}")).is_err());
+    let hmac = ACTIVE_KEY.replace("state", "algorithm = \"HS256\"\nstate");
+    assert!(Config::from_toml(&format!("{ISSUER}{hmac}{GATEWAY}")).is_err());
+    Ok(())
+}
+
+#[test]
+fn the_retired_signing_algorithm_field_is_refused() {
+    let old = ISSUER.replace(
+        "provider = \"file\"",
+        "provider = \"file\"\nalgorithm = \"ES256\"",
+    );
+    assert!(Config::from_toml(&format!("{old}{ACTIVE_KEY}{GATEWAY}")).is_err());
 }
 
 #[test]
@@ -647,7 +780,7 @@ fn a_valid_route_loads() -> TestResult {
 fn a_config_without_an_active_key_has_none() -> TestResult {
     let mut config = Config::from_toml(&minimal())?;
     config.issuer.signing.keys.clear();
-    assert!(config.active_key().is_none());
+    assert!(config.active_key(SigningAlgorithm::ES256).is_none());
     Ok(())
 }
 
@@ -671,7 +804,7 @@ async fn a_file_store_loads_its_file() -> TestResult {
     assert_eq!(
         snapshot
             .config
-            .active_key()
+            .active_key(SigningAlgorithm::ES256)
             .and_then(|key| key.path.clone()),
         Some(dir.path().join("k1.pem"))
     );
@@ -1116,7 +1249,9 @@ fn without_a_directory_key_paths_must_be_absolute() -> TestResult {
         &format!("path = '{}'", absolute.display()),
     );
     let config = Config::from_text(&text, None)?;
-    let path = config.active_key().and_then(|key| key.path.clone());
+    let path = config
+        .active_key(SigningAlgorithm::ES256)
+        .and_then(|key| key.path.clone());
     assert_eq!(path, Some(absolute));
     Ok(())
 }
@@ -1125,7 +1260,9 @@ fn without_a_directory_key_paths_must_be_absolute() -> TestResult {
 fn a_directory_resolves_relative_key_paths() -> TestResult {
     let dir = std::env::temp_dir();
     let config = Config::from_text(&minimal(), Some(&dir))?;
-    let path = config.active_key().and_then(|key| key.path.clone());
+    let path = config
+        .active_key(SigningAlgorithm::ES256)
+        .and_then(|key| key.path.clone());
     assert_eq!(path, Some(dir.join("k1.pem")));
     Ok(())
 }

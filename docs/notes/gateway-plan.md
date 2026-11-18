@@ -48,6 +48,7 @@ allowed_scopes = []
 - `allowed_audiences` lists the inbound `aud` values the route accepts. The inbound token must carry at least one of them.
 - `allowed_scopes` lists the inbound scopes the route accepts. Every scope the inbound token carries must be in it.
 - `required_scopes`, optional, lists scopes the inbound token must all carry. Each must be one `allowed_scopes` accepts, and a scope narrowed with the token endpoint's `scope` parameter must keep them all.
+- `signing_algorithm`, optional, is the algorithm the route's minted tokens are signed with: RS256, RS384, RS512, PS256, PS384, PS512, ES256, ES384 or EdDSA, ES256 when unset. A key for it must be active in `issuer.signing.keys`.
 - `allow` is optional, and adds a second IP check to the gateway-wide `gateway.allow`. A client must be in both lists, so a route can only narrow access. A route without `allow` takes `gateway.allow` alone.
 - `read_timeout` is optional, and overrides `gateway.read_timeout`, the longest the gateway waits on a downstream between reads. That defaults to 60 seconds.
 

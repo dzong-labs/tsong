@@ -1,5 +1,5 @@
-//! Checks that span fields: references resolve, exactly one key signs,
-//! each validation mode has what it needs.
+//! Checks that span fields: references resolve, one active key signs each
+//! route's algorithm, each validation mode has what it needs.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -75,15 +75,31 @@ impl Config {
 
     fn check_keys(&self, problems: &mut Vec<String>) {
         let signing = &self.issuer.signing;
-        let active = signing
-            .keys
-            .iter()
-            .filter(|key| key.state == KeyState::Active)
-            .count();
-        if active != 1 {
-            problems.push(format!(
-                "issuer.signing.keys must have exactly one active key, not {active}"
-            ));
+        let mut active = BTreeSet::new();
+        let mut repeated = BTreeSet::new();
+        for key in &signing.keys {
+            if key.state == KeyState::Active
+                && !active.insert(key.algorithm)
+                && repeated.insert(key.algorithm)
+            {
+                problems.push(format!(
+                    "issuer.signing.keys has more than one active {} key",
+                    key.algorithm
+                ));
+            }
+        }
+        if active.is_empty() {
+            // One problem, not another for every route.
+            problems.push("issuer.signing.keys has no active key".into());
+        } else {
+            for route in &self.routes {
+                if !active.contains(&route.signing_algorithm) {
+                    problems.push(format!(
+                        "route {:?} signs with {}, which no active key in issuer.signing.keys does",
+                        route.name, route.signing_algorithm
+                    ));
+                }
+            }
         }
         let mut kids = BTreeSet::new();
         for key in &signing.keys {

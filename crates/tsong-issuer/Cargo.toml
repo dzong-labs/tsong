@@ -20,9 +20,11 @@ tsong-keys.workspace = true
 tsong-validate.workspace = true
 
 [dev-dependencies]
+aws-lc-rs.workspace = true
 http-body-util.workspace = true
 jsonwebtoken = { workspace = true, features = ["use_pem"] }
 p256.workspace = true
+pem.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
 tower = { workspace = true, features = ["util"] }
 tsong-clock = { workspace = true, features = ["test-util"] }

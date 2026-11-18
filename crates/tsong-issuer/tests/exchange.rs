@@ -7,22 +7,31 @@ use jsonwebtoken::jwk::Jwk;
 use jsonwebtoken::{Algorithm, DecodingKey, Header};
 use serde_json::{Map, Value, json};
 use tsong_issuer::{ACCESS_TOKEN, ExchangeError, JWT, TOKEN_EXCHANGE, TokenRequest, TokenResponse};
-use tsong_keys::{KeyError, KeySet, SignFuture, SigningAlgorithm, SigningKey};
+use tsong_keys::{FileKey, KeyError, KeySet, SignFuture, SigningAlgorithm, SigningKey};
 use tsong_validate::ValidateError;
 
 /// The header and claims of a token Tsong minted, after verifying it
-/// against the first key in Tsong's own JWKS.
+/// against the key its header names in Tsong's own JWKS, with the
+/// algorithm that key publishes.
 fn verified(h: &Harness, token: &str) -> TestResult<(Header, Map<String, Value>)> {
-    let first = h
-        .issuer
-        .jwks()
+    let kid = jsonwebtoken::decode_header(token)?.kid;
+    let jwks = h.issuer.jwks();
+    let named = jwks
         .get("keys")
-        .and_then(|keys| keys.get(0))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|key| key.get("kid").and_then(Value::as_str) == kid.as_deref())
         .cloned()
-        .ok_or("the JWKS has no keys")?;
-    let jwk: Jwk = serde_json::from_value(first)?;
+        .ok_or("no key in Tsong's JWKS has the token's kid")?;
+    let algorithm: Algorithm = named
+        .get("alg")
+        .and_then(Value::as_str)
+        .ok_or("the JWK has no alg")?
+        .parse()?;
+    let jwk: Jwk = serde_json::from_value(named)?;
     let key = DecodingKey::from_jwk(&jwk)?;
-    let mut validation = jsonwebtoken::Validation::new(Algorithm::ES256);
+    let mut validation = jsonwebtoken::Validation::new(algorithm);
     validation.validate_exp = false;
     validation.validate_aud = false;
     validation.required_spec_claims.clear();
@@ -567,7 +576,7 @@ impl SigningKey for BrokenKey {
 
 #[tokio::test]
 async fn a_signing_failure_is_a_server_error() -> TestResult {
-    let h = harness_with_keys(KeySet::new(Arc::new(BrokenKey), vec![])?)?;
+    let h = harness_with_keys(KeySet::new(vec![Arc::new(BrokenKey)], vec![])?)?;
     let error = failure(&h, request(&h, "orders.test", subject(json!({})))).await?;
     assert!(matches!(error, ExchangeError::Server(_)));
     assert_eq!(error.code(), "server_error");
@@ -638,5 +647,78 @@ fn discovery_names_the_endpoints() -> TestResult {
         .and_then(|key| key.get("kid"))
         .cloned();
     assert_eq!(kid, Some(json!("tsong-1")));
+    Ok(())
+}
+
+/// A route signing RS256, beside the harness's routes on the default.
+const LEDGER: &str = r#"
+[[routes]]
+name = "ledger"
+host = "ledger.test"
+downstream = "https://ledger-lb.test"
+append_audience = "ledger.test"
+allowed_audiences = ["tsong"]
+allowed_scopes = ["*"]
+signing_algorithm = "RS256"
+
+[[issuer.signing.keys]]
+kid = "tsong-rs"
+algorithm = "RS256"
+path = "unused.pem"
+state = "active"
+"#;
+
+fn rsa_key(kid: &str) -> TestResult<Arc<dyn SigningKey>> {
+    use aws_lc_rs::encoding::AsDer;
+    let pair = aws_lc_rs::rsa::KeyPair::generate(aws_lc_rs::rsa::KeySize::Rsa2048)
+        .map_err(|_| "generating an RSA key")?;
+    let der = pair.as_der().map_err(|_| "encoding an RSA key")?;
+    let pem = pem::encode(&pem::Pem::new("PRIVATE KEY", der.as_ref()));
+    Ok(Arc::new(FileKey::from_pem(
+        kid,
+        SigningAlgorithm::RS256,
+        &pem,
+    )?))
+}
+
+fn es256_key() -> TestResult<Arc<dyn SigningKey>> {
+    Ok(Arc::new(FileKey::from_pem(
+        "tsong-1",
+        SigningAlgorithm::ES256,
+        &tsong_validate::testkit::pem(5)?,
+    )?))
+}
+
+#[tokio::test]
+async fn each_route_signs_with_its_algorithm() -> TestResult {
+    let keys = KeySet::new(vec![es256_key()?, rsa_key("tsong-rs")?], vec![])?;
+    let h = harness_with_config(&format!("{CONFIG}{LEDGER}"), keys)?;
+    for (host, alg, kid) in [
+        ("ledger.test", Algorithm::RS256, "tsong-rs"),
+        ("orders.test", Algorithm::ES256, "tsong-1"),
+    ] {
+        let response = h
+            .issuer
+            .exchange(request(&h, host, subject(json!({})))?)
+            .await?;
+        let (header, claims) = verified(&h, &response.access_token)?;
+        assert_eq!(header.alg, alg, "{host}");
+        assert_eq!(header.kid.as_deref(), Some(kid), "{host}");
+        assert_eq!(claims.get("aud"), Some(&json!(["tsong", host])), "{host}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_route_without_an_active_key_for_its_algorithm_is_a_server_error() -> TestResult {
+    let keys = KeySet::new(vec![es256_key()?], vec![])?;
+    let h = harness_with_config(&format!("{CONFIG}{LEDGER}"), keys)?;
+    assert_eq!(
+        refused(&h, request(&h, "ledger.test", subject(json!({})))).await?,
+        (
+            "server_error",
+            r#"no active key signs RS256, which route "ledger" uses"#.into()
+        )
+    );
     Ok(())
 }
