@@ -1,6 +1,7 @@
 //! A PKCS#8 PEM private key in a file, signing in process.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{self, EcdsaKeyPair, Ed25519KeyPair, KeyPair, RsaKeyPair};
@@ -20,11 +21,12 @@ pub struct FileKey {
 
 enum Key {
     Ec(EcdsaKeyPair),
-    Rsa(RsaKeyPair, &'static signature::RsaSignatureEncoding),
+    Rsa(Arc<RsaKeyPair>, &'static signature::RsaSignatureEncoding),
     Ed(Ed25519KeyPair),
 }
 
-/// The key type an algorithm needs, as errors name it.
+/// The key type an algorithm needs, as errors name it. For ECDSA and
+/// EdDSA, it is also the JWK `crv`.
 fn key_type(algorithm: SigningAlgorithm) -> &'static str {
     match algorithm {
         SigningAlgorithm::ES256 => "P-256",
@@ -66,14 +68,14 @@ impl FileKey {
                 "n": URL_SAFE_NO_PAD.encode(public.modulus().big_endian_without_leading_zero()),
                 "e": URL_SAFE_NO_PAD.encode(public.exponent().big_endian_without_leading_zero()),
             });
-            Ok((Key::Rsa(pair, encoding), public))
+            Ok((Key::Rsa(Arc::new(pair), encoding), public))
         };
         let (key, public) = match algorithm {
             SigningAlgorithm::ES256 | SigningAlgorithm::ES384 => {
-                let (signing, crv) = if algorithm == SigningAlgorithm::ES256 {
-                    (&signature::ECDSA_P256_SHA256_FIXED_SIGNING, "P-256")
+                let signing = if algorithm == SigningAlgorithm::ES256 {
+                    &signature::ECDSA_P256_SHA256_FIXED_SIGNING
                 } else {
-                    (&signature::ECDSA_P384_SHA384_FIXED_SIGNING, "P-384")
+                    &signature::ECDSA_P384_SHA384_FIXED_SIGNING
                 };
                 let pair = EcdsaKeyPair::from_pkcs8(signing, der).map_err(|_| decode())?;
                 // The uncompressed point: 0x04, then x and y of equal length.
@@ -82,7 +84,7 @@ impl FileKey {
                 let (x, y) = coordinates.split_at(coordinates.len() / 2);
                 let public = json!({
                     "kty": "EC",
-                    "crv": crv,
+                    "crv": key_type(algorithm),
                     "x": URL_SAFE_NO_PAD.encode(x),
                     "y": URL_SAFE_NO_PAD.encode(y),
                 });
@@ -142,20 +144,39 @@ impl SigningKey for FileKey {
     }
 
     fn sign<'a>(&'a self, message: &'a [u8]) -> SignFuture<'a> {
-        let signed = match &self.key {
-            Key::Ec(pair) => pair
-                .sign(&SystemRandom::new(), message)
-                .map(|signature| signature.as_ref().to_vec()),
-            Key::Rsa(pair, encoding) => {
-                let mut signature = vec![0; pair.public_modulus_len()];
-                pair.sign(*encoding, &SystemRandom::new(), message, &mut signature)
-                    .map(|()| signature)
-            }
-            Key::Ed(pair) => Ok(pair.sign(message).as_ref().to_vec()),
-        };
-        let result = signed.map_err(|_| KeyError::Sign {
+        let failed = |_| KeyError::Sign {
             kid: self.kid.clone(),
-        });
-        Box::pin(async move { result })
+        };
+        match &self.key {
+            Key::Ec(pair) => {
+                let signed = pair
+                    .sign(&SystemRandom::new(), message)
+                    .map(|signature| signature.as_ref().to_vec())
+                    .map_err(failed);
+                Box::pin(async move { signed })
+            }
+            Key::Ed(pair) => {
+                let signature = pair.sign(message).as_ref().to_vec();
+                Box::pin(async move { Ok(signature) })
+            }
+            // An RSA signature takes milliseconds, more for a large key, so
+            // it runs on the blocking pool rather than an async worker.
+            Key::Rsa(pair, encoding) => {
+                let (pair, encoding) = (Arc::clone(pair), *encoding);
+                let message = message.to_vec();
+                Box::pin(async move {
+                    tokio::task::spawn_blocking(move || {
+                        let mut signature = vec![0; pair.public_modulus_len()];
+                        pair.sign(encoding, &SystemRandom::new(), &message, &mut signature)
+                            .map(|()| signature)
+                    })
+                    .await
+                    .map_err(|_| KeyError::Sign {
+                        kid: self.kid.clone(),
+                    })?
+                    .map_err(failed)
+                })
+            }
+        }
     }
 }

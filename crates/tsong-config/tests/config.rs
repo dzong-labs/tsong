@@ -224,6 +224,15 @@ fn one_key_per_algorithm_is_active() -> TestResult {
         ACTIVE_KEY.replace("active", "retiring")
     );
     assert_eq!(problems(&none)?, ["issuer.signing.keys has no active key"]);
+    let routed = format!(
+        "{ISSUER}{}{GATEWAY}{OKTA}{ROUTE}",
+        ACTIVE_KEY.replace("active", "retiring")
+    );
+    assert_eq!(
+        problems(&routed)?,
+        ["issuer.signing.keys has no active key"],
+        "the routes add nothing to the missing key"
+    );
     let two = format!(
         "{ISSUER}{ACTIVE_KEY}{}{GATEWAY}",
         ACTIVE_KEY.replace("k1", "k2")

@@ -85,14 +85,16 @@ impl Config {
             }
         }
         if active.is_empty() {
+            // One problem, not another for every route.
             problems.push("issuer.signing.keys has no active key".into());
-        }
-        for route in &self.routes {
-            if !active.contains(&route.signing_algorithm) {
-                problems.push(format!(
-                    "route {:?} signs with {}, which no active key in issuer.signing.keys does",
-                    route.name, route.signing_algorithm
-                ));
+        } else {
+            for route in &self.routes {
+                if !active.contains(&route.signing_algorithm) {
+                    problems.push(format!(
+                        "route {:?} signs with {}, which no active key in issuer.signing.keys does",
+                        route.name, route.signing_algorithm
+                    ));
+                }
             }
         }
         let mut kids = BTreeSet::new();
