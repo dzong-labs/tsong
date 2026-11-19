@@ -4,7 +4,7 @@
 # Durations are [d.]hh:mm:ss[.fffffff], as .NET writes a TimeSpan:
 # "00:15:00" is 15 minutes, "1.01:00:00" is 25 hours.
 
-# ── token exchange issuer ─────────────────────────────
+# Token exchange issuer
 [issuer]
 url = "https://tsong.internal.example.com"
 listen = "0.0.0.0:8444"
@@ -33,7 +33,7 @@ kid = "2026-08"
 private_key = { file = "/etc/tsong/keys/2026-08.pem" }
 state = "retiring"              # still published in JWKS, never signs
 
-# ── gateway ───────────────────────────────────────────
+# Gateway
 [gateway]
 listen = "0.0.0.0:8443"
 trusted_proxies = ["10.0.0.0/8"]
@@ -43,7 +43,7 @@ read_timeout = "00:01:00"       # longest wait on a downstream between reads; a 
 [gateway.cache]
 max_entries = 100_000
 
-# ── trusted inbound issuers ───────────────────────────
+# Trusted inbound issuers
 [trusted_issuers.okta]
 sub_prefix = "okta"   # minted sub is "okta:<sub>"; unique; a-z, 0-9 and -
 issuer = "https://example.okta.com/oauth2/default"
@@ -71,14 +71,14 @@ introspection_url = "https://gitlab.example.com/oauth/introspect"
 client_id = "tsong"
 client_secret = { env = "TSONG_GITLAB_SECRET" }
 
-# ── claim mapping ─────────────────────────────────────
+# Claim mapping
 [claims]
 copy = ["sub", "email", "groups"]
 
 [claims.rename.entra]
 oid = "sub"
 
-# ── routes ────────────────────────────────────────────
+# Routes
 # One route per host. The request's path and query go to the downstream
 # unchanged. Empty allowed_* lists deny every request; "*" accepts any value.
 [[routes]]
