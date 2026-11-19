@@ -32,7 +32,7 @@ jobs:
     - id: rust
       uses: ./.github/actions/changes
       with:
-        pattern: '\.rs$|(^|/)Cargo\.(toml|lock)$|^\.cargo/|^rust-toolchain\.toml$|^\.github/(workflows/rust\.yml|actions/)'
+        pattern: '\.rs$|(^|/)Cargo\.(toml|lock)$|^\.cargo/|^rust-toolchain\.toml$|^deny\.toml$|^\.github/(workflows/rust\.yml|actions/)'
 
   format:
     needs: changes
@@ -110,6 +110,20 @@ jobs:
     - name: Audit dependencies against the RustSec advisory database
       run: cargo audit --deny warnings
 
+  deny:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      with:
+        tool: cargo-deny@0.21.0
+
+    # Sources, licenses and banned crates; advisories are the audit job's.
+    - name: Check where dependencies come from and their licenses
+      run: cargo deny --locked check bans licenses sources
+
   mutants:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
@@ -147,7 +161,7 @@ jobs:
   # matrix legs. Skipped jobs pass only when there were no Rust changes.
   passed:
     if: always()
-    needs: [ changes, format, lint, test, coverage, audit, mutants ]
+    needs: [ changes, format, lint, test, coverage, audit, deny, mutants ]
     runs-on: ubuntu-latest
     steps:
     - name: Require every job to succeed

@@ -82,7 +82,9 @@ deploy/podman/run.sh stop     # SIGTERM, then the drain
 
 `cargo test --workspace` runs the tests. Each crate's own tests cover its code. Line coverage stays above 95%, measured with `cargo llvm-cov`.
 
-`rust-toolchain.toml` installs the stable toolchain with clippy, rustfmt and rust-analyzer. Enable the hooks once per clone. Before each commit they check formatting, lints, docs and tests; before each push, coverage and the dependency audit, as CI does. The push checks need `cargo-llvm-cov` and `cargo-audit`.
+`rust-toolchain.toml` installs the stable toolchain with clippy, rustfmt and rust-analyzer. Enable the hooks once per clone. Before each commit they check formatting, lints, docs and tests; before each push, coverage, the dependency audit and `cargo deny`, as CI does. The push checks need `cargo-llvm-cov`, `cargo-audit` and `cargo-deny`.
+
+`deny.toml` allows crates only from crates.io and under permissive licenses, and bans wildcard versions and OpenSSL. Tsong's own code is safe Rust: the workspace forbids `unsafe`.
 
 ```sh
 git config core.hooksPath .githooks
