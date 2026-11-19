@@ -8,7 +8,7 @@ created: 2026-11-18
 
 # Each input to Tsong is trusted only as far as its source
 
-Tsong sits between callers and the services behind it, and takes input from six sources. Each is trusted only as far as the table says. A review asks of each change whether it lets a source control more than its row allows.
+Tsong sits between callers and the services behind it, and takes input from six sources. Each is trusted only as far as the table says. The [assurance case](assurance-case.md) argues from this model that Tsong's security requirements hold. A review asks of each change whether it lets a source control more than its row allows.
 
 | Source | Trust | What it may control |
 | --- | --- | --- |

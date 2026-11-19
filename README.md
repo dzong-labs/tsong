@@ -129,3 +129,5 @@ NIGHTLY=nightly-2026-10-01 scripts/fuzz.sh 60
 ## Security
 
 Report a vulnerability privately, as [SECURITY.md](SECURITY.md) describes, never in a public issue.
+
+The [threat model](docs/notes/threat-model.md) names what each input to Tsong may control, and the [assurance case](docs/notes/assurance-case.md) argues, with evidence, that Tsong's security requirements hold.
