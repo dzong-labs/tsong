@@ -440,3 +440,15 @@ fn load_takes_a_relative_webhook_secret_file_from_the_bootstrap_directory() -> T
     }
     Ok(())
 }
+
+#[test]
+fn a_webhook_secret_written_in_by_mistake_is_never_quoted() -> TestResult {
+    let text = GIT.replace("env:TSONG_WEBHOOK_SECRET", "hunter2");
+    let error = Bootstrap::from_toml(&text)
+        .err()
+        .ok_or("a raw secret was accepted")?
+        .to_string();
+    assert!(!error.contains("hunter2"), "{error}");
+    assert!(error.contains("a secret must be a reference"), "{error}");
+    Ok(())
+}

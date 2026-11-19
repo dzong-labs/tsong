@@ -1341,3 +1341,16 @@ fn a_client_secret_file_is_taken_from_the_config_directory() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn a_secret_written_in_by_mistake_is_never_quoted() -> TestResult {
+    let text = okta_with("client_secret = \"hunter2\"");
+    let error = Config::from_toml(&text)
+        .err()
+        .ok_or("a raw secret was accepted")?
+        .to_string();
+    assert!(!error.contains("hunter2"), "{error}");
+    assert!(error.contains("a secret must be a reference"), "{error}");
+    assert!(error.contains("line 27"), "{error}");
+    Ok(())
+}

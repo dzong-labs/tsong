@@ -10,6 +10,7 @@ mod bootstrap;
 mod duration;
 mod lint;
 mod network;
+mod parse;
 mod secret;
 mod store;
 mod validate;
@@ -28,6 +29,7 @@ pub use bootstrap::{
 };
 pub use lint::Warnings;
 pub use network::{allowed, client_ip};
+pub use parse::ParseError;
 pub use secret::{Scheme, SecretRef, SecretRefError};
 pub use store::{ConfigStore, Fetched, FileStore, LoadFuture, Snapshot, hex};
 pub use validate::{Problems, RESERVED_CLAIMS};
@@ -397,7 +399,7 @@ pub enum ConfigError {
         source: std::io::Error,
     },
     #[error("parsing: {0}")]
-    Parse(#[from] toml::de::Error),
+    Parse(#[from] ParseError),
     #[error("invalid config:\n{0}")]
     Invalid(Problems),
     /// The store couldn't produce the config, such as a failed fetch.
@@ -408,7 +410,7 @@ pub enum ConfigError {
 impl Config {
     /// Parses and validates a TOML document.
     pub fn from_toml(text: &str) -> Result<Self, ConfigError> {
-        let config: Self = toml::from_str(text)?;
+        let config: Self = parse::from_str(text)?;
         config.validate().map_err(ConfigError::Invalid)?;
         Ok(config)
     }

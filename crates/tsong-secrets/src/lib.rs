@@ -9,6 +9,10 @@ use std::sync::Arc;
 
 pub use tsong_config::{Scheme, SecretRef};
 
+/// The most bytes a secret may hold. A PEM RSA key of 8192 bits is about
+/// 6.4 KB.
+pub const MAX_SECRET_BYTES: usize = 64 * 1024;
+
 /// A secret's bytes. Its `Debug` hides them.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Secret(Vec<u8>);
@@ -44,6 +48,8 @@ pub enum SecretError {
     },
     #[error("secret {0} is empty")]
     Empty(String),
+    #[error("secret {0} is over {MAX_SECRET_BYTES} bytes")]
+    TooLarge(String),
     #[error("no source reads {0} secrets")]
     NoSource(Scheme),
 }
@@ -74,7 +80,8 @@ impl SecretSource for Env {
     }
 }
 
-/// Reads `file:` secrets from files.
+/// Reads `file:` secrets from files. One trailing line ending is dropped,
+/// as `echo` and most editors write one.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct File;
 
@@ -82,14 +89,36 @@ impl SecretSource for File {
     fn resolve<'a>(&'a self, reference: &'a SecretRef) -> ResolveFuture<'a> {
         // A secret is small and read only at startup and reload, so it is
         // read in place, without a runtime.
-        let read = std::fs::read(reference.id())
-            .map(Secret::new)
-            .map_err(|source| SecretError::Read {
-                reference: reference.to_string(),
-                source,
-            });
+        let read = read_file(reference);
         Box::pin(async move { read })
     }
+}
+
+/// The secret in the file `reference` names, up to [`MAX_SECRET_BYTES`],
+/// without one trailing line ending.
+fn read_file(reference: &SecretRef) -> Result<Secret, SecretError> {
+    use std::io::Read;
+    let failed = |source| SecretError::Read {
+        reference: reference.to_string(),
+        source,
+    };
+    let mut bytes = Vec::new();
+    std::fs::File::open(reference.id())
+        .and_then(|file| {
+            file.take(MAX_SECRET_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)
+        })
+        .map_err(failed)?;
+    if bytes.len() > MAX_SECRET_BYTES {
+        return Err(SecretError::TooLarge(reference.to_string()));
+    }
+    if bytes.last() == Some(&b'\n') {
+        bytes.pop();
+        if bytes.last() == Some(&b'\r') {
+            bytes.pop();
+        }
+    }
+    Ok(Secret::new(bytes))
 }
 
 /// A source for each scheme.

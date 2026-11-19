@@ -13,6 +13,7 @@ use axum::routing::{get, post};
 use tokio::sync::Notify;
 use tsong_config::GitHost;
 use tsong_git::webhook::{pushed_branch, signature_header, verify};
+use tsong_secrets::Secret;
 
 use serde_json::json;
 
@@ -22,7 +23,7 @@ use crate::telemetry::Metrics;
 /// How the webhook knows a delivery is real and whether it matters.
 pub struct Hook {
     pub host: GitHost,
-    pub secret: Vec<u8>,
+    pub secret: Secret,
     /// The branch whose pushes trigger a reload.
     pub branch: String,
 }
@@ -110,7 +111,7 @@ async fn webhook(
     let signature = headers
         .get(signature_header(hook.host))
         .map(|value| value.as_bytes());
-    if !verify(hook.host, &hook.secret, signature, &body) {
+    if !verify(hook.host, hook.secret.expose(), signature, &body) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     if pushed_branch(&body).as_deref() == Some(hook.branch.as_str()) {

@@ -493,3 +493,40 @@ async fn shutdown_does_not_wait_for_a_stalled_reload() -> TestResult {
     tokio::time::timeout(Duration::from_secs(5), task).await??;
     Ok(())
 }
+
+/// A source that answers every reference with the same secret.
+struct Fixed(Vec<u8>);
+
+impl tsong_secrets::SecretSource for Fixed {
+    fn resolve<'a>(&'a self, _: &'a tsong_secrets::SecretRef) -> tsong_secrets::ResolveFuture<'a> {
+        let secret = tsong_secrets::Secret::new(self.0.clone());
+        Box::pin(async move { Ok(secret) })
+    }
+}
+
+#[tokio::test]
+async fn a_reload_reads_secrets_through_the_reloaders_sources() -> TestResult {
+    let f = Fixture::new()?;
+    let pem = std::fs::read(&f.key)?;
+    let secrets =
+        tsong_secrets::Secrets::empty().with(tsong_secrets::Scheme::Env, Arc::new(Fixed(pem)));
+    let reloader = f
+        .reloader(&f.text("https://one.test", 8444, ""))
+        .await?
+        .with_secrets(secrets);
+    let from_env = f.text("https://two.test", 8444, "").replace(
+        &format!("'file:{}'", f.key.display()),
+        "\"env:TSONG_TEST_KEY_THAT_IS_NEVER_SET\"",
+    );
+    assert!(from_env.contains("env:TSONG_TEST_KEY"));
+    f.store.push(Ok(fetched(&from_env, "r2")?));
+    assert_eq!(reloader.reload().await, Outcome::Applied);
+    // The file the first config named isn't read through these sources.
+    f.store
+        .push(Ok(fetched(&f.text("https://three.test", 8444, ""), "r3")?));
+    let Outcome::Rejected(error) = reloader.reload().await else {
+        return Err("expected a rejection".into());
+    };
+    assert_eq!(error, r#"key "k1": no source reads file secrets"#);
+    Ok(())
+}

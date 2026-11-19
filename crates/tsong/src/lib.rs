@@ -56,7 +56,7 @@ pub enum Error {
     #[error("{0}warnings are denied")]
     Warnings(Warnings),
     #[error("webhook: {0}")]
-    Secret(#[from] SecretError),
+    Webhook(SecretError),
     #[error("serving: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -117,12 +117,14 @@ pub async fn serve_until(
         audit.clone(),
         clock.clone(),
     ));
+    let secrets = Secrets::default();
     let first = State::build_with(
         store.load().await?.parse()?,
         clock.clone(),
         &metrics,
         audit.clone(),
         fetcher.clone(),
+        &secrets,
     )
     .await?;
     let issuer_address = first.config.issuer.listen;
@@ -130,7 +132,8 @@ pub async fn serve_until(
     let reloader = Arc::new(
         Reloader::new(store, first, audit, clock)
             .with_metrics(metrics.clone())
-            .with_fetcher(fetcher),
+            .with_fetcher(fetcher)
+            .with_secrets(secrets.clone()),
     );
     let trigger = Arc::new(Notify::new());
     let admin = match &bootstrap.admin {
@@ -146,11 +149,10 @@ pub async fn serve_until(
         (Some(webhook), Source::Git(git)) => {
             let hook = Hook {
                 host: webhook.host,
-                secret: Secrets::default()
+                secret: secrets
                     .resolve(&webhook.secret)
-                    .await?
-                    .expose()
-                    .to_vec(),
+                    .await
+                    .map_err(Error::Webhook)?,
                 branch: git.branch.clone(),
             };
             let router = admin::webhook_router(hook, trigger.clone()).layer(

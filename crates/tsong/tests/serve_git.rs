@@ -213,7 +213,7 @@ async fn a_webhook_secret_must_be_in_the_environment() -> TestResult {
     let unset = "TSONG_TEST_SECRET_THAT_IS_NEVER_SET";
     let path = origin.bootstrap("50ms", 0, &webhook(0, &format!("env:{unset}")))?;
     match tsong::serve_until(&path, async {}).await {
-        Err(error @ tsong::Error::Secret(_)) => assert_eq!(
+        Err(error @ tsong::Error::Webhook(_)) => assert_eq!(
             error.to_string(),
             format!("webhook: secret env:{unset} is not set")
         ),

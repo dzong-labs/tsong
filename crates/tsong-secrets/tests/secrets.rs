@@ -50,10 +50,10 @@ async fn an_unset_variable_is_reported() -> TestResult {
 async fn a_file_secret_is_its_bytes() -> TestResult {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("secret");
-    std::fs::write(&path, b"s3cret\n")?;
+    std::fs::write(&path, b" s3cret\t")?;
     let reference = format!("file:{}", path.display()).parse()?;
     let secret = Secrets::default().resolve(&reference).await?;
-    assert_eq!(secret.expose(), b"s3cret\n");
+    assert_eq!(secret.expose(), b" s3cret\t");
     Ok(())
 }
 
@@ -108,4 +108,46 @@ fn debug_never_shows_a_secret() {
     let secret = Secret::new(b"s3cret".to_vec());
     assert_eq!(format!("{secret:?}"), "Secret(..)");
     assert_eq!(format!("{:?}", Secrets::default()), "{Env, File}");
+}
+
+#[tokio::test]
+async fn a_file_secret_drops_one_trailing_line_ending() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("secret");
+    let reference = format!("file:{}", path.display()).parse()?;
+    for (written, read) in [
+        (&b"s3cret\n"[..], &b"s3cret"[..]),
+        (b"s3cret\r\n", b"s3cret"),
+        (b"s3cret\n\n", b"s3cret\n"),
+        (b"s3cret", b"s3cret"),
+    ] {
+        std::fs::write(&path, written)?;
+        let secret = Secrets::default().resolve(&reference).await?;
+        assert_eq!(secret.expose(), read);
+    }
+    std::fs::write(&path, b"\n")?;
+    let error = failure(Secrets::default().resolve(&reference).await)?;
+    assert!(matches!(error, SecretError::Empty(_)));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_file_secret_over_the_limit_is_refused() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("big");
+    let reference = format!("file:{}", path.display()).parse()?;
+    std::fs::write(&path, vec![b'a'; tsong_secrets::MAX_SECRET_BYTES])?;
+    let secret = Secrets::default().resolve(&reference).await?;
+    assert_eq!(secret.expose().len(), tsong_secrets::MAX_SECRET_BYTES);
+    std::fs::write(&path, vec![b'a'; tsong_secrets::MAX_SECRET_BYTES + 1])?;
+    let error = failure(Secrets::default().resolve(&reference).await)?;
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "secret file:{} is over {} bytes",
+            path.display(),
+            tsong_secrets::MAX_SECRET_BYTES
+        )
+    );
+    Ok(())
 }

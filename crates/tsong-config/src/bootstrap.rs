@@ -9,7 +9,7 @@ use std::time::Duration;
 use ipnet::IpNet;
 use serde::Deserialize;
 
-use crate::{Problems, SecretRef, duration};
+use crate::{ParseError, Problems, SecretRef, duration};
 
 /// A whole bootstrap file.
 #[derive(Debug, Clone, Deserialize)]
@@ -156,7 +156,7 @@ pub enum BootstrapError {
         source: std::io::Error,
     },
     #[error("parsing the bootstrap file: {0}")]
-    Parse(#[from] toml::de::Error),
+    Parse(#[from] ParseError),
     #[error("invalid bootstrap file:\n{0}")]
     Invalid(Problems),
 }
@@ -164,7 +164,7 @@ pub enum BootstrapError {
 impl Bootstrap {
     /// Parses and validates a bootstrap document.
     pub fn from_toml(text: &str) -> Result<Self, BootstrapError> {
-        let bootstrap: Self = toml::from_str(text)?;
+        let bootstrap: Self = crate::parse::from_str(text)?;
         bootstrap.validate().map_err(BootstrapError::Invalid)?;
         Ok(bootstrap)
     }

@@ -46,20 +46,32 @@ impl State {
     pub async fn build(snapshot: Snapshot, clock: Arc<dyn Clock>) -> Result<Self, Error> {
         let quiet: Arc<dyn Audit> = Arc::new(Lines::new(std::io::sink()));
         let fetcher: Arc<dyn JwksFetcher> = Arc::new(HttpFetcher::default());
-        Self::assemble(snapshot, clock, &Metrics::default(), quiet, fetcher, false).await
+        let secrets = Secrets::default();
+        Self::assemble(
+            snapshot,
+            clock,
+            &Metrics::default(),
+            quiet,
+            fetcher,
+            &secrets,
+            false,
+        )
+        .await
     }
 
     /// Builds the state for `snapshot`, loading its signing keys. It counts
     /// into `metrics`, audits each exchange to `audit`, fetches keys with
-    /// `fetcher`, and renews them in the background while it lives.
+    /// `fetcher`, reads its secrets through `secrets`, and renews keys in
+    /// the background while it lives.
     pub async fn build_with(
         snapshot: Snapshot,
         clock: Arc<dyn Clock>,
         metrics: &Metrics,
         audit: Arc<dyn Audit>,
         fetcher: Arc<dyn JwksFetcher>,
+        secrets: &Secrets,
     ) -> Result<Self, Error> {
-        Self::assemble(snapshot, clock, metrics, audit, fetcher, true).await
+        Self::assemble(snapshot, clock, metrics, audit, fetcher, secrets, true).await
     }
 
     async fn assemble(
@@ -68,10 +80,11 @@ impl State {
         metrics: &Metrics,
         audit: Arc<dyn Audit>,
         fetcher: Arc<dyn JwksFetcher>,
+        secrets: &Secrets,
         refresh: bool,
     ) -> Result<Self, Error> {
         let config = Arc::new(snapshot.config);
-        let keys = KeySet::from_config(&config.issuer.signing, &Secrets::default()).await?;
+        let keys = KeySet::from_config(&config.issuer.signing, secrets).await?;
         let validator = Validator::new(&config, fetcher, clock.clone());
         let observer = ExchangeAudit {
             audit,
