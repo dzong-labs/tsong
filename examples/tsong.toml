@@ -80,24 +80,25 @@ oid = "sub"
 
 # Routes
 # One route per host. The request's path and query go to the downstream
-# unchanged. An empty audiences.allow or scopes.allow denies every
-# request; "*" accepts any value, and deny narrows it.
+# unchanged. A policy's allow lists the values a token may carry, and
+# the token may carry none of them. An omitted allow means "*", which
+# accepts any value, and deny narrows it.
 [[routes]]
 name = "orders"
 host = "orders.example.com"
 downstream = "https://orders-lb.internal.example.com"
 append_audience = "orders.example.com"      # added to the minted aud; "" adds nothing
 
-# The subject token's aud: at least one allowed value and none outside
-# allow. "*" alone allows any audience, and then only deny narrows it.
+# The subject token's aud: none outside allow, every one in require and
+# none in deny. A token with no aud passes unless require names one.
 [routes.audiences]
 allow = ["api://default", "api://tsong"]
 require = []                                 # optional: the token must carry all of these
-deny = []                                    # optional, only with allow = ["*"]: the token may carry none of these
+deny = []                                    # optional, only with allow omitted or ["*"]: the token may carry none of these
 
-# The subject token's scopes, from scope or scp, by the same rules. A
-# requested scope narrows them, but the minted token keeps every one in
-# require.
+# The subject token's scopes, from scope or scp, by the same rules, so a
+# token with no scopes passes unless require names one. A requested
+# scope narrows them, but the minted token keeps every one in require.
 [routes.scopes]
 allow = ["orders.read", "orders.write"]
 require = ["orders.read"]
