@@ -18,7 +18,7 @@ A useful report says:
 
 - An answer within 14 days, saying whether we confirm the flaw.
 - For a confirmed flaw rated medium or higher, a fix released within 60 days of the report, usually much sooner.
-- A GitHub security advisory and a CVE for each confirmed flaw, published with the fix. The release notes in [CHANGELOG.md](CHANGELOG.md) name it.
+- A GitHub security advisory and a CVE for each confirmed flaw, published with the fix. The release notes name it: on [GitHub Releases](https://github.com/marklauter/tsong/releases), and in [CHANGELOG.md](CHANGELOG.md) for 0.1.0.
 - Credit in the advisory, unless you'd rather not be named.
 
 Please give us until the fix is released before you disclose the flaw publicly.

@@ -2,8 +2,6 @@
 
 Each release lists what changed for people who run Tsong or write its config. Security fixes are listed first in their release, with the advisory and CVE. Tsong follows [Semantic Versioning](https://semver.org); before 1.0, a minor release can break the config or the API.
 
-## Unreleased
-
 ## 0.1.0
 
 The first release.
@@ -23,3 +21,7 @@ The first release.
 - Observability: liveness and readiness, Prometheus metrics, a JSON audit line per exchange and reload, and request correlation by `X-Request-Id` and `traceparent`.
 - A readiness drain on SIGTERM, and a container image that runs as an unprivileged user.
 - The `tsong check` and `tsong serve` commands.
+
+## Later releases
+
+Release notes after 0.1.0 are published with each [GitHub release](https://github.com/marklauter/tsong/releases), not in this file.

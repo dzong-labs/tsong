@@ -46,7 +46,7 @@ Tests come with the change, written first where you can. New behaviour gets test
 - Secrets are references, read through `SecretSource`. Never commit a key, a token or a client secret, even a test one: tests generate their keys.
 - Cryptography goes through the existing libraries (`aws-lc-rs`, `jsonwebtoken`, `p256`). Don't implement a primitive.
 - A new dependency needs a reason in the pull request. Prefer well-maintained crates with few dependencies of their own.
-- A change a user can see updates the [README](README.md) and adds a line to [CHANGELOG.md](CHANGELOG.md) under Unreleased.
+- A change a user can see updates the [README](README.md). Its pull request title becomes its line in the release notes on [GitHub Releases](https://github.com/marklauter/tsong/releases), so write the title for a user. [CHANGELOG.md](CHANGELOG.md) holds the notes for 0.1.0 only.
 
 ## License
 
