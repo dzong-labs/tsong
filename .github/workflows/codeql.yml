@@ -22,13 +22,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Each language is analyzed only when its files change, and always on
-        # the weekly schedule. Runner minutes are limited. The job itself
-        # always runs, so the required Analyze checks still report.
+        # Rust is analyzed only when its files change, and always on the
+        # weekly schedule, since runner minutes are limited. The workflows
+        # are analyzed on every commit: it takes seconds, and gives each
+        # commit a CodeQL result, which Scorecard's SAST check looks for.
+        # The job itself always runs, so the required Analyze checks still
+        # report.
         include:
           - language: actions
             build-mode: none
-            paths: '^\.github/'
+            paths: '.'
           - language: rust
             build-mode: none
             paths: '\.rs$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain\.toml$'
