@@ -664,7 +664,7 @@ signing_algorithm = "RS256"
 [[issuer.signing.keys]]
 kid = "tsong-rs"
 algorithm = "RS256"
-path = "unused.pem"
+private_key = "file:unused.pem"
 state = "active"
 "#;
 

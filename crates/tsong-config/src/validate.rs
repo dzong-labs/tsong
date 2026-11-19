@@ -108,9 +108,9 @@ impl Config {
             } else if !kids.insert(key.kid.as_str()) {
                 problems.push(format!("issuer.signing.keys repeats kid {:?}", key.kid));
             }
-            if signing.provider == KeyProvider::File && key.path.is_none() {
+            if signing.provider == KeyProvider::File && key.private_key.is_none() {
                 problems.push(format!(
-                    "issuer.signing.keys {:?} needs a path for the file provider",
+                    "issuer.signing.keys {:?} needs a private_key for the file provider",
                     key.kid
                 ));
             }
@@ -180,7 +180,7 @@ impl Config {
                     for (field, set) in [
                         ("introspection_url", trusted.introspection_url.is_some()),
                         ("client_id", trusted.client_id.is_some()),
-                        ("client_secret_env", trusted.client_secret_env.is_some()),
+                        ("client_secret", trusted.client_secret.is_some()),
                     ] {
                         if !set {
                             problems.push(format!(

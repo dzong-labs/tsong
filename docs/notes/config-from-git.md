@@ -33,10 +33,10 @@ listen = "0.0.0.0:8445"                   # GET /status
 listen = "0.0.0.0:8446"                   # POST /hooks/config
 allow = ["192.30.252.0/22"]               # the Git host's delivery addresses
 host = "github"                           # or "gitlab"
-secret_env = "TSONG_WEBHOOK_SECRET"
+secret = "env:TSONG_WEBHOOK_SECRET"
 ```
 
-`store = "file"` with `path` reads a config file from disk and never reloads. Relative paths in the bootstrap file, a file source's `path` and a Git source's `checkout`, `ssh_key`, `known_hosts` and local `url`, are taken from the bootstrap file's directory.
+`store = "file"` with `path` reads a config file from disk and never reloads. Relative paths in the bootstrap file, a file source's `path`, a Git source's `checkout`, `ssh_key`, `known_hosts` and local `url`, and a `file:` webhook secret, are taken from the bootstrap file's directory.
 
 ## Fetching
 
@@ -54,7 +54,7 @@ Private keys never live in Git. The config refers to a key by a pointer, a file 
 
 ## Triggers
 
-- A webhook on its own listener, `webhook.listen`, at `POST /hooks/config`. The secret is read from the environment variable `webhook.secret_env` at start; Tsong refuses to start without it. GitHub requests are verified by the HMAC-SHA256 in `X-Hub-Signature-256`, GitLab requests by the shared token in `X-Gitlab-Token`, both compared in constant time. Deliveries may be JSON or GitHub's default form encoding, up to GitHub's 25 MB limit. A verified push to the watched branch triggers a fetch and answers 202. Any other verified delivery, such as a ping or a push to another branch, answers 204, and an unverified one 401. The payload's commit ID is not trusted; the fetch decides what changed.
+- A webhook on its own listener, `webhook.listen`, at `POST /hooks/config`. The secret is read at start through the secret reference `webhook.secret`, such as `env:TSONG_WEBHOOK_SECRET`; Tsong refuses to start without it. GitHub requests are verified by the HMAC-SHA256 in `X-Hub-Signature-256`, GitLab requests by the shared token in `X-Gitlab-Token`, both compared in constant time. Deliveries may be JSON or GitHub's default form encoding, up to GitHub's 25 MB limit. A verified push to the watched branch triggers a fetch and answers 202. Any other verified delivery, such as a ping or a push to another branch, answers 204, and an unverified one 401. The payload's commit ID is not trusted; the fetch decides what changed.
 - A poll every `poll` interval, in case a webhook is missed.
 
 Each listener has its own allow list. The webhook listener admits only peers in `webhook.allow`, which holds the Git host's delivery addresses (GitHub publishes them at `api.github.com/meta`). That list is deployed in the bootstrap file, never loaded from Git, and is checked against each connection's own address, since nothing should proxy the webhook. The admin listener admits clients in `gateway.allow` of the config being served, found through `gateway.trusted_proxies` like the gateway and the issuer.

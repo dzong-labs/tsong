@@ -14,6 +14,7 @@ use tsong_config::{Config, Snapshot};
 use tsong_gateway::Gateway;
 use tsong_issuer::Issuer;
 use tsong_keys::KeySet;
+use tsong_secrets::Secrets;
 use tsong_validate::{HttpFetcher, JwksFetcher, Validator};
 
 use crate::Error;
@@ -42,26 +43,26 @@ impl State {
     /// Builds the state for `snapshot`, loading its signing keys, with
     /// metrics of its own, no exchange audit, and no background key
     /// refresh: keys are fetched over HTTP when a token needs them.
-    pub fn build(snapshot: Snapshot, clock: Arc<dyn Clock>) -> Result<Self, Error> {
+    pub async fn build(snapshot: Snapshot, clock: Arc<dyn Clock>) -> Result<Self, Error> {
         let quiet: Arc<dyn Audit> = Arc::new(Lines::new(std::io::sink()));
         let fetcher: Arc<dyn JwksFetcher> = Arc::new(HttpFetcher::default());
-        Self::assemble(snapshot, clock, &Metrics::default(), quiet, fetcher, false)
+        Self::assemble(snapshot, clock, &Metrics::default(), quiet, fetcher, false).await
     }
 
     /// Builds the state for `snapshot`, loading its signing keys. It counts
     /// into `metrics`, audits each exchange to `audit`, fetches keys with
     /// `fetcher`, and renews them in the background while it lives.
-    pub fn build_with(
+    pub async fn build_with(
         snapshot: Snapshot,
         clock: Arc<dyn Clock>,
         metrics: &Metrics,
         audit: Arc<dyn Audit>,
         fetcher: Arc<dyn JwksFetcher>,
     ) -> Result<Self, Error> {
-        Self::assemble(snapshot, clock, metrics, audit, fetcher, true)
+        Self::assemble(snapshot, clock, metrics, audit, fetcher, true).await
     }
 
-    fn assemble(
+    async fn assemble(
         snapshot: Snapshot,
         clock: Arc<dyn Clock>,
         metrics: &Metrics,
@@ -70,7 +71,7 @@ impl State {
         refresh: bool,
     ) -> Result<Self, Error> {
         let config = Arc::new(snapshot.config);
-        let keys = KeySet::from_config(&config.issuer.signing)?;
+        let keys = KeySet::from_config(&config.issuer.signing, &Secrets::default()).await?;
         let validator = Validator::new(&config, fetcher, clock.clone());
         let observer = ExchangeAudit {
             audit,

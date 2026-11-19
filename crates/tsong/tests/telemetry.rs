@@ -157,7 +157,9 @@ async fn the_refresher_refetches_expired_keys_and_reports_their_age() -> TestRes
     let clock = Arc::new(ManualClock::at(NOW));
     let fetcher = Arc::new(FakeFetcher::with(vec![]));
     let validator = tsong_validate::Validator::new(&config, fetcher.clone(), clock.clone());
-    let keys = tsong_keys::KeySet::from_config(&config.issuer.signing)?;
+    let keys =
+        tsong_keys::KeySet::from_config(&config.issuer.signing, &tsong_secrets::Secrets::default())
+            .await?;
     let issuer = tsong_issuer::Issuer::new(Arc::new(config), keys, validator, clock.clone());
     let metrics = Metrics::default();
     let age = || {
@@ -202,7 +204,9 @@ async fn a_refresher_runs_on_its_tick_until_dropped() -> TestResult {
     let fetcher = Arc::new(FakeFetcher::with(vec![]));
     let clock = Arc::new(tsong_clock::SystemClock);
     let validator = tsong_validate::Validator::new(&config, fetcher.clone(), clock.clone());
-    let keys = tsong_keys::KeySet::from_config(&config.issuer.signing)?;
+    let keys =
+        tsong_keys::KeySet::from_config(&config.issuer.signing, &tsong_secrets::Secrets::default())
+            .await?;
     let issuer = tsong_issuer::Issuer::new(Arc::new(config), keys, validator, clock);
     let metrics = Metrics::default();
     let refresher = Refresher::spawn(
@@ -233,7 +237,13 @@ fn a_refresher_needs_a_runtime() -> TestResult {
     let clock = Arc::new(ManualClock::at(NOW));
     let validator =
         tsong_validate::Validator::new(&config, Arc::new(FakeFetcher::default()), clock.clone());
-    let keys = tsong_keys::KeySet::from_config(&config.issuer.signing)?;
+    // Keys load on a runtime of their own, gone before the spawn.
+    let keys = tokio::runtime::Builder::new_current_thread()
+        .build()?
+        .block_on(tsong_keys::KeySet::from_config(
+            &config.issuer.signing,
+            &tsong_secrets::Secrets::default(),
+        ))?;
     let issuer = tsong_issuer::Issuer::new(Arc::new(config), keys, validator, clock);
     let spawned = Refresher::spawn(
         Arc::new(issuer),
@@ -305,7 +315,7 @@ struct Metered {
     reloader: Reloader,
 }
 
-fn metered() -> TestResult<Metered> {
+async fn metered() -> TestResult<Metered> {
     let dir = tempfile::tempdir()?;
     let key = write_key(dir.path())?;
     let store = Arc::new(QueueStore::default());
@@ -313,7 +323,8 @@ fn metered() -> TestResult<Metered> {
     let first = State::build(
         snapshot(&config_text(&key, "https://one.test", 8444, ""), "r1")?,
         clock.clone(),
-    )?;
+    )
+    .await?;
     let metrics = Arc::new(Metrics::default());
     let reloader = Reloader::new(
         Box::new(Shared(store.clone())),
@@ -341,7 +352,7 @@ async fn reloads_are_counted_by_outcome() -> TestResult {
         metrics,
         reloader,
         ..
-    } = metered()?;
+    } = metered().await?;
     store.push(Ok(fetched(
         &config_text(&key, "https://two.test", 8444, ""),
         "r2",
@@ -374,7 +385,7 @@ async fn the_last_fetch_and_the_served_revision_are_reported() -> TestResult {
         clock,
         metrics,
         reloader,
-    } = metered()?;
+    } = metered().await?;
     let fetched_at = || metrics.config_fetched.get();
     let revisions = || -> TestResult<Vec<String>> {
         let text = metrics.encode()?;

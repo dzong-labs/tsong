@@ -38,12 +38,15 @@ pub trait SigningKey: Send + Sync {
 /// Why a key couldn't be loaded or used.
 #[derive(Debug, thiserror::Error)]
 pub enum KeyError {
-    #[error("reading key {kid:?}: {source}")]
-    Read { kid: String, source: std::io::Error },
+    #[error("key {kid:?}: {source}")]
+    Secret {
+        kid: String,
+        source: tsong_secrets::SecretError,
+    },
     #[error("key {kid:?} is not a PKCS#8 PEM {expected} private key")]
     Decode { kid: String, expected: &'static str },
-    #[error("key {kid:?} has no path")]
-    MissingPath { kid: String },
+    #[error("key {kid:?} has no private_key")]
+    MissingPrivateKey { kid: String },
     #[error("key {kid:?} failed to sign")]
     Sign { kid: String },
     #[error("no key is active")]

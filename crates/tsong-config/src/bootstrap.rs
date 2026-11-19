@@ -9,7 +9,7 @@ use std::time::Duration;
 use ipnet::IpNet;
 use serde::Deserialize;
 
-use crate::{Problems, duration};
+use crate::{Problems, SecretRef, duration};
 
 /// A whole bootstrap file.
 #[derive(Debug, Clone, Deserialize)]
@@ -133,8 +133,8 @@ pub struct Webhook {
     /// should proxy this listener.
     pub allow: Vec<IpNet>,
     pub host: GitHost,
-    /// The environment variable holding the webhook secret.
-    pub secret_env: String,
+    /// The secret the Git host signs or tags deliveries with.
+    pub secret: SecretRef,
 }
 
 /// A Git host, which decides how webhooks are verified.
@@ -169,8 +169,8 @@ impl Bootstrap {
         Ok(bootstrap)
     }
 
-    /// Reads a bootstrap file. A file source's path is taken from the
-    /// bootstrap file's directory.
+    /// Reads a bootstrap file. Relative paths, including a `file:` webhook
+    /// secret, are taken from the bootstrap file's directory.
     pub fn load(path: &Path) -> Result<Self, BootstrapError> {
         let text = std::fs::read_to_string(path).map_err(|source| BootstrapError::Read {
             path: path.to_owned(),
@@ -193,6 +193,13 @@ impl Bootstrap {
                     git.url = dir.join(&git.url).display().to_string();
                 }
             }
+        }
+        if let Some(webhook) = &mut bootstrap.webhook
+            && webhook.secret.rebase(dir).is_err()
+        {
+            return Err(BootstrapError::Invalid(Problems(vec![
+                "webhook.secret is relative to a directory whose name isn't UTF-8".into(),
+            ])));
         }
         Ok(bootstrap)
     }
@@ -256,9 +263,6 @@ impl Bootstrap {
             }
             if webhook.allow.is_empty() {
                 problems.push("webhook.allow is empty, so no delivery can arrive".into());
-            }
-            if webhook.secret_env.is_empty() {
-                problems.push("webhook.secret_env is empty".into());
             }
         }
         if problems.is_empty() {

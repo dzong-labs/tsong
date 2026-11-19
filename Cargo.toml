@@ -38,6 +38,7 @@ tsong-gateway = { version = "0.1.0", path = "crates/tsong-gateway" }
 tsong-git = { version = "0.1.0", path = "crates/tsong-git" }
 tsong-issuer = { version = "0.1.0", path = "crates/tsong-issuer" }
 tsong-keys = { version = "0.1.0", path = "crates/tsong-keys" }
+tsong-secrets = { version = "0.1.0", path = "crates/tsong-secrets" }
 tsong-validate = { version = "0.1.0", path = "crates/tsong-validate" }
 url = { version = "2.5.8", features = ["serde"] }
 

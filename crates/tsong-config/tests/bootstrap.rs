@@ -23,7 +23,7 @@ listen = "127.0.0.1:8445"
 listen = "127.0.0.1:8446"
 allow = ["192.30.252.0/22", "2a0a:a440::/29"]
 host = "github"
-secret_env = "TSONG_WEBHOOK_SECRET"
+secret = "env:TSONG_WEBHOOK_SECRET"
 "#;
 
 /// The problems validation finds in `text`, or a test failure.
@@ -70,7 +70,7 @@ fn a_git_bootstrap_loads() -> TestResult {
     assert_eq!(webhook.listen.port(), 8446);
     assert_eq!(webhook.allow.len(), 2);
     assert_eq!(webhook.host, GitHost::GitHub);
-    assert_eq!(webhook.secret_env, "TSONG_WEBHOOK_SECRET");
+    assert_eq!(webhook.secret.to_string(), "env:TSONG_WEBHOOK_SECRET");
     assert_eq!(CONFIG_FILE, "tsong.toml");
     Ok(())
 }
@@ -229,7 +229,7 @@ fn the_poll_is_above_zero() -> TestResult {
 }
 
 #[test]
-fn a_webhook_needs_a_git_source_and_a_secret() -> TestResult {
+fn a_webhook_needs_a_git_source_and_an_allow_list() -> TestResult {
     let text = r#"
 [source]
 store = "file"
@@ -242,25 +242,24 @@ listen = "127.0.0.1:8445"
 listen = "127.0.0.1:8446"
 allow = []
 host = "gitlab"
-secret_env = ""
+secret = "env:TSONG_WEBHOOK_SECRET"
 "#;
     assert_eq!(
         problems(text)?,
         [
             "webhook needs a git source",
             "webhook.allow is empty, so no delivery can arrive",
-            "webhook.secret_env is empty",
         ]
     );
     let message = Bootstrap::from_toml(text).map_err(|error| error.to_string());
     assert_eq!(
         message.err().as_deref(),
         Some(
-            "invalid bootstrap file:\n- webhook needs a git source\n- webhook.allow is empty, so no delivery can arrive\n- webhook.secret_env is empty\n"
+            "invalid bootstrap file:\n- webhook needs a git source\n- webhook.allow is empty, so no delivery can arrive\n"
         )
     );
     let without = text.replace(
-        "\n[webhook]\nlisten = \"127.0.0.1:8446\"\nallow = []\nhost = \"gitlab\"\nsecret_env = \"\"\n",
+        "\n[webhook]\nlisten = \"127.0.0.1:8446\"\nallow = []\nhost = \"gitlab\"\nsecret = \"env:TSONG_WEBHOOK_SECRET\"\n",
         "",
     );
     Bootstrap::from_toml(&without)?;
@@ -274,7 +273,7 @@ fn the_webhook_and_admin_listeners_are_independent() -> TestResult {
     assert!(bootstrap.admin.is_none());
     assert!(bootstrap.webhook.is_some());
     let no_webhook = GIT.replace(
-        "[webhook]\nlisten = \"127.0.0.1:8446\"\nallow = [\"192.30.252.0/22\", \"2a0a:a440::/29\"]\nhost = \"github\"\nsecret_env = \"TSONG_WEBHOOK_SECRET\"\n",
+        "[webhook]\nlisten = \"127.0.0.1:8446\"\nallow = [\"192.30.252.0/22\", \"2a0a:a440::/29\"]\nhost = \"github\"\nsecret = \"env:TSONG_WEBHOOK_SECRET\"\n",
         "",
     );
     let bootstrap = Bootstrap::from_toml(&no_webhook)?;
@@ -388,6 +387,56 @@ fn the_drain_defaults_to_five_seconds_and_may_be_zero() -> TestResult {
         let set = text.replace("[health]", &format!("[health]\ndrain = \"{drain}\""));
         let health = Bootstrap::from_toml(&set)?.health.ok_or("no health")?;
         assert_eq!(health.drain, std::time::Duration::from_secs(seconds));
+    }
+    Ok(())
+}
+
+#[test]
+fn the_webhook_secret_is_a_reference() -> TestResult {
+    for (secret, expected) in [
+        (
+            "hunter2",
+            "a secret must be a reference, <scheme>:<id>, with scheme env or file",
+        ),
+        (
+            "vault:tsong",
+            "a secret reference's scheme must be env or file",
+        ),
+        ("env:", "a secret reference needs an id after its scheme"),
+    ] {
+        let text = GIT.replace("env:TSONG_WEBHOOK_SECRET", secret);
+        let error = Bootstrap::from_toml(&text)
+            .err()
+            .ok_or("a bad reference was accepted")?
+            .to_string();
+        assert!(error.contains(expected), "{error}");
+    }
+    Ok(())
+}
+
+#[test]
+fn the_retired_secret_env_field_is_refused() {
+    let text = GIT.replace(
+        r#"secret = "env:TSONG_WEBHOOK_SECRET""#,
+        r#"secret_env = "TSONG_WEBHOOK_SECRET""#,
+    );
+    assert!(Bootstrap::from_toml(&text).is_err());
+}
+
+#[test]
+fn load_takes_a_relative_webhook_secret_file_from_the_bootstrap_directory() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("bootstrap.toml");
+    for (written, expected) in [
+        (
+            "file:hook.secret",
+            format!("file:{}", dir.path().join("hook.secret").display()),
+        ),
+        ("env:HOOK", "env:HOOK".to_owned()),
+    ] {
+        std::fs::write(&path, GIT.replace("env:TSONG_WEBHOOK_SECRET", written))?;
+        let webhook = Bootstrap::load(&path)?.webhook.ok_or("no webhook")?;
+        assert_eq!(webhook.secret.to_string(), expected);
     }
     Ok(())
 }

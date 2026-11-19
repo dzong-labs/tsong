@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use aws_lc_rs::encoding::AsDer;
@@ -15,6 +15,7 @@ use p256::pkcs8::{EncodePrivateKey, LineEnding};
 use serde_json::Value;
 use tsong_config::{KeyEntry, KeyProvider, KeyState, Signing};
 use tsong_keys::{FileKey, KeyError, KeySet, SigningAlgorithm, SigningKey};
+use tsong_secrets::{ResolveFuture, Scheme, Secret, SecretRef, SecretSource, Secrets};
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
@@ -253,31 +254,6 @@ fn a_file_key_must_suit_its_algorithm() -> TestResult {
 }
 
 #[test]
-fn a_file_key_loads_from_disk() -> TestResult {
-    let dir = tempfile::tempdir()?;
-    let path = dir.path().join("k1.pem");
-    std::fs::write(&path, pem(7)?)?;
-    let key = FileKey::load("k1", SigningAlgorithm::ES256, &path)?;
-    assert_eq!(
-        key.public_jwk(),
-        FileKey::from_pem("k1", SigningAlgorithm::ES256, &pem(7)?)?.public_jwk()
-    );
-    Ok(())
-}
-
-#[test]
-fn a_missing_key_file_is_reported() -> TestResult {
-    let error = failure(FileKey::load(
-        "k1",
-        SigningAlgorithm::ES256,
-        &PathBuf::from("no-such-key.pem"),
-    ))?;
-    assert!(matches!(error, KeyError::Read { .. }));
-    assert!(error.to_string().starts_with(r#"reading key "k1": "#));
-    Ok(())
-}
-
-#[test]
 fn a_key_set_publishes_every_key_active_first() -> TestResult {
     let rsa: Arc<dyn SigningKey> = Arc::new(FileKey::from_pem(
         "rsa",
@@ -335,6 +311,16 @@ fn a_key_set_needs_one_active_key_per_algorithm() -> TestResult {
     Ok(())
 }
 
+/// A `file:` reference to `path`.
+fn file_ref(path: &Path) -> TestResult<SecretRef> {
+    Ok(format!("file:{}", path.display()).parse()?)
+}
+
+/// The keys `signing` lists, read through the default sources.
+async fn load(signing: &Signing) -> Result<KeySet, KeyError> {
+    KeySet::from_config(signing, &Secrets::default()).await
+}
+
 /// A file-provider signing config, with a P-256 key file in `dir` for
 /// each key.
 fn signing(dir: &Path, keys: &[(&str, KeyState)]) -> TestResult<Signing> {
@@ -346,7 +332,7 @@ fn signing(dir: &Path, keys: &[(&str, KeyState)]) -> TestResult<Signing> {
             kid: (*kid).into(),
             algorithm: SigningAlgorithm::ES256,
             state: *state,
-            path: Some(path),
+            private_key: Some(file_ref(&path)?),
         });
     }
     Ok(Signing {
@@ -355,8 +341,8 @@ fn signing(dir: &Path, keys: &[(&str, KeyState)]) -> TestResult<Signing> {
     })
 }
 
-#[test]
-fn a_key_set_loads_from_config() -> TestResult {
+#[tokio::test]
+async fn a_key_set_loads_from_config() -> TestResult {
     let dir = tempfile::tempdir()?;
     let mut signing = signing(
         dir.path(),
@@ -368,9 +354,9 @@ fn a_key_set_loads_from_config() -> TestResult {
         kid: "rsa".into(),
         algorithm: SigningAlgorithm::PS384,
         state: KeyState::Active,
-        path: Some(path),
+        private_key: Some(file_ref(&path)?),
     });
-    let set = KeySet::from_config(&signing)?;
+    let set = KeySet::from_config(&signing, &Secrets::default()).await?;
     let kids: Vec<_> = set.keys().map(SigningKey::kid).collect();
     assert_eq!(kids, ["rsa", "new", "old"]);
     assert_eq!(
@@ -381,29 +367,29 @@ fn a_key_set_loads_from_config() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn a_key_set_from_config_needs_an_active_key_per_algorithm() -> TestResult {
+#[tokio::test]
+async fn a_key_set_from_config_needs_an_active_key_per_algorithm() -> TestResult {
     let dir = tempfile::tempdir()?;
     let none = signing(dir.path(), &[("old", KeyState::Retiring)])?;
-    let error = failure(KeySet::from_config(&none))?;
+    let error = failure(load(&none).await)?;
     assert_eq!(error.to_string(), "no key is active");
     let two = signing(
         dir.path(),
         &[("a", KeyState::Active), ("b", KeyState::Active)],
     )?;
-    let error = failure(KeySet::from_config(&two))?;
+    let error = failure(load(&two).await)?;
     assert_eq!(error.to_string(), "more than one ES256 key is active");
     Ok(())
 }
 
-#[test]
-fn a_config_key_must_suit_its_algorithm() -> TestResult {
+#[tokio::test]
+async fn a_config_key_must_suit_its_algorithm() -> TestResult {
     let dir = tempfile::tempdir()?;
     let mut signing = signing(dir.path(), &[("k1", KeyState::Active)])?;
     for key in &mut signing.keys {
         key.algorithm = SigningAlgorithm::RS256;
     }
-    let error = failure(KeySet::from_config(&signing))?;
+    let error = failure(load(&signing).await)?;
     assert_eq!(
         error.to_string(),
         r#"key "k1" is not a PKCS#8 PEM RSA (2048 to 8192 bits) private key"#
@@ -411,16 +397,61 @@ fn a_config_key_must_suit_its_algorithm() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn a_file_key_entry_needs_a_path() -> TestResult {
+#[tokio::test]
+async fn a_file_key_entry_needs_a_private_key() -> TestResult {
     let dir = tempfile::tempdir()?;
     let mut signing = signing(dir.path(), &[("k1", KeyState::Active)])?;
     for key in &mut signing.keys {
-        key.path = None;
+        key.private_key = None;
     }
-    let error = failure(KeySet::from_config(&signing))?;
-    assert_eq!(error.to_string(), r#"key "k1" has no path"#);
+    let error = failure(load(&signing).await)?;
+    assert_eq!(error.to_string(), r#"key "k1" has no private_key"#);
     Ok(())
+}
+
+#[tokio::test]
+async fn a_private_key_is_read_through_its_source() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let mut signing = signing(dir.path(), &[("k1", KeyState::Active)])?;
+    for key in &mut signing.keys {
+        key.private_key = Some("env:TSONG_K1".parse()?);
+    }
+    let secrets = Secrets::empty().with(Scheme::Env, Arc::new(Fixed(pem(1)?)));
+    let set = KeySet::from_config(&signing, &secrets).await?;
+    assert_eq!(
+        set.active(SigningAlgorithm::ES256).map(SigningKey::kid),
+        Some("k1")
+    );
+    let error = failure(KeySet::from_config(&signing, &Secrets::empty()).await)?;
+    assert_eq!(
+        error.to_string(),
+        r#"key "k1": no source reads env secrets"#
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_missing_private_key_names_its_reference() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let mut signing = signing(dir.path(), &[("k1", KeyState::Active)])?;
+    let missing = dir.path().join("missing.pem");
+    for key in &mut signing.keys {
+        key.private_key = Some(file_ref(&missing)?);
+    }
+    let error = failure(load(&signing).await)?.to_string();
+    let prefix = format!(r#"key "k1": reading secret file:{}: "#, missing.display());
+    assert!(error.starts_with(&prefix), "{error}");
+    Ok(())
+}
+
+/// A source that answers every reference with the same secret.
+struct Fixed(String);
+
+impl SecretSource for Fixed {
+    fn resolve<'a>(&'a self, _: &'a SecretRef) -> ResolveFuture<'a> {
+        let secret = Secret::new(self.0.clone().into_bytes());
+        Box::pin(async move { Ok(secret) })
+    }
 }
 
 /// Polls `future` once, outside any async runtime.

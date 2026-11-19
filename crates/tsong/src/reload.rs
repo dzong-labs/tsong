@@ -205,7 +205,8 @@ impl Reloader {
             &self.metrics,
             self.audit.clone(),
             self.fetcher.clone(),
-        );
+        )
+        .await;
         let next = match built {
             Ok(next) => next,
             Err(error) => {

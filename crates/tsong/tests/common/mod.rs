@@ -72,7 +72,7 @@ provider = "file"
 
 [[issuer.signing.keys]]
 kid = "k1"
-path = '{}'
+private_key = 'file:{}'
 state = "active"
 
 [gateway]

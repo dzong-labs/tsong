@@ -41,9 +41,9 @@ impl Fixture {
     }
 
     /// A reloader serving `text` at revision `r1`.
-    fn reloader(&self, text: &str) -> TestResult<Reloader> {
+    async fn reloader(&self, text: &str) -> TestResult<Reloader> {
         let clock: Arc<dyn Clock> = self.clock.clone();
-        let first = State::build(snapshot(text, "r1")?, clock.clone())?;
+        let first = State::build(snapshot(text, "r1")?, clock.clone()).await?;
         Ok(Reloader::new(
             Box::new(Shared(self.store.clone())),
             first,
@@ -61,7 +61,9 @@ async fn the_first_load_is_audited_and_counted() -> TestResult {
         route("b", "B.example.com", "\"*\""),
         route("a", "a.example.com", "\"*\"")
     );
-    let reloader = f.reloader(&f.text("https://one.test", 8444, &routes))?;
+    let reloader = f
+        .reloader(&f.text("https://one.test", 8444, &routes))
+        .await?;
     assert_eq!(
         f.lines.parsed()?,
         [json!({
@@ -96,7 +98,7 @@ async fn the_first_load_is_audited_and_counted() -> TestResult {
 async fn the_same_revision_changes_nothing() -> TestResult {
     let f = Fixture::new()?;
     let text = f.text("https://one.test", 8444, "");
-    let reloader = f.reloader(&text)?;
+    let reloader = f.reloader(&text).await?;
     f.store.push(Ok(fetched(&text, "r1")?));
     assert_eq!(reloader.reload().await, Outcome::Unchanged);
     assert_eq!(f.lines.parsed()?.len(), 1);
@@ -112,7 +114,9 @@ async fn a_new_revision_is_swapped_in_and_its_changes_audited() -> TestResult {
         route("a", "a.example.com", "\"read\""),
         route("b", "b.example.com", "\"read\"")
     );
-    let reloader = f.reloader(&f.text("https://one.test", 8444, &before))?;
+    let reloader = f
+        .reloader(&f.text("https://one.test", 8444, &before))
+        .await?;
     let receiver = reloader.subscribe();
     let after = format!(
         "{}{}{}",
@@ -157,7 +161,9 @@ async fn a_new_revision_is_swapped_in_and_its_changes_audited() -> TestResult {
 async fn an_unchanged_route_and_address_are_not_reported() -> TestResult {
     let f = Fixture::new()?;
     let routes = route("a", "a.example.com", "\"read\"");
-    let reloader = f.reloader(&f.text("https://one.test", 8444, &routes))?;
+    let reloader = f
+        .reloader(&f.text("https://one.test", 8444, &routes))
+        .await?;
     f.store.push(Ok(fetched(
         &f.text("https://two.test", 8444, &routes),
         "r2",
@@ -178,7 +184,7 @@ async fn an_unchanged_route_and_address_are_not_reported() -> TestResult {
 #[tokio::test]
 async fn a_failed_load_keeps_the_old_state() -> TestResult {
     let f = Fixture::new()?;
-    let reloader = f.reloader(&f.text("https://one.test", 8444, ""))?;
+    let reloader = f.reloader(&f.text("https://one.test", 8444, "")).await?;
     f.store
         .push(Err(ConfigError::Store("fetching: offline".into())));
     f.clock.advance(Duration::from_secs(5));
@@ -210,14 +216,17 @@ async fn a_failed_load_keeps_the_old_state() -> TestResult {
 #[tokio::test]
 async fn a_config_whose_state_fails_to_build_is_rejected() -> TestResult {
     let f = Fixture::new()?;
-    let reloader = f.reloader(&f.text("https://one.test", 8444, ""))?;
+    let reloader = f.reloader(&f.text("https://one.test", 8444, "")).await?;
     let missing = f.key.with_file_name("missing.pem");
     let text = config_text(&missing, "https://two.test", 8444, "");
     f.store.push(Ok(fetched(&text, "r2")?));
     let Outcome::Rejected(error) = reloader.reload().await else {
         return Err("expected a rejection".into());
     };
-    assert!(error.starts_with(r#"reading key "k1""#), "{error}");
+    assert!(
+        error.starts_with(r#"key "k1": reading secret file:"#),
+        "{error}"
+    );
     let line = f.lines.parsed()?.get(1).cloned().ok_or("no second line")?;
     assert_eq!(line.get("revision"), Some(&json!("r2")));
     assert_eq!(line.get("outcome"), Some(&json!("rejected")));
@@ -232,7 +241,7 @@ async fn a_config_whose_state_fails_to_build_is_rejected() -> TestResult {
 #[tokio::test]
 async fn each_failure_has_a_short_reason_and_the_detail_only_in_the_log() -> TestResult {
     let f = Fixture::new()?;
-    let reloader = f.reloader(&f.text("https://one.test", 8444, ""))?;
+    let reloader = f.reloader(&f.text("https://one.test", 8444, "")).await?;
     let unparsable = fetched("max_entries = [", "r2")?;
     let invalid = fetched(
         &f.text("https://two.test", 8444, "")
@@ -277,7 +286,7 @@ async fn issuer_of(router: &axum::Router) -> TestResult<Value> {
 #[tokio::test]
 async fn requests_reach_the_current_state() -> TestResult {
     let f = Fixture::new()?;
-    let reloader = f.reloader(&f.text("https://one.test", 8444, ""))?;
+    let reloader = f.reloader(&f.text("https://one.test", 8444, "")).await?;
     let issuer = current(reloader.subscribe(), |state| &state.issuer);
     let gateway = current(reloader.subscribe(), |state| &state.gateway);
     assert_eq!(issuer_of(&issuer).await?, json!("https://one.test"));
@@ -311,7 +320,7 @@ async fn reloaded(reloader: &Reloader, reloads: u64) -> TestResult {
 #[tokio::test]
 async fn the_loop_reloads_on_each_trigger_and_stops_when_told() -> TestResult {
     let f = Fixture::new()?;
-    let reloader = Arc::new(f.reloader(&f.text("https://one.test", 8444, ""))?);
+    let reloader = Arc::new(f.reloader(&f.text("https://one.test", 8444, "")).await?);
     let trigger = Arc::new(Notify::new());
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let task = {
@@ -335,7 +344,7 @@ async fn the_loop_reloads_on_each_trigger_and_stops_when_told() -> TestResult {
 #[tokio::test]
 async fn the_loop_reloads_on_each_poll() -> TestResult {
     let f = Fixture::new()?;
-    let reloader = Arc::new(f.reloader(&f.text("https://one.test", 8444, ""))?);
+    let reloader = Arc::new(f.reloader(&f.text("https://one.test", 8444, "")).await?);
     f.store
         .push(Ok(fetched(&f.text("https://two.test", 8444, ""), "r2")?));
     let trigger = Notify::new();
@@ -361,7 +370,7 @@ fn lines_are_written_one_to_a_line() {
 async fn a_new_revision_with_the_same_content_rebuilds_nothing_but_is_reported() -> TestResult {
     let f = Fixture::new()?;
     let text = f.text("https://one.test", 8444, "");
-    let reloader = f.reloader(&text)?;
+    let reloader = f.reloader(&text).await?;
     let state = reloader.subscribe().borrow().clone();
     let mut unrelated = fetched(&text, "r2")?;
     unrelated.content = "content of r1".into();
@@ -387,7 +396,7 @@ fn invalid_at(revision: &str, content: &str) -> TestResult<Fetched> {
 async fn an_invalid_config_is_rejected_once_until_it_changes() -> TestResult {
     let f = Fixture::new()?;
     let text = f.text("https://one.test", 8444, "");
-    let reloader = f.reloader(&text)?;
+    let reloader = f.reloader(&text).await?;
     f.store.push(Ok(invalid_at("r2", "bad")?));
     let Outcome::Rejected(detail) = reloader.reload().await else {
         return Err("expected a rejection".into());
@@ -429,7 +438,7 @@ async fn an_invalid_config_is_rejected_once_until_it_changes() -> TestResult {
 #[tokio::test]
 async fn a_failed_fetch_is_retried_every_time() -> TestResult {
     let f = Fixture::new()?;
-    let reloader = f.reloader(&f.text("https://one.test", 8444, ""))?;
+    let reloader = f.reloader(&f.text("https://one.test", 8444, "")).await?;
     for _ in 0..2 {
         f.store.push(Err(ConfigError::Store("offline".into())));
         assert!(matches!(reloader.reload().await, Outcome::Rejected(_)));
@@ -459,7 +468,8 @@ async fn shutdown_does_not_wait_for_a_stalled_reload() -> TestResult {
     let first = State::build(
         snapshot(&f.text("https://one.test", 8444, ""), "r1")?,
         clock.clone(),
-    )?;
+    )
+    .await?;
     let reloader = Arc::new(Reloader::new(
         Box::new(Stalled),
         first,
