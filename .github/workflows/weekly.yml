@@ -23,6 +23,8 @@ jobs:
       NIGHTLY: nightly-2026-10-01
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
     - name: Install nightly
       run: rustup toolchain install $NIGHTLY --profile minimal
     - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
@@ -51,6 +53,8 @@ jobs:
       PROPTEST_CASES: "100000"
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
     - uses: ./.github/actions/setup-rust
     - name: Property tests with 100,000 cases each
       run: cargo test -p tsong-config -p tsong-issuer --locked --release --test properties --test mint_properties
@@ -61,6 +65,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
     - uses: ./.github/actions/setup-rust
     - name: Build twice and compare
       run: scripts/reproducible.sh
@@ -73,6 +79,8 @@ jobs:
       NIGHTLY: nightly-2026-10-01
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
     - name: Install nightly
       run: rustup toolchain install $NIGHTLY --profile minimal --component llvm-tools-preview
     - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
@@ -80,5 +88,7 @@ jobs:
         tool: cargo-llvm-cov@0.9.1
     - name: Measure branch coverage
       run: |
-        cargo +$NIGHTLY llvm-cov --branch --workspace --locked --summary-only | tee coverage.txt
-        { echo '```'; grep -E '^(Filename|TOTAL)' coverage.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        set -euo pipefail
+        cargo +$NIGHTLY llvm-cov --branch --workspace --locked --summary-only > coverage.txt
+        cat coverage.txt
+        { echo '```'; grep -E '^(Filename|TOTAL)' coverage.txt || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
