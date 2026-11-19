@@ -1,8 +1,8 @@
 //! What a minted token carries, over generated subject tokens and
 //! requests: its scopes against the `billing` route, which allows
 //! orders.read, orders.write and billing.read and requires orders.read and
-//! billing.read; its audiences against the `policy` route's audience
-//! policy; and its claims against the config's claim mapping. Each
+//! billing.read; its audiences and scopes against the `policy` route's
+//! policies; and its claims against the config's claim mapping. Each
 //! run tries `PROPTEST_CASES` cases, 256 unless set; the weekly workflow
 //! sets more.
 
@@ -38,7 +38,7 @@ fn scopes() -> impl Strategy<Value = Vec<&'static str>> {
 /// The scopes the minted token must carry, or `None` when the exchange
 /// must be refused.
 fn expected(held: &BTreeSet<&str>, requested: Option<&[&str]>) -> Option<BTreeSet<String>> {
-    if !held.iter().all(|scope| ALLOWED.contains(scope)) {
+    if held.is_empty() || !held.iter().all(|scope| ALLOWED.contains(scope)) {
         return None;
     }
     let granted: BTreeSet<&str> = match requested {
@@ -85,7 +85,7 @@ proptest! {
                     .collect();
                 prop_assert_eq!(minted, expected);
             }
-            (None, Err(_)) => {}
+            (None, Err(error)) => prop_assert_eq!(error.code(), "invalid_scope"),
             (expected, result) => {
                 prop_assert!(false, "expected {expected:?}, got {result:?}");
             }
@@ -199,6 +199,61 @@ proptest! {
                 let validated = held.iter().any(|aud| ["tsong", "api"].contains(aud));
                 let code = if validated { "invalid_target" } else { "invalid_request" };
                 prop_assert_eq!(error.code(), code);
+            }
+        }
+    }
+}
+
+/// Scopes a subject token might carry: the `policy` route allows any scope
+/// and denies `admin`.
+const POLICY_SCOPES: [&str; 3] = ["orders.read", "root", "admin"];
+
+fn policy_scopes() -> impl Strategy<Value = Vec<&'static str>> {
+    prop::collection::vec(prop::sample::select(&POLICY_SCOPES[..]), 0..4)
+}
+
+proptest! {
+    #![proptest_config(config())]
+
+    /// The `policy` route, which allows any scope and denies `admin`,
+    /// accepts a subject token exactly when it carries a scope and not
+    /// `admin`, and the request asks for no scope it doesn't hold. A token
+    /// it accepts is minted with the requested scopes, or else the subject
+    /// token's; one it refuses is `invalid_scope`.
+    #[test]
+    fn a_route_s_scope_policy_decides_the_exchange(
+        held in policy_scopes(),
+        requested in prop::option::of(policy_scopes()),
+    ) {
+        let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+        let h = harness().map_err(|error| TestCaseError::fail(error.to_string()))?;
+        let scope = if held.is_empty() { json!(null) } else { json!(held.join(" ")) };
+        let mut token = request(&h, "policy.test", subject(json!({ "scope": scope })))
+            .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        token.scope = requested.as_ref().map(|requested| requested.join(" "));
+        let result = runtime.block_on(h.issuer.exchange(token));
+        let held_set: BTreeSet<&str> = held.iter().copied().collect();
+        let granted: BTreeSet<&str> = requested
+            .as_ref()
+            .map_or_else(|| held_set.clone(), |requested| requested.iter().copied().collect());
+        let accepted = !held_set.is_empty()
+            && !held_set.contains("admin")
+            && granted.is_subset(&held_set);
+        match result {
+            Ok(response) => {
+                prop_assert!(accepted, "accepted {held:?} for {requested:?}");
+                let minted: BTreeSet<String> = response
+                    .scope
+                    .unwrap_or_default()
+                    .split_whitespace()
+                    .map(str::to_owned)
+                    .collect();
+                let granted: BTreeSet<String> = granted.into_iter().map(str::to_owned).collect();
+                prop_assert_eq!(minted, granted);
+            }
+            Err(error) => {
+                prop_assert!(!accepted, "refused {held:?} for {requested:?}: {error}");
+                prop_assert_eq!(error.code(), "invalid_scope");
             }
         }
     }

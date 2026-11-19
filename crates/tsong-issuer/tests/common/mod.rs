@@ -66,7 +66,7 @@ host = "orders.test"
 downstream = "https://orders-lb.test"
 append_audience = "orders.test"
 audiences = { allow = ["tsong", "orders.test"] }
-allowed_scopes = ["orders.read", "orders.write"]
+scopes = { allow = ["orders.read", "orders.write"] }
 
 [[routes]]
 name = "open"
@@ -74,7 +74,7 @@ host = "open.test"
 downstream = "https://open-lb.test"
 append_audience = ""
 audiences = { allow = ["*"] }
-allowed_scopes = ["*"]
+scopes = { allow = ["*"] }
 allow = ["10.1.0.0/16"]
 
 [[routes]]
@@ -83,8 +83,7 @@ host = "billing.test"
 downstream = "https://billing-lb.test"
 append_audience = ""
 audiences = { allow = ["tsong"] }
-allowed_scopes = ["orders.read", "orders.write", "billing.read"]
-required_scopes = ["orders.read", "billing.read"]
+scopes = { allow = ["orders.read", "orders.write", "billing.read"], require = ["orders.read", "billing.read"] }
 
 [[routes]]
 name = "policy"
@@ -92,7 +91,7 @@ host = "policy.test"
 downstream = "https://policy-lb.test"
 append_audience = "policy.test"
 audiences = { allow = ["*"], require = ["tsong"], deny = ["admin"] }
-allowed_scopes = ["*"]
+scopes = { allow = ["*"], deny = ["admin"] }
 
 [[routes]]
 name = "closed"
@@ -100,7 +99,7 @@ host = "closed.test"
 downstream = "https://closed-lb.test"
 append_audience = "closed.test"
 audiences = { allow = ["tsong"] }
-allowed_scopes = []
+scopes = { allow = [] }
 "#;
 
 /// Every exchange event the issuer reported.

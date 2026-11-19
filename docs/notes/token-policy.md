@@ -8,14 +8,13 @@ created: 2026-11-19
 
 # Token policy
 
-A route decides which subject tokens it accepts and what the minted token carries. Today that decision is spread over a trusted issuer's `audiences`, a route's `[routes.audiences]`, `allowed_scopes`, `required_scopes` and `append_audience`, and the global `[claims]` copy and rename lists (`examples/tsong.toml`, `Issuer::exchange` in `crates/tsong-issuer/src/lib.rs`). The token policy gathers the route's part into one block per route, so an authorization modeller reads a route's whole policy in one place.
+A route decides which subject tokens it accepts and what the minted token carries. Today that decision is spread over a trusted issuer's `audiences`, a route's `[routes.audiences]`, `[routes.scopes]` and `append_audience`, and the global `[claims]` copy and rename lists (`examples/tsong.toml`, `Issuer::exchange` in `crates/tsong-issuer/src/lib.rs`). The token policy gathers the route's part into one block per route, so an authorization modeller reads a route's whole policy in one place.
 
 ## Today
 
 - A route's `[routes.audiences]`: the subject token must carry at least one audience in `allow` and none outside it, every one in `require` and none in `deny`. This is pull request 1 below.
-- A route's `allowed_scopes`: any scope outside the list refuses the request. A token with no scopes passes.
-- `required_scopes`: every one must be present.
-- The minted token keeps the inbound audiences and scopes unchanged, plus `append_audience`.
+- A route's `[routes.scopes]`: the same four checks on the subject token's scopes, from `scope` or `scp`. A token with no scopes is refused. This is pull request 2 below.
+- The minted token keeps the inbound audiences, plus `append_audience`, and the inbound scopes, narrowed by the request's `scope` parameter but always keeping every scope in `scopes.require`.
 - Claims are copied and renamed per trusted issuer, not per route. Nothing checks a claim's value.
 
 ## The policy
@@ -58,7 +57,7 @@ Every check runs on inbound values. `map` changes only what the minted token car
 
 ### Loading
 
-The config fails to load, and `tsong check` reports it, when:
+The config fails to load, and `tsong check` reports it, when, in `[routes.audiences]` or `[routes.scopes]`:
 
 - `allow` is missing. An empty `allow` denies every request, as empty lists do today.
 - A value is empty, holds whitespace, or repeats within its list.
@@ -70,9 +69,9 @@ The config fails to load, and `tsong check` reports it, when:
 
 `deny` may list the route's own `append_audience`. `deny` checks the inbound token and `append_audience` the minted one, so the route then refuses a token already minted for it.
 
-`tsong check` warns when an audience `allow` is `"*"` with no `deny`, which accepts any audience, and when the audience policy admits no audience a trusted issuer that validates JWTs accepts, which refuses every token.
+`tsong check` warns when an `allow` is empty, which denies every request, or is `"*"` with no `deny`, which accepts any value, and when the audience policy admits no audience a trusted issuer that validates JWTs accepts, which refuses every token.
 
-`allowed_audiences`, `allowed_scopes` and `required_scopes` are removed, not kept as aliases, and an old config is refused naming the new block. The release notes say how to move a config across.
+`allowed_audiences`, `allowed_scopes` and `required_scopes` are removed, not kept as aliases, and an old config is refused naming the key that replaces it. The release notes say how to move a config across.
 
 ### Rules
 

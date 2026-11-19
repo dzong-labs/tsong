@@ -88,7 +88,7 @@ host = "orders.example.com"
 downstream = "https://orders-lb.example.com"
 append_audience = ""
 audiences = { allow = ["*"] }
-allowed_scopes = []
+scopes = { allow = [] }
 "#;
 
 #[tokio::test]
@@ -99,7 +99,7 @@ async fn check_reports_warnings_and_passes() -> TestResult {
         tsong::run(args("check", &path)).await?,
         format!(
             "warning: route \"orders\": audiences.allow has \"*\"; any audience is accepted\n\
-             warning: route \"orders\": allowed_scopes is empty; every request will be denied\n\
+             warning: route \"orders\": scopes.allow is empty; every request will be denied\n\
              {}: ok, signing with ES256 k1",
             path.display()
         )
@@ -138,7 +138,10 @@ async fn deny_warnings_fails_a_check_with_warnings() -> TestResult {
             r#"audiences = { allow = ["*"] }"#,
             r#"audiences = { allow = ["*"], deny = ["admin"] }"#,
         )
-        .replace("allowed_scopes = []", r#"allowed_scopes = ["orders.read"]"#);
+        .replace(
+            "scopes = { allow = [] }",
+            r#"scopes = { allow = ["orders.read"] }"#,
+        );
     let narrowed = write_config_with(dir.path(), 0, 0, true, &narrowed)?;
     assert_eq!(
         tsong::run(deny(&narrowed)).await?,

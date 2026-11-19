@@ -45,6 +45,26 @@ pub(crate) fn refuse_allowed_audiences<'de, D: Deserializer<'de>>(
     ))
 }
 
+/// Refuses a route's `allowed_scopes`, at its value's line and column,
+/// naming what took its place.
+pub(crate) fn refuse_allowed_scopes<'de, D: Deserializer<'de>>(
+    _: D,
+) -> Result<Option<IgnoredAny>, D::Error> {
+    Err(D::Error::custom(
+        "allowed_scopes is replaced by [routes.scopes]; move its values to scopes.allow, which also refuses a token carrying no scope it allows",
+    ))
+}
+
+/// Refuses a route's `required_scopes`, at its value's line and column,
+/// naming what took its place.
+pub(crate) fn refuse_required_scopes<'de, D: Deserializer<'de>>(
+    _: D,
+) -> Result<Option<IgnoredAny>, D::Error> {
+    Err(D::Error::custom(
+        "required_scopes is replaced by [routes.scopes]; move its values to scopes.require",
+    ))
+}
+
 /// Parses `text` as `T`, with any error as a [`ParseError`].
 pub(crate) fn from_str<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, ParseError> {
     toml::from_str(text).map_err(|error| ParseError::new(text, &error))

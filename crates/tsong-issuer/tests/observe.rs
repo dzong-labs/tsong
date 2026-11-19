@@ -103,7 +103,9 @@ async fn a_refusal_is_observed_with_what_was_known() -> TestResult {
     assert_eq!(event.error, Some("invalid_scope"));
     assert_eq!(
         event.error_description.as_deref(),
-        Some(r#"scope "admin" is not allowed for route "orders""#)
+        Some(
+            r#"the subject token's scope "admin" is outside the scopes allowed for "orders.test""#
+        )
     );
     assert_eq!(event.iss.as_deref(), Some("https://issuer.test"));
     assert_eq!(event.sub.as_deref(), Some("alice"));

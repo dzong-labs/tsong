@@ -7,9 +7,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use ipnet::IpNet;
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
-use tsong_config::{
-    ANY, AudiencePolicy, AudienceRefusal, Route, RouteTable, SigningAlgorithm, allowed, client_ip,
-};
+use tsong_config::{ANY, Policy, Refusal, Route, RouteTable, SigningAlgorithm, allowed, client_ip};
 use url::Url;
 
 /// The run's settings: `PROPTEST_CASES` and the rest from the
@@ -184,6 +182,7 @@ proptest! {
 /// and `require` never names `admin`.
 const AUDIENCES: [&str; 5] = ["tsong", "api", "other", "admin", ANY];
 
+/// Scopes a route may name or a token carry, held to the same rules.
 const SCOPES: [&str; 5] = ["orders.read", "orders.write", "billing.read", "admin", ANY];
 
 fn names(universe: &'static [&'static str]) -> impl Strategy<Value = Vec<String>> {
@@ -191,54 +190,77 @@ fn names(universe: &'static [&'static str]) -> impl Strategy<Value = Vec<String>
         .prop_map(|names| names.into_iter().map(str::to_owned).collect())
 }
 
-/// A route with these allowed audiences and scopes, and nothing else set.
-fn route(allow: Vec<String>, allowed_scopes: Vec<String>) -> Result<Route, url::ParseError> {
+/// A policy allowing any value.
+fn any_value() -> Policy {
+    Policy {
+        allow: vec![ANY.into()],
+        require: Vec::new(),
+        deny: Vec::new(),
+    }
+}
+
+/// A route allowing any audience and scope, and nothing else set.
+fn route() -> Result<Route, url::ParseError> {
     Ok(Route {
         name: "r".into(),
         host: "r.test".into(),
         downstream: Url::parse("https://r-lb.test")?,
         append_audience: String::new(),
-        audiences: AudiencePolicy {
-            allow,
-            require: Vec::new(),
-            deny: Vec::new(),
-        },
-        allowed_scopes,
-        required_scopes: Vec::new(),
+        audiences: any_value(),
+        scopes: any_value(),
         signing_algorithm: SigningAlgorithm::default(),
         allow: None,
         read_timeout: None,
     })
 }
 
+/// Checks `policy`'s answer for a token carrying `held` against a model of
+/// its four checks: the token is accepted exactly when it carries at least
+/// one value `allow` admits, none outside `allow`, every one `require`
+/// lists and none `deny` lists. A refusal names the first check that
+/// failed, and every check before it passed.
+fn matches_model(policy: &Policy, held: &[&str]) -> Result<(), TestCaseError> {
+    let Policy {
+        allow,
+        require,
+        deny,
+    } = policy;
+    let allowed = |value: &str| allow.iter().any(|a| a == ANY || a == value);
+    let one_allowed = held.iter().any(|value| allowed(value));
+    let none_outside = held.iter().all(|value| allowed(value));
+    let all_required = require.iter().all(|r| held.contains(&r.as_str()));
+    let none_denied = !held.iter().any(|value| deny.iter().any(|d| d == value));
+    let refusal = policy.refusal(held);
+    prop_assert_eq!(
+        refusal.is_none(),
+        one_allowed && none_outside && all_required && none_denied
+    );
+    match refusal {
+        None => {}
+        Some(Refusal::NoValue) => prop_assert!(held.is_empty()),
+        Some(Refusal::NotAllowed) => {
+            prop_assert!(!one_allowed && !held.is_empty());
+        }
+        Some(Refusal::Outside(value)) => {
+            prop_assert!(one_allowed);
+            prop_assert!(held.contains(&value) && !allowed(value));
+        }
+        Some(Refusal::Missing(value)) => {
+            prop_assert!(one_allowed && none_outside);
+            prop_assert!(require.iter().any(|r| r == value) && !held.contains(&value));
+        }
+        Some(Refusal::Denied(value)) => {
+            prop_assert!(one_allowed && none_outside && all_required);
+            prop_assert!(held.contains(&value) && deny.iter().any(|d| d == value));
+        }
+    }
+    Ok(())
+}
+
 proptest! {
     #![proptest_config(config())]
 
-    /// A route accepts a token's scopes when it allows `*` or every one of
-    /// them, and an empty list accepts nothing. A refusal names the first
-    /// scope not allowed.
-    #[test]
-    fn a_route_accepts_only_scopes_it_allows(
-        allowed_scopes in names(&SCOPES),
-        held in names(&SCOPES[..4]),
-    ) {
-        let route = route(vec![ANY.into()], allowed_scopes.clone())?;
-        let result = route.refused_scope(held.iter().map(String::as_str));
-        let allows = |scope: &String| allowed_scopes.iter().any(|a| a == scope);
-        if allowed_scopes.is_empty() {
-            prop_assert_eq!(result, Err(None));
-        } else if allowed_scopes.iter().any(|a| a == ANY) {
-            prop_assert_eq!(result, Ok(()));
-        } else {
-            let first = held.iter().find(|scope| !allows(scope)).map(String::as_str);
-            prop_assert_eq!(result, first.map_or(Ok(()), |scope| Err(Some(scope))));
-        }
-    }
-
-    /// A route accepts a token's audiences exactly when it carries at least
-    /// one `allow` admits, none outside `allow`, every one `require` lists
-    /// and none `deny` lists. A refusal names the first check that failed,
-    /// and every check before it passed.
+    /// A route's audience policy matches the model.
     #[test]
     fn a_route_accepts_only_audiences_its_policy_admits(
         allow in names(&AUDIENCES),
@@ -246,38 +268,27 @@ proptest! {
         deny in names(&AUDIENCES[..4]),
         audiences in names(&AUDIENCES[..4]),
     ) {
-        let mut route = route(allow.clone(), vec![ANY.into()])?;
-        route.audiences.require.clone_from(&require);
-        route.audiences.deny.clone_from(&deny);
+        let mut route = route()?;
+        route.audiences = Policy { allow, require, deny };
         let held: Vec<&str> = audiences.iter().map(String::as_str).collect();
-        let allowed = |aud: &str| allow.iter().any(|a| a == ANY || a == aud);
-        let one_allowed = held.iter().any(|aud| allowed(aud));
-        let none_outside = held.iter().all(|aud| allowed(aud));
-        let all_required = require.iter().all(|r| held.contains(&r.as_str()));
-        let none_denied = !held.iter().any(|aud| deny.iter().any(|d| d == aud));
-        let refusal = route.audience_refusal(&held);
-        prop_assert_eq!(
-            refusal.is_none(),
-            one_allowed && none_outside && all_required && none_denied
-        );
-        match refusal {
-            None => {}
-            Some(AudienceRefusal::NoAudience) => prop_assert!(held.is_empty()),
-            Some(AudienceRefusal::NotAllowed) => {
-                prop_assert!(!one_allowed && !held.is_empty());
-            }
-            Some(AudienceRefusal::Outside(aud)) => {
-                prop_assert!(one_allowed);
-                prop_assert!(held.contains(&aud) && !allowed(aud));
-            }
-            Some(AudienceRefusal::Missing(aud)) => {
-                prop_assert!(one_allowed && none_outside);
-                prop_assert!(require.iter().any(|r| r == aud) && !held.contains(&aud));
-            }
-            Some(AudienceRefusal::Denied(aud)) => {
-                prop_assert!(one_allowed && none_outside && all_required);
-                prop_assert!(held.contains(&aud) && deny.iter().any(|d| d == aud));
-            }
+        matches_model(&route.audiences, &held)?;
+    }
+
+    /// A route's scope policy matches the same model, so a token with no
+    /// scopes is refused by every route.
+    #[test]
+    fn a_route_accepts_only_scopes_its_policy_admits(
+        allow in names(&SCOPES),
+        require in names(&SCOPES[..3]),
+        deny in names(&SCOPES[..4]),
+        scopes in names(&SCOPES[..4]),
+    ) {
+        let mut route = route()?;
+        route.scopes = Policy { allow, require, deny };
+        let held: Vec<&str> = scopes.iter().map(String::as_str).collect();
+        matches_model(&route.scopes, &held)?;
+        if held.is_empty() {
+            prop_assert_eq!(route.scopes.refusal(&held), Some(Refusal::NoValue));
         }
     }
 
@@ -288,7 +299,7 @@ proptest! {
         other in "[a-z]{1,8}\\.test",
         upper in prop::collection::vec(any::<bool>(), 13),
     ) {
-        let mut route = route(vec![ANY.into()], vec![ANY.into()])?;
+        let mut route = route()?;
         route.host.clone_from(&host);
         let table = RouteTable::new(std::slice::from_ref(&route));
         let cased: String = host

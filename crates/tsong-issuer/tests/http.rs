@@ -88,9 +88,15 @@ async fn the_token_endpoint_exchanges_a_form() -> TestResult {
 }
 
 #[tokio::test]
-async fn a_token_without_scopes_omits_the_scope_field() -> TestResult {
+async fn a_token_narrowed_to_no_scope_omits_the_scope_field() -> TestResult {
     let h = harness()?;
-    let form = exchange_form_with(&h, "orders.test", json!({ "scope": null }))?;
+    // A subject token needs a scope, but an empty request keeps none.
+    let token = h.inbound.sign(&subject(json!({}))?)?;
+    let form = form(&format!(
+        "grant_type={}&subject_token={token}&subject_token_type={}&audience=orders.test&scope=",
+        TOKEN_EXCHANGE.replace(':', "%3A"),
+        ACCESS_TOKEN.replace(':', "%3A"),
+    ))?;
     let (status, _, body) = send(&h, form).await?;
     assert_eq!(status, StatusCode::OK);
     assert!(body.get("scope").is_none());

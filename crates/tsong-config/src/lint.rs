@@ -1,8 +1,8 @@
 //! Warnings: settings that are valid but look like a mistake. An empty
 //! allow list denies everything, which looks like an omission; an entry
-//! that accepts anything looks like a decision worth confirming. A route
-//! whose audience policy admits no audience a trusted issuer accepts
-//! refuses every token.
+//! that accepts anything looks like a decision worth confirming, unless a
+//! deny list narrows it. A route whose audience policy admits no audience
+//! a trusted issuer accepts refuses every token.
 //! Keys trusted for more than a day leave a key an issuer has withdrawn in
 //! use for that long.
 
@@ -52,41 +52,33 @@ impl Config {
             .collect();
         for route in &self.routes {
             let name = &route.name;
-            let policy = &route.audiences;
             // `deny` narrowing a "*" is a decision already; `require` isn't,
             // as it doesn't limit what else a token may carry.
-            let accepted = if policy.require.is_empty() {
-                "any audience is accepted"
-            } else {
-                "any audience is accepted alongside the required ones"
-            };
-            for (field, values, star_warns, accepted) in [
-                (
-                    "audiences.allow",
-                    &policy.allow,
-                    policy.deny.is_empty(),
-                    accepted,
-                ),
-                (
-                    "allowed_scopes",
-                    &route.allowed_scopes,
-                    true,
-                    "any value is accepted",
-                ),
+            for (list, noun, policy) in [
+                ("audiences", "audience", &route.audiences),
+                ("scopes", "scope", &route.scopes),
             ] {
-                if values.is_empty() {
+                if policy.allow.is_empty() {
                     warnings.push(format!(
-                        "route {name:?}: {field} is empty; every request will be denied"
+                        "route {name:?}: {list}.allow is empty; every request will be denied"
                     ));
-                } else if star_warns && values.iter().any(|value| value == ANY) {
-                    warnings.push(format!("route {name:?}: {field} has \"*\"; {accepted}"));
+                } else if policy.deny.is_empty() && policy.allow.iter().any(|value| value == ANY) {
+                    let alongside = if policy.require.is_empty() {
+                        ""
+                    } else {
+                        " alongside the required ones"
+                    };
+                    warnings.push(format!(
+                        "route {name:?}: {list}.allow has \"*\"; any {noun} is accepted{alongside}"
+                    ));
                 }
             }
+            let policy = &route.audiences;
             if !policy.allow.is_empty()
                 && !jwt_audiences.is_empty()
-                && !jwt_audiences.iter().any(|aud| {
-                    policy.allows(aud) && !policy.deny.iter().any(|denied| denied == aud)
-                })
+                && !jwt_audiences
+                    .iter()
+                    .any(|aud| policy.allows(aud) && !policy.denies(aud))
             {
                 warnings.push(format!(
                     "route {name:?}: audiences admits no audience a trusted issuer accepts; every token will be refused"

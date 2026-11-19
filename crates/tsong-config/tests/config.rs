@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 use tsong_config::{
-    ANY, AudienceRefusal, Config, ConfigError, ConfigStore, FileStore, InboundAlgorithm,
-    KeyProvider, KeyState, Route, RouteTable, Scheme, SecretRef, SecretRefError, SigningAlgorithm,
-    TrustedIssuer, Validation, Warnings, hex,
+    ANY, Config, ConfigError, ConfigStore, FileStore, InboundAlgorithm, KeyProvider, KeyState,
+    Refusal, Route, RouteTable, Scheme, SecretRef, SecretRefError, SigningAlgorithm, TrustedIssuer,
+    Validation, Warnings, hex,
 };
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
@@ -132,7 +132,9 @@ fn sample_loads() -> TestResult {
     assert_eq!(orders.host, "orders.example.com");
     assert_eq!(orders.append_audience, "orders.example.com");
     assert_eq!(orders.audiences.allow, ["api://default", "api://tsong"]);
-    assert_eq!(orders.allowed_scopes, ["orders.read", "orders.write"]);
+    assert_eq!(orders.scopes.allow, ["orders.read", "orders.write"]);
+    assert_eq!(orders.scopes.require, ["orders.read"]);
+    assert!(orders.scopes.deny.is_empty());
     assert!(orders.allow.is_none());
     assert_eq!(route(&config, 1)?.allow.as_ref().map(Vec::len), Some(1));
     assert_eq!(config.warnings(), Warnings::default());
@@ -331,10 +333,7 @@ fn a_route_signs_es256_unless_it_names_an_algorithm() -> TestResult {
         .replace("state", "algorithm = \"RS256\"\nstate");
     let text = format!(
         "{}{rsa}",
-        route_with(
-            "allowed_scopes",
-            "signing_algorithm = \"RS256\"\nallowed_scopes"
-        )
+        route_with("scopes = {", "signing_algorithm = \"RS256\"\nscopes = {")
     );
     let config = Config::from_toml(&text)?;
     assert_eq!(
@@ -346,10 +345,7 @@ fn a_route_signs_es256_unless_it_names_an_algorithm() -> TestResult {
 
 #[test]
 fn a_route_s_algorithm_needs_an_active_key() -> TestResult {
-    let text = route_with(
-        "allowed_scopes",
-        "signing_algorithm = \"EdDSA\"\nallowed_scopes",
-    );
+    let text = route_with("scopes = {", "signing_algorithm = \"EdDSA\"\nscopes = {");
     assert_eq!(
         problems(&text)?,
         [r#"route "orders" signs with EdDSA, which no active key in issuer.signing.keys does"#]
@@ -796,7 +792,7 @@ host = "orders.example.com"
 downstream = "https://orders-lb.example.com"
 append_audience = "orders.example.com"
 audiences = { allow = ["api"] }
-allowed_scopes = ["orders.read"]
+scopes = { allow = ["orders.read"] }
 "#;
 
 fn with_route(route: &str) -> String {
@@ -876,7 +872,7 @@ fn route_fields_are_required() -> TestResult {
         "downstream",
         "append_audience",
         "audiences",
-        "allowed_scopes",
+        "scopes",
     ] {
         let line = ROUTE
             .lines()
@@ -1027,26 +1023,23 @@ fn orders(audiences: &[&str], scopes: &[&str]) -> TestResult<Route> {
     let config = Config::from_toml(&with_route(ROUTE))?;
     let mut route = route(&config, 0)?.clone();
     route.audiences.allow = names(audiences);
-    route.allowed_scopes = names(scopes);
+    route.scopes.allow = names(scopes);
     Ok(route)
 }
 
 #[test]
 fn a_route_needs_one_allowed_audience_and_none_outside() -> TestResult {
     let route = orders(&["a", "b"], &[])?;
-    assert_eq!(route.audience_refusal(&["b"]), None);
-    assert_eq!(route.audience_refusal(&["a", "b"]), None);
+    assert_eq!(route.audiences.refusal(&["b"]), None);
+    assert_eq!(route.audiences.refusal(&["a", "b"]), None);
     assert_eq!(
-        route.audience_refusal(&["x", "y"]),
-        Some(AudienceRefusal::NotAllowed)
+        route.audiences.refusal(&["x", "y"]),
+        Some(Refusal::NotAllowed)
     );
+    assert_eq!(route.audiences.refusal(&[]), Some(Refusal::NoValue));
     assert_eq!(
-        route.audience_refusal(&[]),
-        Some(AudienceRefusal::NoAudience)
-    );
-    assert_eq!(
-        route.audience_refusal(&["b", "x", "y"]),
-        Some(AudienceRefusal::Outside("x"))
+        route.audiences.refusal(&["b", "x", "y"]),
+        Some(Refusal::Outside("x"))
     );
     Ok(())
 }
@@ -1054,15 +1047,12 @@ fn a_route_needs_one_allowed_audience_and_none_outside() -> TestResult {
 #[test]
 fn an_empty_allow_accepts_nothing_and_a_star_accepts_any_audience() -> TestResult {
     let empty = orders(&[], &[])?;
-    assert_eq!(
-        empty.audience_refusal(&["a"]),
-        Some(AudienceRefusal::NotAllowed)
-    );
+    assert_eq!(empty.audiences.refusal(&["a"]), Some(Refusal::NotAllowed));
     let any = orders(&[ANY], &[])?;
-    assert_eq!(any.audience_refusal(&["a", "b"]), None);
+    assert_eq!(any.audiences.refusal(&["a", "b"]), None);
     assert_eq!(
-        any.audience_refusal(&[]),
-        Some(AudienceRefusal::NoAudience),
+        any.audiences.refusal(&[]),
+        Some(Refusal::NoValue),
         "a star still needs an audience"
     );
     Ok(())
@@ -1072,15 +1062,12 @@ fn an_empty_allow_accepts_nothing_and_a_star_accepts_any_audience() -> TestResul
 fn a_route_needs_every_required_audience() -> TestResult {
     let mut route = orders(&["a", "b", "c"], &[])?;
     route.audiences.require = names(&["b", "c"]);
-    assert_eq!(route.audience_refusal(&["a", "b", "c"]), None);
+    assert_eq!(route.audiences.refusal(&["a", "b", "c"]), None);
     assert_eq!(
-        route.audience_refusal(&["a", "b"]),
-        Some(AudienceRefusal::Missing("c"))
+        route.audiences.refusal(&["a", "b"]),
+        Some(Refusal::Missing("c"))
     );
-    assert_eq!(
-        route.audience_refusal(&["a"]),
-        Some(AudienceRefusal::Missing("b"))
-    );
+    assert_eq!(route.audiences.refusal(&["a"]), Some(Refusal::Missing("b")));
     Ok(())
 }
 
@@ -1088,10 +1075,10 @@ fn a_route_needs_every_required_audience() -> TestResult {
 fn a_route_refuses_a_denied_audience() -> TestResult {
     let mut route = orders(&[ANY], &[])?;
     route.audiences.deny = names(&["admin", "root"]);
-    assert_eq!(route.audience_refusal(&["a", "b"]), None);
+    assert_eq!(route.audiences.refusal(&["a", "b"]), None);
     assert_eq!(
-        route.audience_refusal(&["a", "root", "admin"]),
-        Some(AudienceRefusal::Denied("root"))
+        route.audiences.refusal(&["a", "root", "admin"]),
+        Some(Refusal::Denied("root"))
     );
     Ok(())
 }
@@ -1103,16 +1090,16 @@ fn audience_checks_run_in_order() -> TestResult {
     route.audiences.deny = names(&["c"]);
     // Outside comes before missing, and missing before denied.
     assert_eq!(
-        route.audience_refusal(&["c", "x"]),
-        Some(AudienceRefusal::Outside("x"))
+        route.audiences.refusal(&["c", "x"]),
+        Some(Refusal::Outside("x"))
     );
     assert_eq!(
-        route.audience_refusal(&["a", "c"]),
-        Some(AudienceRefusal::Missing("b"))
+        route.audiences.refusal(&["a", "c"]),
+        Some(Refusal::Missing("b"))
     );
     assert_eq!(
-        route.audience_refusal(&["b", "c"]),
-        Some(AudienceRefusal::Denied("c"))
+        route.audiences.refusal(&["b", "c"]),
+        Some(Refusal::Denied("c"))
     );
     Ok(())
 }
@@ -1320,93 +1307,267 @@ fn deny_applies_only_when_allow_is_a_star() -> TestResult {
 }
 
 #[test]
-fn a_route_refuses_the_first_scope_it_does_not_allow() -> TestResult {
-    let route = orders(&[], &["read", "write"])?;
-    assert_eq!(route.refused_scope(["read", "write"].into_iter()), Ok(()));
-    assert_eq!(route.refused_scope(std::iter::empty()), Ok(()));
+fn a_route_s_scopes_pass_the_same_checks_as_its_audiences() -> TestResult {
+    let mut route = orders(&[ANY], &["read", "write", "admin"])?;
+    route.scopes.require = names(&["read"]);
+    assert_eq!(route.scopes.refusal(&["read", "write"]), None);
+    assert_eq!(route.scopes.refusal(&[]), Some(Refusal::NoValue));
+    assert_eq!(route.scopes.refusal(&["x"]), Some(Refusal::NotAllowed));
     assert_eq!(
-        route.refused_scope(["read", "admin", "root"].into_iter()),
-        Err(Some("admin"))
+        route.scopes.refusal(&["read", "x"]),
+        Some(Refusal::Outside("x"))
+    );
+    assert_eq!(
+        route.scopes.refusal(&["write"]),
+        Some(Refusal::Missing("read"))
+    );
+    route.scopes.allow = names(&[ANY]);
+    route.scopes.deny = names(&["admin"]);
+    assert_eq!(
+        route.scopes.refusal(&["read", "admin"]),
+        Some(Refusal::Denied("admin"))
     );
     Ok(())
 }
 
 #[test]
-fn a_route_reports_the_first_required_scope_missing() -> TestResult {
-    let mut route = orders(&[], &["read", "write"])?;
-    assert_eq!(route.missing_scope(|_| false), None, "none required");
-    route.required_scopes = vec!["read".into(), "write".into()];
-    assert_eq!(route.missing_scope(|_| true), None);
-    assert_eq!(route.missing_scope(|scope| scope == "read"), Some("write"));
-    assert_eq!(route.missing_scope(|_| false), Some("read"));
+fn an_empty_scope_allow_accepts_nothing_and_a_star_accepts_any_scope() -> TestResult {
+    let empty = orders(&[ANY], &[])?;
+    assert_eq!(empty.scopes.refusal(&["read"]), Some(Refusal::NotAllowed));
+    let any = orders(&[ANY], &[ANY])?;
+    assert_eq!(any.scopes.refusal(&["admin"]), None);
+    assert_eq!(
+        any.scopes.refusal(&[]),
+        Some(Refusal::NoValue),
+        "a star still needs a scope"
+    );
     Ok(())
 }
 
 #[test]
-fn required_scopes_default_to_none_and_load() -> TestResult {
+fn a_scope_table_loads_with_require_and_deny() -> TestResult {
+    let table = ROUTE.replace("scopes = { allow = [\"orders.read\"] }\n", "")
+        + "\n[routes.scopes]\nallow = [\"*\"]\nrequire = [\"orders.read\"]\ndeny = [\"admin\"]\n";
+    let config = Config::from_toml(&with_route(&table))?;
+    let scopes = &route(&config, 0)?.scopes;
+    assert_eq!(scopes.allow, [ANY]);
+    assert_eq!(scopes.require, ["orders.read"]);
+    assert_eq!(scopes.deny, ["admin"]);
     let config = Config::from_toml(&with_route(ROUTE))?;
-    assert!(route(&config, 0)?.required_scopes.is_empty());
-    let required = ROUTE.replace(
-        "allowed_scopes",
-        "required_scopes = [\"orders.read\"]\nallowed_scopes",
-    );
-    let config = Config::from_toml(&with_route(&required))?;
-    assert_eq!(route(&config, 0)?.required_scopes, ["orders.read"]);
+    let scopes = &route(&config, 0)?.scopes;
+    assert!(scopes.require.is_empty(), "require defaults to none");
+    assert!(scopes.deny.is_empty(), "deny defaults to none");
     Ok(())
 }
 
 #[test]
-fn required_scopes_must_be_allowed_and_named() -> TestResult {
-    let refused = ROUTE.replace(
-        "allowed_scopes",
-        "required_scopes = [\"orders.read\", \"admin\", \"*\"]\nallowed_scopes",
+fn a_scope_table_refuses_unknown_keys() -> TestResult {
+    let text = route_with(
+        r#"scopes = { allow = ["orders.read"] }"#,
+        r#"scopes = { allow = ["orders.read"], required = ["orders.read"] }"#,
     );
+    assert!(parse_error(&text)?.contains("unknown field `required`"));
+    Ok(())
+}
+
+/// Checks that the orders route with `line` added is refused at `column`
+/// of that line with `message`.
+fn refused_key(line: &str, column: usize, message: &str) -> TestResult {
+    let text = route_with(
+        r#"scopes = { allow = ["orders.read"] }"#,
+        &format!("scopes = {{ allow = [\"orders.read\"] }}\n{line}"),
+    );
+    let number = text
+        .lines()
+        .position(|text| text == line)
+        .ok_or("no refused line")?
+        + 1;
     assert_eq!(
-        problems(&with_route(&refused))?,
-        [
-            r#"route "orders" requires scope "admin", which its allowed_scopes refuses"#,
-            r#"route "orders" required_scopes may not hold "*"; name each scope"#,
-        ]
+        parse_error(&text)?,
+        format!("line {number}, column {column}: {message}")
     );
-    let open = refused.replace(", \"*\"]", "]").replace(
+    Ok(())
+}
+
+#[test]
+fn allowed_scopes_is_refused_naming_its_replacement() -> TestResult {
+    refused_key(
         r#"allowed_scopes = ["orders.read"]"#,
-        r#"allowed_scopes = ["*"]"#,
-    );
-    Config::from_toml(&with_route(&open))?;
+        18,
+        "allowed_scopes is replaced by [routes.scopes]; move its values to scopes.allow, which also refuses a token carrying no scope it allows",
+    )
+}
+
+#[test]
+fn required_scopes_is_refused_naming_its_replacement() -> TestResult {
+    refused_key(
+        r#"required_scopes = ["orders.read"]"#,
+        19,
+        "required_scopes is replaced by [routes.scopes]; move its values to scopes.require",
+    )
+}
+
+#[test]
+fn a_route_shows_no_trace_of_the_removed_scope_keys() -> TestResult {
+    let config = Config::from_toml(&with_route(ROUTE))?;
+    let shown = format!("{:?}", route(&config, 0)?);
+    assert!(!shown.contains("allowed_scopes"), "{shown}");
+    assert!(!shown.contains("required_scopes"), "{shown}");
     Ok(())
 }
 
 #[test]
-fn required_scopes_are_single_scopes_named_once() -> TestResult {
-    // Under "*" every scope is allowed, so only the shape check stands
-    // between these and a route that refuses every token.
-    let malformed = ROUTE
-        .replace(
-            "allowed_scopes",
-            "required_scopes = [\"\", \"orders.read billing.read\", \"a\", \"a\"]\nallowed_scopes",
-        )
-        .replace(
-            r#"allowed_scopes = ["orders.read"]"#,
-            r#"allowed_scopes = ["*"]"#,
+fn removed_scope_keys_outside_a_route_are_unknown_fields() -> TestResult {
+    for key in ["allowed_scopes", "required_scopes"] {
+        let error = parse_error(&okta_with(&format!("{key} = [\"api\"]")))?;
+        assert!(
+            error.contains(&format!("unknown field `{key}`, expected")),
+            "{error}"
         );
+    }
+    Ok(())
+}
+
+/// The problems the orders route has with this scope policy.
+fn scope_problems(policy: &str) -> TestResult<Vec<String>> {
+    problems(&route_with(
+        r#"scopes = { allow = ["orders.read"] }"#,
+        &format!("scopes = {policy}"),
+    ))
+}
+
+#[test]
+fn scope_values_are_named() -> TestResult {
     assert_eq!(
-        problems(&with_route(&malformed))?,
+        scope_problems(r#"{ allow = ["read", ""], require = [""] }"#)?,
         [
-            r#"route "orders" required scope "" must be one scope, without spaces"#,
-            r#"route "orders" required scope "orders.read billing.read" must be one scope, without spaces"#,
-            r#"route "orders" repeats required scope "a""#,
+            r#"route "orders" scopes.allow has an empty value; name each scope"#,
+            r#"route "orders" scopes.require has an empty value; name each scope"#,
+        ]
+    );
+    assert_eq!(
+        scope_problems(r#"{ allow = ["*"], deny = [""] }"#)?,
+        [r#"route "orders" scopes.deny has an empty value; name each scope"#]
+    );
+    Ok(())
+}
+
+#[test]
+fn a_star_stands_alone_in_scopes_allow_and_nowhere_else() -> TestResult {
+    assert_eq!(
+        scope_problems(r#"{ allow = ["read", "*"] }"#)?,
+        [
+            r#"route "orders" scopes.allow has "*" with other values; "*" allows any scope, so it stands alone"#
+        ]
+    );
+    assert_eq!(
+        scope_problems(r#"{ allow = ["*"], require = ["*"], deny = ["*"] }"#)?,
+        [
+            r#"route "orders" scopes.require may not hold "*"; name each scope"#,
+            r#"route "orders" scopes.deny may not hold "*"; name each scope"#,
         ]
     );
     Ok(())
 }
 
 #[test]
-fn an_empty_scope_list_refuses_everything_and_a_star_accepts_anything() -> TestResult {
-    let empty = orders(&[], &[])?;
-    assert_eq!(empty.refused_scope(std::iter::empty()), Err(None));
-    assert_eq!(empty.refused_scope(["read"].into_iter()), Err(None));
-    let any = orders(&[], &["read", ANY])?;
-    assert_eq!(any.refused_scope(["admin"].into_iter()), Ok(()));
+fn a_scope_is_not_both_required_and_denied() -> TestResult {
+    assert_eq!(
+        scope_problems(r#"{ allow = ["*"], require = ["read", "read"], deny = ["read"] }"#)?,
+        [
+            r#"route "orders" both requires and denies scope "read""#,
+            r#"route "orders" scopes.require repeats scope "read""#,
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn scope_lists_repeat_no_value() -> TestResult {
+    assert_eq!(
+        scope_problems(r#"{ allow = ["read", "read"], require = ["read", "read"] }"#)?,
+        [
+            r#"route "orders" scopes.allow repeats scope "read""#,
+            r#"route "orders" scopes.require repeats scope "read""#,
+        ]
+    );
+    assert_eq!(
+        scope_problems(r#"{ allow = ["*"], deny = ["admin", "admin"] }"#)?,
+        [r#"route "orders" scopes.deny repeats scope "admin""#]
+    );
+    Ok(())
+}
+
+#[test]
+fn scope_values_hold_no_whitespace() -> TestResult {
+    // Under "*" every scope is allowed, so only the shape check stands
+    // between a required "a b" and a route that refuses every token.
+    assert_eq!(
+        scope_problems(
+            r#"{ allow = ["*"], require = ["orders.read billing.read"], deny = ["\tadmin"] }"#
+        )?,
+        [
+            r#"route "orders" scopes.require has "orders.read billing.read"; a scope holds no whitespace"#,
+            r#"route "orders" scopes.deny has "\tadmin"; a scope holds no whitespace"#,
+        ]
+    );
+    assert_eq!(
+        scope_problems(r#"{ allow = ["a b"] }"#)?,
+        [r#"route "orders" scopes.allow has "a b"; a scope holds no whitespace"#]
+    );
+    Ok(())
+}
+
+#[test]
+fn required_scopes_must_be_allowed() -> TestResult {
+    assert_eq!(
+        scope_problems(r#"{ allow = ["read"], require = ["read", "admin"] }"#)?,
+        [r#"route "orders" requires scope "admin", which its scopes.allow doesn't admit"#]
+    );
+    Config::from_toml(&route_with(
+        r#"scopes = { allow = ["orders.read"] }"#,
+        r#"scopes = { allow = ["*"], require = ["admin"], deny = ["root"] }"#,
+    ))?;
+    Ok(())
+}
+
+#[test]
+fn scope_deny_applies_only_when_allow_is_a_star() -> TestResult {
+    let refused = r#"route "orders" scopes.deny applies only when scopes.allow is "*"; remove the denied scopes from allow instead"#;
+    for policy in [
+        r#"{ allow = ["read", "admin"], deny = ["admin"] }"#,
+        r#"{ allow = [], deny = ["admin"] }"#,
+    ] {
+        assert_eq!(scope_problems(policy)?, [refused], "{policy}");
+    }
+    Config::from_toml(&route_with(
+        r#"scopes = { allow = ["orders.read"] }"#,
+        r#"scopes = { allow = ["*"], deny = ["admin"] }"#,
+    ))?;
+    Ok(())
+}
+
+#[test]
+fn a_star_scope_warns_unless_deny_narrows_it() -> TestResult {
+    let star = |policy: &str| -> TestResult<Vec<String>> {
+        let text = route_with(
+            r#"scopes = { allow = ["orders.read"] }"#,
+            &format!("scopes = {policy}"),
+        );
+        Ok(Config::from_toml(&text)?.warnings().0)
+    };
+    assert_eq!(
+        star(r#"{ allow = ["*"] }"#)?,
+        [r#"route "orders": scopes.allow has "*"; any scope is accepted"#]
+    );
+    assert_eq!(
+        star(r#"{ allow = ["*"], require = ["read"] }"#)?,
+        [
+            r#"route "orders": scopes.allow has "*"; any scope is accepted alongside the required ones"#
+        ]
+    );
+    assert!(star(r#"{ allow = ["*"], deny = ["admin"] }"#)?.is_empty());
+    assert!(star(r#"{ allow = ["*"], require = ["read"], deny = ["admin"] }"#)?.is_empty());
     Ok(())
 }
 
@@ -1426,8 +1587,8 @@ fn empty_lists_warn_as_omissions() -> TestResult {
             "audiences = { allow = [] }",
         )
         .replace(
-            r#"allowed_scopes = ["orders.read"]"#,
-            "allowed_scopes = []\nallow = []",
+            r#"scopes = { allow = ["orders.read"] }"#,
+            "scopes = { allow = [] }\nallow = []",
         );
     let text = with_route(&route).replace(r#"allow = ["10.0.0.0/8"]"#, "allow = []");
     let warnings = Config::from_toml(&text)?.warnings();
@@ -1436,7 +1597,7 @@ fn empty_lists_warn_as_omissions() -> TestResult {
         [
             "gateway.allow is empty; every client will be denied",
             r#"route "orders": audiences.allow is empty; every request will be denied"#,
-            r#"route "orders": allowed_scopes is empty; every request will be denied"#,
+            r#"route "orders": scopes.allow is empty; every request will be denied"#,
             r#"route "orders": allow is empty; every client will be denied"#,
         ]
     );
@@ -1455,8 +1616,8 @@ fn accept_anything_entries_warn_as_decisions() -> TestResult {
             r#"audiences = { allow = ["*"] }"#,
         )
         .replace(
-            r#"allowed_scopes = ["orders.read"]"#,
-            "allowed_scopes = [\"*\"]\nallow = [\"::/0\"]",
+            r#"scopes = { allow = ["orders.read"] }"#,
+            "scopes = { allow = [\"*\"] }\nallow = [\"::/0\"]",
         );
     let text = with_route(&route).replace(
         r#"allow = ["10.0.0.0/8"]"#,
@@ -1469,7 +1630,7 @@ fn accept_anything_entries_warn_as_decisions() -> TestResult {
             "gateway.allow has 0.0.0.0/0; every address is allowed",
             "gateway.allow has ::/0; every address is allowed",
             r#"route "orders": audiences.allow has "*"; any audience is accepted"#,
-            r#"route "orders": allowed_scopes has "*"; any value is accepted"#,
+            r#"route "orders": scopes.allow has "*"; any scope is accepted"#,
             r#"route "orders": allow has ::/0; every address is allowed"#,
         ]
     );
@@ -1623,8 +1784,8 @@ fn the_read_timeout_defaults_to_a_minute_and_a_route_may_override_it() -> TestRe
             r#"host = "slow.example.com""#,
         )
         .replace(
-            r#"allowed_scopes = ["orders.read"]"#,
-            "allowed_scopes = [\"orders.read\"]\nread_timeout = \"00:05:00\"",
+            r#"scopes = { allow = ["orders.read"] }"#,
+            "scopes = { allow = [\"orders.read\"] }\nread_timeout = \"00:05:00\"",
         );
     let config = Config::from_toml(&with_route(&format!("{ROUTE}{second}")))?;
     assert_eq!(config.gateway.read_timeout, Duration::from_secs(60));
@@ -1651,8 +1812,8 @@ fn the_read_timeout_defaults_to_a_minute_and_a_route_may_override_it() -> TestRe
 #[test]
 fn read_timeouts_are_above_zero() -> TestResult {
     let text = route_with(
-        r#"allowed_scopes = ["orders.read"]"#,
-        "allowed_scopes = [\"orders.read\"]\nread_timeout = \"00:00:00\"",
+        r#"scopes = { allow = ["orders.read"] }"#,
+        "scopes = { allow = [\"orders.read\"] }\nread_timeout = \"00:00:00\"",
     )
     .replace(
         "[gateway.cache]",
@@ -1666,8 +1827,8 @@ fn read_timeouts_are_above_zero() -> TestResult {
         ]
     );
     let bad = route_with(
-        r#"allowed_scopes = ["orders.read"]"#,
-        "allowed_scopes = [\"orders.read\"]\nread_timeout = \"soon\"",
+        r#"scopes = { allow = ["orders.read"] }"#,
+        "scopes = { allow = [\"orders.read\"] }\nread_timeout = \"soon\"",
     );
     parse_error(&bad)?;
     Ok(())
