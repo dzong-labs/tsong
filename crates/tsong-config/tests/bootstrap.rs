@@ -84,7 +84,7 @@ fn a_git_bootstrap_loads() -> TestResult {
 fn the_poll_and_host_are_configurable() -> TestResult {
     let text = GIT
         .replace(r#"host = "github""#, r#"host = "gitlab""#)
-        .replace("[admin]", "poll = \"30s\"\n\n[admin]");
+        .replace("[admin]", "poll = \"00:00:30\"\n\n[admin]");
     let bootstrap = Bootstrap::from_toml(&text)?;
     let Source::Git(GitSource { poll, .. }) = bootstrap.source else {
         return Err("expected a git source".into());
@@ -228,7 +228,7 @@ fn unauthenticated_transports_are_refused() -> TestResult {
 
 #[test]
 fn the_poll_is_above_zero() -> TestResult {
-    let text = GIT.replace("[admin]", "poll = \"0s\"\n\n[admin]");
+    let text = GIT.replace("[admin]", "poll = \"00:00:00\"\n\n[admin]");
     assert_eq!(problems(&text)?, ["source.poll must be above zero"]);
     Ok(())
 }
@@ -388,7 +388,7 @@ fn the_drain_defaults_to_five_seconds_and_may_be_zero() -> TestResult {
         format!("{GIT}\n[health]\nlisten = \"127.0.0.1:8447\"\nallow = [\"10.20.0.0/16\"]\n");
     let health = Bootstrap::from_toml(&text)?.health.ok_or("no health")?;
     assert_eq!(health.drain, std::time::Duration::from_secs(5));
-    for (drain, seconds) in [("30s", 30), ("0s", 0)] {
+    for (drain, seconds) in [("00:00:30", 30), ("00:00:00", 0)] {
         let set = text.replace("[health]", &format!("[health]\ndrain = \"{drain}\""));
         let health = Bootstrap::from_toml(&set)?.health.ok_or("no health")?;
         assert_eq!(health.drain, std::time::Duration::from_secs(seconds));

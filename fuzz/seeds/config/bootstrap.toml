@@ -1,5 +1,8 @@
 # A sample bootstrap file, deployed with Tsong: `tsong serve bootstrap.toml`.
 # It says where the config lives, which the config itself can't say.
+#
+# Durations are [d.]hh:mm:ss[.fffffff], as .NET writes a TimeSpan:
+# "00:15:00" is 15 minutes, "1.01:00:00" is 25 hours.
 
 # ── config source ─────────────────────────────────────
 # A folder on a Git branch, reloaded when the branch moves. Tsong reads
@@ -12,7 +15,7 @@ folder = "tsong"                          # "" for the repository's root
 checkout = "/var/lib/tsong/config.git"    # the bare clone Tsong keeps
 ssh_key = "/etc/tsong/deploy_key"         # a read-only deploy key
 known_hosts = "/etc/tsong/known_hosts"    # the only host keys SSH accepts
-poll = "5m"                               # fetch this often when no webhook arrives
+poll = "00:05:00"                         # fetch this often when no webhook arrives
 
 # Or a file on disk, relative to this file, read once:
 # [source]
@@ -45,5 +48,5 @@ secret = { env = "TSONG_WEBHOOK_SECRET" }
 [health]
 listen = "0.0.0.0:8447"
 allow = ["10.20.0.0/16"]                  # the load balancer's subnets
-drain = "5s"                              # on shutdown, readiness fails this long before the listeners close;
+drain = "00:00:05"                        # on shutdown, readiness fails this long before the listeners close;
                                           # see docs/notes/shutdown-and-draining.md

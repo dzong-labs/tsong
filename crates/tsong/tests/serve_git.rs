@@ -147,10 +147,10 @@ async fn serve_reloads_when_the_branch_moves() -> TestResult {
 [health]
 listen = \"127.0.0.1:{health}\"
 allow = [\"127.0.0.0/8\"]
-drain = \"3s\"
+drain = \"00:00:03\"
 "
     );
-    let (stop, server) = serve(origin.bootstrap("50ms", admin, &checks)?);
+    let (stop, server) = serve(origin.bootstrap("00:00:00.05", admin, &checks)?);
 
     let status = serving(admin, &first).await?;
     assert_eq!(status.get("reloads"), Some(&Value::from(1)));
@@ -211,7 +211,11 @@ async fn a_webhook_secret_must_be_in_the_environment() -> TestResult {
     let origin = Origin::new()?;
     origin.commit("https://one.test", 0)?;
     let unset = "TSONG_TEST_SECRET_THAT_IS_NEVER_SET";
-    let path = origin.bootstrap("50ms", 0, &webhook(0, &format!("{{ env = \"{unset}\" }}")))?;
+    let path = origin.bootstrap(
+        "00:00:00.05",
+        0,
+        &webhook(0, &format!("{{ env = \"{unset}\" }}")),
+    )?;
     match tsong::serve_until(&path, async {}).await {
         Err(error @ tsong::Error::Webhook(_)) => assert_eq!(
             error.to_string(),
@@ -231,7 +235,7 @@ async fn a_signed_webhook_reloads_without_waiting_for_the_poll() -> TestResult {
     let first = origin.commit("https://one.test", port)?;
     // PATH is always set, so it stands in for the secret's variable.
     let (stop, server) =
-        serve(origin.bootstrap("1h", admin, &webhook(hooks, "{ env = \"PATH\" }"))?);
+        serve(origin.bootstrap("01:00:00", admin, &webhook(hooks, "{ env = \"PATH\" }"))?);
     serving(admin, &first).await?;
 
     let second = origin.commit("https://two.test", port)?;

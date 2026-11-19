@@ -47,10 +47,3 @@ deny = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-
-[advisories]
-# A plain cargo deny check reads advisories too. These ignores match
-# .cargo/audit.toml, which CI uses; change both together.
-ignore = [
-    { id = "RUSTSEC-2026-0542", reason = "humantime is unmaintained; replaced in issue #15" },
-]

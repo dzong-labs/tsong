@@ -114,7 +114,7 @@ fn failures(metrics: &Metrics) -> u64 {
 #[tokio::test]
 async fn failed_jwks_fetches_are_counted_and_audited_and_so_is_the_recovery() -> TestResult {
     let dir = tempfile::tempdir()?;
-    let config = okta_config(dir.path(), "1h")?;
+    let config = okta_config(dir.path(), "01:00:00")?;
     let okta = okta(&config)?;
     let lines = Arc::new(Recorded::default());
     let metrics = Metrics::default();
@@ -153,7 +153,7 @@ async fn failed_jwks_fetches_are_counted_and_audited_and_so_is_the_recovery() ->
 #[tokio::test]
 async fn the_refresher_refetches_expired_keys_and_reports_their_age() -> TestResult {
     let dir = tempfile::tempdir()?;
-    let config = okta_config(dir.path(), "1h")?;
+    let config = okta_config(dir.path(), "01:00:00")?;
     let clock = Arc::new(ManualClock::at(NOW));
     let fetcher = Arc::new(FakeFetcher::with(vec![]));
     let validator = tsong_validate::Validator::new(&config, fetcher.clone(), clock.clone());
@@ -200,7 +200,7 @@ async fn the_refresher_refetches_expired_keys_and_reports_their_age() -> TestRes
 #[tokio::test]
 async fn a_refresher_runs_on_its_tick_until_dropped() -> TestResult {
     let dir = tempfile::tempdir()?;
-    let config = okta_config(dir.path(), "1s")?;
+    let config = okta_config(dir.path(), "00:00:01")?;
     let fetcher = Arc::new(FakeFetcher::with(vec![]));
     let clock = Arc::new(tsong_clock::SystemClock);
     let validator = tsong_validate::Validator::new(&config, fetcher.clone(), clock.clone());
@@ -233,7 +233,7 @@ async fn a_refresher_runs_on_its_tick_until_dropped() -> TestResult {
 #[test]
 fn a_refresher_needs_a_runtime() -> TestResult {
     let dir = tempfile::tempdir()?;
-    let config = okta_config(dir.path(), "1h")?;
+    let config = okta_config(dir.path(), "01:00:00")?;
     let clock = Arc::new(ManualClock::at(NOW));
     let validator =
         tsong_validate::Validator::new(&config, Arc::new(FakeFetcher::default()), clock.clone());

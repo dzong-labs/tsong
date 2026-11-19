@@ -24,7 +24,7 @@ folder = "tsong"                          # the repo folder holding tsong.toml
 checkout = "/var/lib/tsong/config.git"    # a bare clone Tsong keeps
 ssh_key = "/etc/tsong/deploy_key"
 known_hosts = "/etc/tsong/known_hosts"
-poll = "5m"
+poll = "00:05:00"
 
 [admin]
 listen = "0.0.0.0:8445"                   # GET /status

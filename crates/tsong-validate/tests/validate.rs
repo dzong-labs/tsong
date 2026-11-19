@@ -19,8 +19,8 @@ const CONFIG: &str = r#"
 [issuer]
 url = "https://tsong.test"
 listen = "127.0.0.1:0"
-token_lifetime = "15m"
-clock_skew = "30s"
+token_lifetime = "00:15:00"
+clock_skew = "00:00:30"
 
 [issuer.signing]
 provider = "file"
@@ -42,7 +42,7 @@ sub_prefix = "test"
 issuer = "https://issuer.test"
 audiences = ["tsong", "tsong-alt"]
 algorithms = ["ES256", "ES384"]
-jwks_refetch = "60s"
+jwks_refetch = "00:01:00"
 "#;
 
 const INTROSPECTED: &str = r#"
@@ -608,8 +608,8 @@ async fn keys_younger_than_the_retry_interval_still_expire_on_time() -> TestResu
     let fetcher = Arc::new(FakeFetcher::with(vec![key.jwk()]));
     let clock = Arc::new(ManualClock::at(NOW));
     let text = CONFIG.replace(
-        "jwks_refetch = \"60s\"",
-        "jwks_refetch = \"60s\"\njwks_max_age = \"5s\"",
+        "jwks_refetch = \"00:01:00\"",
+        "jwks_refetch = \"00:01:00\"\njwks_max_age = \"00:00:05\"",
     );
     let validator = Validator::new(&Config::from_toml(&text)?, fetcher.clone(), clock.clone());
     let token = key.sign(&claims())?;

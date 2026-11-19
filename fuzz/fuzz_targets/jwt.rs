@@ -17,8 +17,8 @@ const CONFIG: &str = r#"
 [issuer]
 url = "https://tsong.test"
 listen = "127.0.0.1:0"
-token_lifetime = "15m"
-clock_skew = "30s"
+token_lifetime = "00:15:00"
+clock_skew = "00:00:30"
 
 [issuer.signing]
 provider = "file"

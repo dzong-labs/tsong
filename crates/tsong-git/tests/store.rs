@@ -34,8 +34,8 @@ fn config(max_entries: u32) -> String {
 [issuer]
 url = "https://tsong.example.com"
 listen = "127.0.0.1:8444"
-token_lifetime = "15m"
-clock_skew = "30s"
+token_lifetime = "00:15:00"
+clock_skew = "00:00:30"
 
 [issuer.signing]
 provider = "file"

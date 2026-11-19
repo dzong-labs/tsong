@@ -19,7 +19,7 @@ path = "tsong.toml"
 # checkout = "/var/lib/tsong/config.git"
 # ssh_key = "/etc/tsong/ssh/deploy_key"
 # known_hosts = "/etc/tsong/ssh/known_hosts"
-# poll = "5m"
+# poll = "00:05:00"
 
 # ── admin listener ────────────────────────────────────
 # GET /status and GET /metrics, for clients in the config's gateway.allow.
@@ -33,4 +33,4 @@ listen = "0.0.0.0:8445"
 [health]
 listen = "0.0.0.0:8447"
 allow = ["0.0.0.0/0", "::/0"]
-drain = "5s"    # readiness fails this long on shutdown before the listeners close
+drain = "00:00:05"  # readiness fails this long on shutdown before the listeners close
