@@ -6,7 +6,7 @@ use std::fmt;
 
 use url::Url;
 
-use crate::{ANY, Config, KeyProvider, KeyState, Policy, Validation};
+use crate::{ANY, Config, KeyProvider, KeyState, Policy, PolicyKind, Validation};
 
 /// Claims Tsong sets on every token it issues, which claim mapping may not
 /// write.
@@ -235,8 +235,9 @@ impl Config {
             } else if !hosts.insert(route.host.to_ascii_lowercase()) {
                 problems.push(format!("routes repeats host {:?}", route.host));
             }
-            check_policy(name, &route.audiences, &AUDIENCES, problems);
-            check_policy(name, &route.scopes, &SCOPES, problems);
+            for (kind, policy) in route.policies() {
+                check_policy(name, kind, policy, problems);
+            }
             if route.read_timeout.is_some_and(|timeout| timeout.is_zero()) {
                 problems.push(format!("route {name:?} read_timeout must be above zero"));
             }
@@ -249,39 +250,13 @@ impl Config {
     }
 }
 
-/// How a policy's problems name its list and the values in it.
-struct Names {
-    /// The route key the policy is under, such as `audiences`.
-    list: &'static str,
-    /// One value, such as `audience`.
-    value: &'static str,
-    /// One value with its article, such as `an audience`.
-    a_value: &'static str,
-}
-
-const AUDIENCES: Names = Names {
-    list: "audiences",
-    value: "audience",
-    a_value: "an audience",
-};
-
-const SCOPES: Names = Names {
-    list: "scopes",
-    value: "scope",
-    a_value: "a scope",
-};
-
 /// Checks a route's audience or scope policy: every value names one value
 /// once, `"*"` stands alone in `allow` and nowhere else, `deny` is set only
 /// under `"*"`, and every `require` value is one `allow` admits and not
 /// one `deny` lists.
-fn check_policy(name: &str, policy: &Policy, names: &Names, problems: &mut Vec<String>) {
-    let Names {
-        list,
-        value: noun,
-        a_value,
-    } = names;
-    let any = policy.allow.iter().any(|value| value == ANY);
+fn check_policy(name: &str, kind: PolicyKind, policy: &Policy, problems: &mut Vec<String>) {
+    let (list, noun, a_noun) = (kind.key(), kind.noun(), kind.a_noun());
+    let any = policy.allows_any();
     for (field, values) in [
         ("allow", &policy.allow),
         ("require", &policy.require),
@@ -310,7 +285,7 @@ fn check_policy(name: &str, policy: &Policy, names: &Names, problems: &mut Vec<S
                 ));
             } else if value.contains(char::is_whitespace) {
                 problems.push(format!(
-                    "route {name:?} {list}.{field} has {value:?}; {a_value} holds no whitespace"
+                    "route {name:?} {list}.{field} has {value:?}; {a_noun} holds no whitespace"
                 ));
             } else if field == "require" && any && policy.denies(value) {
                 problems.push(format!(

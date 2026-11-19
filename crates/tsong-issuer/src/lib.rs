@@ -24,7 +24,9 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tsong_clock::Clock;
-use tsong_config::{Config, RESERVED_CLAIMS, Refusal, Route, RouteTable, allowed, client_ip};
+use tsong_config::{
+    Config, Policy, PolicyKind, RESERVED_CLAIMS, Refusal, Route, RouteTable, allowed, client_ip,
+};
 use tsong_keys::KeySet;
 use tsong_validate::{Validated, Validator, scopes};
 
@@ -168,11 +170,14 @@ impl Issuer {
         })?;
         let inbound_audiences = audiences(validated.claims())?;
         if let Some(refusal) = route.audiences.refusal(&inbound_audiences) {
-            return Err(ExchangeError::InvalidTarget(refused(
-                refusal, AUDIENCE, audience,
-            )));
+            return Err(refused(refusal, PolicyKind::Audiences, audience));
         }
-        let granted = granted_scopes(route, audience, &validated, request.scope.as_deref())?;
+        let granted = granted_scopes(
+            &route.scopes,
+            audience,
+            &validated,
+            request.scope.as_deref(),
+        )?;
         let original_sub = validated
             .subject()
             .filter(|sub| !sub.is_empty())
@@ -398,27 +403,19 @@ fn audiences(claims: &serde_json::Map<String, Value>) -> Result<Vec<&str>, Excha
     }
 }
 
-/// How a refusal names one of the subject token's values, and several.
-struct Noun {
-    one: &'static str,
-    many: &'static str,
+/// The OAuth error a refusal by a route's `kind` of policy is reported as.
+fn refusal_error(kind: PolicyKind, reason: String) -> ExchangeError {
+    match kind {
+        PolicyKind::Audiences => ExchangeError::InvalidTarget(reason),
+        PolicyKind::Scopes => ExchangeError::InvalidScope(reason),
+    }
 }
-
-const AUDIENCE: Noun = Noun {
-    one: "audience",
-    many: "audiences",
-};
-
-const SCOPE: Noun = Noun {
-    one: "scope",
-    many: "scopes",
-};
 
 /// Why the route for `target` refused the subject token's audiences or
 /// scopes.
-fn refused(refusal: Refusal<'_>, noun: Noun, target: &str) -> String {
-    let Noun { one, many } = noun;
-    match refusal {
+fn refused(refusal: Refusal<'_>, kind: PolicyKind, target: &str) -> ExchangeError {
+    let (one, many) = (kind.noun(), kind.key());
+    let reason = match refusal {
         Refusal::NotAllowed => {
             format!("none of the subject token's {many} is allowed for {target:?}")
         }
@@ -434,18 +431,21 @@ fn refused(refusal: Refusal<'_>, noun: Noun, target: &str) -> String {
         Refusal::Denied(value) => {
             format!("the subject token's {one} {value:?} is denied for {target:?}")
         }
-    }
+    };
+    refusal_error(kind, reason)
 }
 
-/// The subject token's scopes, once the route for `target` accepts them,
-/// narrowed to the scopes requested when there is a request.
+/// The subject token's scopes, once the scope `policy` of the route for
+/// `target` accepts them, narrowed to the scopes requested when there is a
+/// request.
 fn granted_scopes(
-    route: &Route,
+    policy: &Policy,
     target: &str,
     validated: &Validated,
     requested: Option<&str>,
 ) -> Result<Vec<String>, ExchangeError> {
-    let held = scopes(validated.claims());
+    // Sorted and without repeats, as `scopes` collects them into a set.
+    let held: Vec<&str> = scopes(validated.claims()).into_iter().collect();
     // An `scp` array item is one scope. Empty, or holding whitespace, it
     // would turn into no scope or several in the minted `scope` string.
     if let Some(malformed) = held
@@ -456,45 +456,54 @@ fn granted_scopes(
             "the subject token's scope {malformed:?} is not a single scope"
         )));
     }
-    let policy = &route.scopes;
-    let inbound: Vec<&str> = held.iter().copied().collect();
-    if let Some(refusal) = policy.refusal(&inbound) {
-        return Err(ExchangeError::InvalidScope(refused(refusal, SCOPE, target)));
+    if let Some(refusal) = policy.refusal(&held) {
+        return Err(refused(refusal, PolicyKind::Scopes, target));
     }
-    let granted = match requested {
-        None => inbound.iter().map(|scope| (*scope).to_owned()).collect(),
+    let granted: Vec<String> = match requested {
+        // `refusal` proved the subject token holds every required scope,
+        // and every one it holds is granted.
+        None => held.iter().map(|scope| (*scope).to_owned()).collect(),
         Some(requested) => {
-            let mut granted = Vec::new();
+            let mut narrowed: Vec<&str> = Vec::new();
             for scope in requested.split_whitespace() {
-                if !held.contains(scope) {
+                if held.binary_search(&scope).is_err() {
                     return Err(ExchangeError::InvalidScope(format!(
                         "the subject token lacks scope {scope:?}"
                     )));
                 }
-                if !granted.iter().any(|kept| kept == scope) {
-                    granted.push(scope.to_owned());
+                if !narrowed.contains(&scope) {
+                    narrowed.push(scope);
                 }
             }
-            granted.sort();
-            granted
+            // The minted token keeps every scope the route requires. The
+            // subject token holds them all, so only the request can drop
+            // one.
+            if let Some(dropped) = policy
+                .require
+                .iter()
+                .find(|required| !narrowed.contains(&required.as_str()))
+            {
+                return Err(ExchangeError::InvalidScope(format!(
+                    "the requested scope drops {dropped:?}, which {target:?} requires"
+                )));
+            }
+            narrowed.sort_unstable();
+            narrowed.into_iter().map(str::to_owned).collect()
         }
     };
-    // The minted token keeps every scope the route requires. The subject
-    // token holds them all, so only a requested scope can drop one.
-    if let Some(dropped) = policy
-        .require
-        .iter()
-        .find(|required| !granted.contains(required))
-    {
-        return Err(ExchangeError::InvalidScope(format!(
-            "the requested scope drops {dropped:?}, which {target:?} requires"
-        )));
-    }
     // A minted token holds only scopes the subject token held and the
-    // route accepts.
-    debug_assert!(granted.iter().all(|scope| {
-        held.contains(scope.as_str()) && policy.allows(scope) && !policy.denies(scope)
-    }));
+    // route accepts, and every scope the route requires.
+    debug_assert!(
+        granted
+            .iter()
+            .all(|scope| { held.binary_search(&scope.as_str()).is_ok() && policy.admits(scope) })
+    );
+    debug_assert!(
+        policy
+            .require
+            .iter()
+            .all(|required| granted.contains(required))
+    );
     Ok(granted)
 }
 

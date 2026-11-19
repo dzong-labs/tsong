@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use ipnet::IpNet;
 
-use crate::{ANY, Config, Validation};
+use crate::{Config, Validation};
 
 /// The longest `jwks_max_age` that doesn't warn.
 const LONGEST_JWKS_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
@@ -54,15 +54,13 @@ impl Config {
             let name = &route.name;
             // `deny` narrowing a "*" is a decision already; `require` isn't,
             // as it doesn't limit what else a token may carry.
-            for (list, noun, policy) in [
-                ("audiences", "audience", &route.audiences),
-                ("scopes", "scope", &route.scopes),
-            ] {
+            for (kind, policy) in route.policies() {
+                let (list, noun) = (kind.key(), kind.noun());
                 if policy.allow.is_empty() {
                     warnings.push(format!(
                         "route {name:?}: {list}.allow is empty; every request will be denied"
                     ));
-                } else if policy.deny.is_empty() && policy.allow.iter().any(|value| value == ANY) {
+                } else if policy.deny.is_empty() && policy.allows_any() {
                     let alongside = if policy.require.is_empty() {
                         ""
                     } else {
@@ -76,9 +74,7 @@ impl Config {
             let policy = &route.audiences;
             if !policy.allow.is_empty()
                 && !jwt_audiences.is_empty()
-                && !jwt_audiences
-                    .iter()
-                    .any(|aud| policy.allows(aud) && !policy.denies(aud))
+                && !jwt_audiences.iter().any(|aud| policy.admits(aud))
             {
                 warnings.push(format!(
                     "route {name:?}: audiences admits no audience a trusted issuer accepts; every token will be refused"

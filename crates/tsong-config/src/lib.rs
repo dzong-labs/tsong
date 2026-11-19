@@ -398,6 +398,17 @@ impl Policy {
         self.deny.iter().any(|denied| denied == value)
     }
 
+    /// Whether the policy admits `value` on its own: `allow` admits it and
+    /// `deny` doesn't list it.
+    pub fn admits(&self, value: &str) -> bool {
+        self.allows(value) && !self.denies(value)
+    }
+
+    /// Whether `allow` is `"*"`, admitting any value.
+    pub fn allows_any(&self) -> bool {
+        self.allow.iter().any(|allowed| allowed == ANY)
+    }
+
     /// Why the policy refuses a token carrying these values, or `None` when
     /// it accepts them. The token must carry at least one value `allow`
     /// admits, none outside it, every one `require` lists and none `deny`
@@ -451,11 +462,57 @@ pub enum Refusal<'a> {
     Denied(&'a str),
 }
 
+/// Which of a route's policies a [`Policy`] is, and how messages name it
+/// and the values it holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyKind {
+    /// `[routes.audiences]`, over the token's `aud` values.
+    Audiences,
+    /// `[routes.scopes]`, over the token's `scope` or `scp` values.
+    Scopes,
+}
+
+impl PolicyKind {
+    /// The route key the policy is under, which also names several of its
+    /// values: `audiences` or `scopes`.
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Audiences => "audiences",
+            Self::Scopes => "scopes",
+        }
+    }
+
+    /// One value: `audience` or `scope`.
+    pub const fn noun(self) -> &'static str {
+        match self {
+            Self::Audiences => "audience",
+            Self::Scopes => "scope",
+        }
+    }
+
+    /// One value with its indefinite article: `an audience` or `a scope`.
+    pub const fn a_noun(self) -> &'static str {
+        match self {
+            Self::Audiences => "an audience",
+            Self::Scopes => "a scope",
+        }
+    }
+}
+
 impl Route {
     /// The longest the gateway waits on this route's downstream between
     /// reads.
     pub fn read_timeout(&self, gateway: &Gateway) -> Duration {
         self.read_timeout.unwrap_or(gateway.read_timeout)
+    }
+
+    /// The route's policies, each with its kind, in the order they are
+    /// checked.
+    pub fn policies(&self) -> [(PolicyKind, &Policy); 2] {
+        [
+            (PolicyKind::Audiences, &self.audiences),
+            (PolicyKind::Scopes, &self.scopes),
+        ]
     }
 }
 
