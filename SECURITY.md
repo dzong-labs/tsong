@@ -31,12 +31,13 @@ From 0.2.0, each release is built and signed by the [release workflow](.github/w
 With the [GitHub CLI](https://cli.github.com):
 
 ```sh
-gh attestation verify tsong-x86_64-linux --repo marklauter/tsong
-gh attestation verify oci://ghcr.io/marklauter/tsong:v0.2.0 --repo marklauter/tsong
+gh attestation verify tsong-x86_64-linux --repo marklauter/tsong   --signer-workflow marklauter/tsong/.github/workflows/release.yml
+gh attestation verify SHA256SUMS --repo marklauter/tsong   --signer-workflow marklauter/tsong/.github/workflows/release.yml
+gh attestation verify oci://ghcr.io/marklauter/tsong:v0.2.0 --repo marklauter/tsong   --signer-workflow marklauter/tsong/.github/workflows/release.yml
 sha256sum -c SHA256SUMS
 ```
 
-The first two fail unless the file was built by this repository's release workflow. The release binary is reproducible: `scripts/reproducible.sh` rebuilds it bit for bit from the tagged commit.
+Each fails unless the file was built and signed by this repository's release workflow, from a tagged commit on `main`. A version is signed once: the workflow refuses to change a published release or to move an existing image tag. The release binary is reproducible: `scripts/reproducible.sh` rebuilds it bit for bit from the tagged commit.
 
 ## Supported versions
 
