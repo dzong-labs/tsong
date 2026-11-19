@@ -63,6 +63,17 @@ jobs:
     - name: Docs
       run: cargo doc --workspace --no-deps --locked
 
+    # The workspace lints, unsafe_code = "forbid" among them, reach only
+    # the crates that inherit them.
+    - name: Every crate inherits the workspace lints
+      run: |
+        missing=$(cargo metadata --no-deps --format-version 1 --locked |
+          jq -r '.packages[] | select(.manifest_path | contains("/crates/")) | .manifest_path' |
+          while read -r manifest; do
+            grep -Pzq '\[lints\]\s*\nworkspace = true' "$manifest" || echo "$manifest"
+          done)
+        if [ -n "$missing" ]; then echo "missing [lints] workspace = true:"; echo "$missing"; exit 1; fi
+
   test:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
@@ -114,6 +125,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
+    env:
+      # The runner's own stable cargo reads the metadata; the components
+      # rust-toolchain.toml names would go unused.
+      RUSTUP_TOOLCHAIN: stable
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3

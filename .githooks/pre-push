@@ -1,8 +1,8 @@
 #!/bin/sh
 # The slow CI checks, before each push: coverage, the dependency audit, and
 # the dependency graph check. Needs cargo-llvm-cov, cargo-audit and
-# cargo-deny installed. Mutation testing runs on
-# Linux only: in CI, or locally through scripts/linux.sh.
+# cargo-deny installed. Mutation testing runs on Linux only: in CI, or
+# locally through scripts/linux.sh.
 set -e
 cargo llvm-cov --workspace --locked --fail-under-lines 95 --summary-only
 cargo audit --deny warnings

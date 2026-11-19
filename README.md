@@ -84,7 +84,7 @@ deploy/podman/run.sh stop     # SIGTERM, then the drain
 
 `rust-toolchain.toml` installs the stable toolchain with clippy, rustfmt and rust-analyzer. Enable the hooks once per clone. Before each commit they check formatting, lints, docs and tests; before each push, coverage, the dependency audit and `cargo deny`, as CI does. The push checks need `cargo-llvm-cov`, `cargo-audit` and `cargo-deny`.
 
-`deny.toml` allows crates only from crates.io and under permissive licenses, and bans wildcard versions and OpenSSL. Tsong's own code is safe Rust: the workspace forbids `unsafe`.
+`deny.toml` allows crates only from crates.io and under permissive licenses, and bans wildcard versions and OpenSSL. Tsong's own code is safe Rust: the workspace lints forbid `unsafe`, and CI checks that every crate inherits them.
 
 ```sh
 git config core.hooksPath .githooks

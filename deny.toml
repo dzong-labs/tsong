@@ -1,7 +1,6 @@
 # cargo-deny checks the dependency graph: where crates come from, which
-# licenses they carry, and which crates and versions are banned. Advisories
-# are checked by cargo audit, so the ignore list lives in one place,
-# .cargo/audit.toml.
+# licenses they carry, and which crates and versions are banned. CI and the
+# pre-push hook leave advisories to cargo audit:
 #
 #   cargo deny check bans licenses sources
 
@@ -32,13 +31,13 @@ confidence-threshold = 0.93
 [bans]
 # A version requirement of "*" lets any release in, so none is allowed.
 wildcards = "deny"
-# Path dependencies within the workspace are exact, not wildcards.
-allow-wildcard-paths = true
 # Two versions of one crate build twice and audit twice. It isn't a fault
 # on its own, since it usually waits on an upstream release, so it warns.
 multiple-versions = "warn"
-# openssl would be a second TLS and crypto stack beside rustls and aws-lc-rs.
+# OpenSSL would be a second TLS and crypto stack beside rustls and
+# aws-lc-rs; native-tls is how it usually arrives.
 deny = [
+    { crate = "native-tls", reason = "rustls and aws-lc-rs are Tsong's TLS and crypto" },
     { crate = "openssl", reason = "rustls and aws-lc-rs are Tsong's TLS and crypto" },
     { crate = "openssl-sys", reason = "rustls and aws-lc-rs are Tsong's TLS and crypto" },
 ]
@@ -48,3 +47,10 @@ deny = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+[advisories]
+# A plain cargo deny check reads advisories too. These ignores match
+# .cargo/audit.toml, which CI uses; change both together.
+ignore = [
+    { id = "RUSTSEC-2026-0542", reason = "humantime is unmaintained; replaced in issue #15" },
+]
