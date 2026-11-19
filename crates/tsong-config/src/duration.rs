@@ -48,7 +48,9 @@ fn parse_duration(text: &str) -> Result<Duration, DurationError> {
         .checked_mul(SECONDS_PER_DAY)
         .and_then(|days| days.checked_add(hours * 3600 + minutes * 60 + seconds))
         .ok_or(DurationError)?;
-    Ok(Duration::from_secs(whole) + Duration::from_nanos(nanos))
+    Duration::from_secs(whole)
+        .checked_add(Duration::from_nanos(nanos))
+        .ok_or(DurationError)
 }
 
 /// `text` as a number, when it is only ASCII digits and its length is in
@@ -107,6 +109,11 @@ mod tests {
             ("00:00:00.0000001", Duration::from_nanos(100)),
             ("00:00:00.1234567", Duration::from_nanos(123_456_700)),
             ("00:00:00.9999999", Duration::from_nanos(999_999_900)),
+            // The longest: u64::MAX seconds and the largest fraction.
+            (
+                "213503982334601.07:00:15.9999999",
+                Duration::new(u64::MAX, 999_999_900),
+            ),
             (
                 "2.03:04:05.6",
                 Duration::new(2 * 86_400 + 3 * 3600 + 4 * 60 + 5, 600_000_000),
@@ -148,6 +155,8 @@ mod tests {
             "00:aa:00",
             "99999999999999999999.00:00:00",
             "999999999999999999999.00:00:00",
+            // One second past u64::MAX seconds.
+            "213503982334601.07:00:16",
             "١٢:٠٠:٠٠",
         ] {
             assert_eq!(parse_duration(text), Err(DurationError), "{text:?}");
