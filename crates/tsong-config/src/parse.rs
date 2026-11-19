@@ -53,7 +53,7 @@ refuse_removed_keys! {
     refuse_allowed_audiences: "allowed_audiences" =>
         "[routes.audiences]; move its values to audiences.allow, which also refuses a token carrying any audience outside it";
     refuse_allowed_scopes: "allowed_scopes" =>
-        "[routes.scopes]; move its values to scopes.allow, which also refuses a token carrying no scope it allows";
+        "[routes.scopes]; move its values to scopes.allow, which also refuses a token carrying any scope outside it";
     refuse_required_scopes: "required_scopes" =>
         "[routes.scopes]; move its values to scopes.require";
 }

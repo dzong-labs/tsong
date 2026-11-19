@@ -251,13 +251,18 @@ impl Config {
     }
 }
 
-/// Checks a route's audience or scope policy: every value names one value
-/// once, `"*"` stands alone in `allow` and nowhere else, `deny` is set only
-/// under `"*"`, and every `require` value is one `allow` admits and not
-/// one `deny` lists.
+/// Checks a route's audience or scope policy: `allow` is not empty, every
+/// value names one value once, `"*"` stands alone in `allow` and nowhere
+/// else, `deny` is set only under `"*"`, and every `require` value is one
+/// `allow` admits and not one `deny` lists.
 fn check_policy(name: &str, kind: PolicyKind, policy: &Policy, problems: &mut Vec<String>) {
     let (list, noun, a_noun) = (kind.key(), kind.noun(), kind.a_noun());
     let any = policy.allows_any();
+    if policy.allow.is_empty() {
+        problems.push(format!(
+            "route {name:?} {list}.allow is empty; omit allow to admit any {noun}"
+        ));
+    }
     for (field, values) in [
         ("allow", &policy.allow),
         ("require", &policy.require),
@@ -301,7 +306,7 @@ fn check_policy(name: &str, kind: PolicyKind, policy: &Policy, problems: &mut Ve
     }
     if !any && !policy.deny.is_empty() {
         problems.push(format!(
-            "route {name:?} {list}.deny applies only when {list}.allow is \"*\"; remove the denied {list} from allow instead"
+            "route {name:?} {list}.deny applies only when {list}.allow is \"*\" or omitted; remove the denied {list} from allow instead"
         ));
     }
 }

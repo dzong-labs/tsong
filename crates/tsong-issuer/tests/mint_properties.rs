@@ -230,10 +230,10 @@ proptest! {
     #![proptest_config(config())]
 
     /// The `policy` route, which allows any scope and denies `admin`,
-    /// accepts a subject token exactly when it carries a scope and not
-    /// `admin`, and the request asks for no scope it doesn't hold. A token
-    /// it accepts is minted with the requested scopes, or else the subject
-    /// token's; one it refuses is `invalid_scope`.
+    /// accepts a subject token exactly when it doesn't carry `admin` and
+    /// the request asks for no scope it doesn't hold. A token it accepts is
+    /// minted with the requested scopes, or else the subject token's; one
+    /// it refuses is `invalid_scope`.
     #[test]
     fn a_route_s_scope_policy_decides_the_exchange(
         held in scopes_from(&POLICY_SCOPES),
@@ -244,8 +244,7 @@ proptest! {
         let granted: BTreeSet<&str> = requested
             .as_ref()
             .map_or_else(|| held_set.clone(), |requested| requested.iter().copied().collect());
-        let accepted = !held_set.is_empty()
-            && !held_set.contains("admin")
+        let accepted = !held_set.contains("admin")
             && granted.is_subset(&held_set);
         match result {
             Ok(minted) => {

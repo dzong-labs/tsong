@@ -73,8 +73,8 @@ name = "open"
 host = "open.test"
 downstream = "https://open-lb.test"
 append_audience = ""
-audiences = { allow = ["*"] }
-scopes = { allow = ["*"] }
+audiences = {}
+scopes = {}
 allow = ["10.1.0.0/16"]
 
 [[routes]]
@@ -92,14 +92,6 @@ downstream = "https://policy-lb.test"
 append_audience = "policy.test"
 audiences = { allow = ["*"], require = ["tsong"], deny = ["admin"] }
 scopes = { allow = ["*"], deny = ["admin"] }
-
-[[routes]]
-name = "closed"
-host = "closed.test"
-downstream = "https://closed-lb.test"
-append_audience = "closed.test"
-audiences = { allow = ["tsong"] }
-scopes = { allow = [] }
 "#;
 
 /// Every exchange event the issuer reported.

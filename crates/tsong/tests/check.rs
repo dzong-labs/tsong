@@ -87,8 +87,9 @@ name = "orders"
 host = "orders.example.com"
 downstream = "https://orders-lb.example.com"
 append_audience = ""
-audiences = { allow = ["*"] }
-scopes = { allow = [] }
+audiences = { deny = ["admin"] }
+scopes = {}
+allow = []
 "#;
 
 #[tokio::test]
@@ -98,8 +99,7 @@ async fn check_reports_warnings_and_passes() -> TestResult {
     assert_eq!(
         tsong::run(args("check", &path)).await?,
         format!(
-            "warning: route \"orders\": audiences.allow has \"*\"; any audience is accepted\n\
-             warning: route \"orders\": scopes.allow is empty; every request will be denied\n\
+            "warning: route \"orders\": allow is empty; every client will be denied\n\
              {}: ok, signing with ES256 k1",
             path.display()
         )
@@ -123,7 +123,7 @@ async fn deny_warnings_fails_a_check_with_warnings() -> TestResult {
     assert!(
         error
             .to_string()
-            .ends_with("every request will be denied\nwarnings are denied")
+            .ends_with("every client will be denied\nwarnings are denied")
     );
 
     let clean = write_config(dir.path(), 0, true)?;
@@ -132,16 +132,8 @@ async fn deny_warnings_fails_a_check_with_warnings() -> TestResult {
         format!("{}: ok, signing with ES256 k1", clean.display())
     );
 
-    // A "*" that deny narrows is a decision, not a warning.
-    let narrowed = WARNED_ROUTE
-        .replace(
-            r#"audiences = { allow = ["*"] }"#,
-            r#"audiences = { allow = ["*"], deny = ["admin"] }"#,
-        )
-        .replace(
-            "scopes = { allow = [] }",
-            r#"scopes = { allow = ["orders.read"] }"#,
-        );
+    // An omitted allow, which admits any value, is not a warning.
+    let narrowed = WARNED_ROUTE.replace("allow = []\n", "");
     let narrowed = write_config_with(dir.path(), 0, 0, true, &narrowed)?;
     assert_eq!(
         tsong::run(deny(&narrowed)).await?,

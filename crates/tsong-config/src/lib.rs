@@ -364,15 +364,18 @@ impl From<RouteDef> for Route {
 
 /// A route's policy for one list of the subject token's values, its
 /// audiences or its scopes, checked once the token is validated. The token
-/// must pass every check; the first that fails refuses it. The minted
-/// token's audiences are not affected; its scopes may be narrowed by the
-/// request, but always keep every one `require` lists.
+/// must pass every check; the first that fails refuses it. A token carrying
+/// no value passes unless `require` lists one. The minted token's audiences
+/// are not affected; its scopes may be narrowed by the request, but always
+/// keep every one `require` lists.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
-    /// The values the token may carry: at least one of them, and none
-    /// outside them. Empty denies every token; `"*"`, alone, allows any
-    /// value, and then only `deny` narrows it.
+    /// The values the token may carry: any number of them, none included,
+    /// and none outside them. `require` names the values it must carry.
+    /// `"*"`, alone, allows any value, and then only `deny` narrows it.
+    /// Omitted, `"*"`. Empty is refused.
+    #[serde(default = "any")]
     pub allow: Vec<String>,
     /// The values the token must all carry. Each must be one `allow`
     /// admits. Empty or unset requires none.
@@ -410,26 +413,10 @@ impl Policy {
     }
 
     /// Why the policy refuses a token carrying these values, or `None` when
-    /// it accepts them. The token must carry at least one value `allow`
-    /// admits, none outside it, every one `require` lists and none `deny`
-    /// lists.
+    /// it accepts them. The token may carry no value outside `allow`, must
+    /// carry every one `require` lists, and may carry none `deny` lists.
     pub fn refusal<'a>(&'a self, values: &[&'a str]) -> Option<Refusal<'a>> {
-        if values.is_empty() {
-            return Some(Refusal::NoValue);
-        }
-        let mut admitted = false;
-        let mut outside = None;
-        for value in values {
-            if self.allows(value) {
-                admitted = true;
-            } else if outside.is_none() {
-                outside = Some(*value);
-            }
-        }
-        if !admitted {
-            return Some(Refusal::NotAllowed);
-        }
-        if let Some(outside) = outside {
+        if let Some(outside) = values.iter().find(|value| !self.allows(value)) {
             return Some(Refusal::Outside(outside));
         }
         if let Some(missing) = self
@@ -450,10 +437,6 @@ impl Policy {
 /// checks that failed, in the order they run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refusal<'a> {
-    /// The token carries no value.
-    NoValue,
-    /// The token carries values, but none `allow` admits.
-    NotAllowed,
     /// The token carries this value, which is outside `allow`.
     Outside(&'a str),
     /// The token lacks this value, which `require` lists.
@@ -506,8 +489,8 @@ impl Route {
         self.read_timeout.unwrap_or(gateway.read_timeout)
     }
 
-    /// The route's policies, each with its kind, in the order they are
-    /// checked.
+    /// The route's policies, each with its kind, for checks that treat
+    /// them alike.
     pub fn policies(&self) -> [(PolicyKind, &Policy); 2] {
         [
             (PolicyKind::Audiences, &self.audiences),
@@ -518,6 +501,11 @@ impl Route {
 
 /// The entry in an `allow` list that accepts any value.
 pub const ANY: &str = "*";
+
+/// The `allow` an omitted one stands for: `"*"`.
+fn any() -> Vec<String> {
+    vec![ANY.to_owned()]
+}
 
 /// The routes keyed by host, for lookup in constant time.
 #[derive(Debug, Clone, Default)]

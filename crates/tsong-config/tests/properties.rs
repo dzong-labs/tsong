@@ -215,10 +215,10 @@ fn route() -> Result<Route, url::ParseError> {
 }
 
 /// Checks `policy`'s answer for a token carrying `held` against a model of
-/// its four checks: the token is accepted exactly when it carries at least
-/// one value `allow` admits, none outside `allow`, every one `require`
-/// lists and none `deny` lists. A refusal names the first check that
-/// failed, and every check before it passed.
+/// its three checks: the token is accepted exactly when it carries no value
+/// outside `allow`, every one `require` lists and none `deny` lists. A
+/// refusal names the first check that failed, and every check before it
+/// passed.
 fn matches_model(policy: &Policy, held: &[&str]) -> Result<(), TestCaseError> {
     let Policy {
         allow,
@@ -226,31 +226,25 @@ fn matches_model(policy: &Policy, held: &[&str]) -> Result<(), TestCaseError> {
         deny,
     } = policy;
     let allowed = |value: &str| allow.iter().any(|a| a == ANY || a == value);
-    let one_allowed = held.iter().any(|value| allowed(value));
     let none_outside = held.iter().all(|value| allowed(value));
     let all_required = require.iter().all(|r| held.contains(&r.as_str()));
     let none_denied = !held.iter().any(|value| deny.iter().any(|d| d == value));
     let refusal = policy.refusal(held);
     prop_assert_eq!(
         refusal.is_none(),
-        one_allowed && none_outside && all_required && none_denied
+        none_outside && all_required && none_denied
     );
     match refusal {
         None => {}
-        Some(Refusal::NoValue) => prop_assert!(held.is_empty()),
-        Some(Refusal::NotAllowed) => {
-            prop_assert!(!one_allowed && !held.is_empty());
-        }
         Some(Refusal::Outside(value)) => {
-            prop_assert!(one_allowed);
             prop_assert!(held.contains(&value) && !allowed(value));
         }
         Some(Refusal::Missing(value)) => {
-            prop_assert!(one_allowed && none_outside);
+            prop_assert!(none_outside);
             prop_assert!(require.iter().any(|r| r == value) && !held.contains(&value));
         }
         Some(Refusal::Denied(value)) => {
-            prop_assert!(one_allowed && none_outside && all_required);
+            prop_assert!(none_outside && all_required);
             prop_assert!(held.contains(&value) && deny.iter().any(|d| d == value));
         }
     }
@@ -275,7 +269,7 @@ proptest! {
     }
 
     /// A route's scope policy matches the same model, so a token with no
-    /// scopes is refused by every route.
+    /// scopes is refused only by a route that requires one.
     #[test]
     fn a_route_accepts_only_scopes_its_policy_admits(
         allow in names(&SCOPES),
@@ -288,7 +282,10 @@ proptest! {
         let held: Vec<&str> = scopes.iter().map(String::as_str).collect();
         matches_model(&route.scopes, &held)?;
         if held.is_empty() {
-            prop_assert_eq!(route.scopes.refusal(&held), Some(Refusal::NoValue));
+            prop_assert_eq!(
+                route.scopes.refusal(&held).is_none(),
+                route.scopes.require.is_empty()
+            );
         }
     }
 

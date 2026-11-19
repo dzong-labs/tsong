@@ -270,30 +270,31 @@ async fn a_requested_scope_keeps_the_required_scopes() -> TestResult {
 }
 
 #[tokio::test]
-async fn a_subject_without_scopes_is_refused_by_every_route() -> TestResult {
+async fn a_subject_without_scopes_is_refused_only_by_a_require() -> TestResult {
     let h = harness()?;
-    for host in [
-        "orders.test",
-        "open.test",
-        "billing.test",
-        "policy.test",
-        "closed.test",
-    ] {
-        for scopes in [
+    let no_scopes = || {
+        [
             json!({ "scope": null }),
             json!({ "scope": "" }),
             json!({ "scope": " ", "scp": [] }),
-        ] {
-            let claims = subject(scopes);
-            assert_eq!(
-                refused(&h, request(&h, host, claims)).await?,
-                (
-                    "invalid_scope",
-                    format!("the subject token has no scope, and {host:?} requires one")
-                ),
-                "{host}"
-            );
+        ]
+    };
+    // An omitted allow, a "*" and a named allow all admit no scope.
+    for host in ["open.test", "policy.test", "orders.test"] {
+        for scopes in no_scopes() {
+            let (response, _) = exchanged(&h, request(&h, host, subject(scopes))).await?;
+            assert_eq!(response.scope, None, "{host}");
         }
+    }
+    for scopes in no_scopes() {
+        assert_eq!(
+            refused(&h, request(&h, "billing.test", subject(scopes))).await?,
+            (
+                "invalid_scope",
+                r#"the subject token lacks scope "orders.read", which "billing.test" requires"#
+                    .into()
+            )
+        );
     }
     Ok(())
 }
@@ -317,14 +318,15 @@ async fn the_route_refuses_scopes_outside_the_allowed_ones() -> TestResult {
 }
 
 #[tokio::test]
-async fn the_subject_must_carry_a_scope_the_route_allows() -> TestResult {
+async fn the_subject_may_carry_no_scope_the_route_does_not_allow() -> TestResult {
     let h = harness()?;
     let claims = subject(json!({ "scope": "admin root" }));
     assert_eq!(
         refused(&h, request(&h, "orders.test", claims)).await?,
         (
             "invalid_scope",
-            r#"none of the subject token's scopes is allowed for "orders.test""#.into()
+            r#"the subject token's scope "admin" is outside the scopes allowed for "orders.test""#
+                .into()
         )
     );
     Ok(())
@@ -365,28 +367,15 @@ async fn an_scp_item_must_be_a_single_scope() -> TestResult {
 }
 
 #[tokio::test]
-async fn a_route_with_no_allowed_scopes_refuses_every_subject() -> TestResult {
-    let h = harness()?;
-    let claims = subject(json!({ "scope": "orders.read" }));
-    assert_eq!(
-        refused(&h, request(&h, "closed.test", claims)).await?,
-        (
-            "invalid_scope",
-            r#"none of the subject token's scopes is allowed for "closed.test""#.into()
-        )
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn the_subject_must_carry_an_audience_the_route_allows() -> TestResult {
+async fn the_subject_may_carry_no_audience_the_route_does_not_allow() -> TestResult {
     let h = harness()?;
     let claims = subject(json!({ "aud": ["api", "other"] }));
     assert_eq!(
         refused(&h, request(&h, "orders.test", claims)).await?,
         (
             "invalid_target",
-            r#"none of the subject token's audiences is allowed for "orders.test""#.into()
+            r#"the subject token's audience "api" is outside the audiences allowed for "orders.test""#
+                .into()
         )
     );
     let claims = subject(json!({ "aud": ["tsong"] }));

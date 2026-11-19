@@ -3,11 +3,12 @@
 //! [`Issuer::exchange`] takes a subject token from any trusted issuer and
 //! an audience naming a route's host, and returns a token Tsong signs for
 //! that route. The route filters the subject token's audiences, then its
-//! scopes: the token must carry at least one value the route allows, none
-//! outside them, every value the route requires and none it denies. The
-//! minted token keeps the subject token's audiences and scopes, narrowed
-//! to the requested scopes but always keeping the required ones, and adds
-//! the route's `append_audience`. Its `sub` is the trusted issuer's
+//! scopes: the token may carry no value outside those the route allows,
+//! must carry every value the route requires, and may carry none it
+//! denies. A token carrying no audience or no scope passes unless the
+//! route requires one. The minted token keeps the subject token's
+//! audiences and scopes, narrowed to the requested scopes but always
+//! keeping the required ones, and adds the route's `append_audience`. Its `sub` is the trusted issuer's
 //! `sub_prefix`, a `:`, and the subject, and its RFC 9493 `sub_id` keeps the
 //! subject token's own `iss` and `sub`. [`router`] serves the token
 //! endpoint, the JWKS and the discovery document over HTTP.
@@ -403,25 +404,11 @@ fn audiences(claims: &serde_json::Map<String, Value>) -> Result<Vec<&str>, Excha
     }
 }
 
-/// The OAuth error a refusal by a route's `kind` of policy is reported as.
-fn refusal_error(kind: PolicyKind, reason: String) -> ExchangeError {
-    match kind {
-        PolicyKind::Audiences => ExchangeError::InvalidTarget(reason),
-        PolicyKind::Scopes => ExchangeError::InvalidScope(reason),
-    }
-}
-
 /// Why the route for `target` refused the subject token's audiences or
-/// scopes.
+/// scopes, as the OAuth error for that `kind` of policy.
 fn refused(refusal: Refusal<'_>, kind: PolicyKind, target: &str) -> ExchangeError {
     let (one, many) = (kind.noun(), kind.key());
     let reason = match refusal {
-        Refusal::NotAllowed => {
-            format!("none of the subject token's {many} is allowed for {target:?}")
-        }
-        Refusal::NoValue => {
-            format!("the subject token has no {one}, and {target:?} requires one")
-        }
         Refusal::Outside(value) => format!(
             "the subject token's {one} {value:?} is outside the {many} allowed for {target:?}"
         ),
@@ -432,7 +419,10 @@ fn refused(refusal: Refusal<'_>, kind: PolicyKind, target: &str) -> ExchangeErro
             format!("the subject token's {one} {value:?} is denied for {target:?}")
         }
     };
-    refusal_error(kind, reason)
+    match kind {
+        PolicyKind::Audiences => ExchangeError::InvalidTarget(reason),
+        PolicyKind::Scopes => ExchangeError::InvalidScope(reason),
+    }
 }
 
 /// The subject token's scopes, once the scope `policy` of the route for
