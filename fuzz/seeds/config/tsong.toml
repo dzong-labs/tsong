@@ -8,7 +8,7 @@
 [issuer]
 url = "https://tsong.internal.example.com"
 listen = "0.0.0.0:8444"
-token_lifetime = "00:15:00"          # longest lifetime of a minted token
+token_lifetime = "00:15:00"     # longest lifetime of a minted token
 clock_skew = "00:00:30"
 
 [issuer.signing]
@@ -38,7 +38,7 @@ state = "retiring"              # still published in JWKS, never signs
 listen = "0.0.0.0:8443"
 trusted_proxies = ["10.0.0.0/8"]
 allow = ["10.0.0.0/8", "172.16.0.0/12"]  # empty denies all; ["0.0.0.0/0", "::/0"] allows all
-read_timeout = "00:01:00"            # longest wait on a downstream between reads; a route may override
+read_timeout = "00:01:00"       # longest wait on a downstream between reads; a route may override
 
 [gateway.cache]
 max_entries = 100_000
@@ -49,7 +49,7 @@ sub_prefix = "okta"   # minted sub is "okta:<sub>"; unique; a-z, 0-9 and -
 issuer = "https://example.okta.com/oauth2/default"
 audiences = ["api://default"]
 algorithms = ["RS256"]
-jwks_max_age = "01:00:00"   # keys are trusted this long, then refetched; tokens are refused until a refetch succeeds
+jwks_max_age = "01:00:00"  # keys are trusted this long, then refetched; tokens are refused until a refetch succeeds
 jwks_retry = "00:00:10"    # how often a failed refetch of expired keys is retried
 jwks_refetch = "00:00:30"  # least time between refetches an unknown kid or a failed signature triggers
 jwks_timeout = "00:00:10"  # longest a discovery or JWKS request may take
@@ -98,5 +98,5 @@ append_audience = "builds.example.com"
 allowed_audiences = ["tsong"]
 allowed_scopes = ["api", "read_api"]
 allow = ["10.20.0.0/16"]                     # narrows gateway.allow for this route
-read_timeout = "00:05:00"                          # long-running builds
+read_timeout = "00:05:00"                    # long-running builds
 signing_algorithm = "RS256"                  # ES256 unless set

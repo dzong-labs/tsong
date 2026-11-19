@@ -36,7 +36,7 @@ impl Config {
             if trusted.validation == Validation::Jwt && trusted.jwks_max_age > LONGEST_JWKS_MAX_AGE
             {
                 warnings.push(format!(
-                    "trusted_issuers.{name}.jwks_max_age is over 24h; a key the issuer withdraws stays trusted that long"
+                    "trusted_issuers.{name}.jwks_max_age is over a day, 1.00:00:00; a key the issuer withdraws stays trusted that long"
                 ));
             }
         }

@@ -628,7 +628,7 @@ fn a_discovery_url_and_a_jwks_url_are_not_both_set() -> TestResult {
 
 #[test]
 fn keys_trusted_for_more_than_a_day_warn() -> TestResult {
-    let warning = "trusted_issuers.okta.jwks_max_age is over 24h; a key the issuer withdraws stays trusted that long".to_owned();
+    let warning = "trusted_issuers.okta.jwks_max_age is over a day, 1.00:00:00; a key the issuer withdraws stays trusted that long".to_owned();
     let day = Config::from_toml(&okta_with("jwks_max_age = \"1.00:00:00\""))?;
     assert!(!day.warnings().0.contains(&warning), "{}", day.warnings());
     let longer = Config::from_toml(&okta_with("jwks_max_age = \"1.01:00:00\""))?;
