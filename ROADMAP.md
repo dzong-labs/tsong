@@ -31,6 +31,7 @@ What Tsong has built and what comes next. The open items are the plan for the ne
 27. Required scopes: a route's optional `required_scopes` must all be present in the inbound token, and a token minted for the route keeps them all. Each must be one `allowed_scopes` accepts. Scope names pass through unchanged (done).
 28. Signing algorithms: each route's `signing_algorithm` picks how its tokens are signed, from the nine asymmetric algorithms inbound validation accepts, ES256 by default. Each signing key names its algorithm, one key per algorithm is active, and every algorithm a route uses needs an active key. Keys are PKCS#8 PEM, signed through `aws-lc-rs`, and a key of the wrong type, or an RSA key under 2048 bits, is refused (done).
 29. Secret references: a secret field holds a table with one key, the scheme, such as `{ env = "NAME" }`, never the secret, and the `SecretSource` for the scheme reads it (`crates/tsong-secrets/src/lib.rs`). A string is a value and a table is a reference, so neither needs escaping. `env` and `file` are built (done). Next, `{ aws-sm = "arn" }` for AWS Secrets Manager, then other secret stores as they are needed. The introspection `client_secret` is parsed and required, but read only once introspection (item 3) uses it.
+30. Inbound TLS, low priority: a listener speaks HTTPS when the config gives it a certificate chain and private key, both secret references, through rustls, which Tsong already uses outbound. TLS 1.2 and 1.3 only, HTTP/2 over ALPN, and a new certificate loaded on reload. Plain HTTP stays for listeners behind a TLS-terminating load balancer, which is how Tsong is meant to run until then.
 
 ## Not planned
 
@@ -39,5 +40,4 @@ Tsong will not do these, this year or later:
 - Authenticate users itself. Tsong trusts identity providers to log users in; it has no login page, sessions, consent screens or user store, and stores no passwords.
 - Turn a check off. Config sets the values a check uses, such as audiences, scopes and allowed algorithms, but every check stays on.
 - Sign or accept tokens with a shared secret. Tsong signs with asymmetric keys only, and refuses HS256 and its kin inbound.
-- Terminate TLS on its own listeners. A load balancer in front of Tsong does; Tsong encrypts every connection it makes, with TLS or SSH.
 - Run on platforms other than Linux.
