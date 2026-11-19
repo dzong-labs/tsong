@@ -92,6 +92,12 @@ git config core.hooksPath .githooks
 
 Tsong runs on Linux, so mutation testing runs on Linux only: in CI on each pull request, or locally in podman with `scripts/linux.sh mutants --workspace`.
 
+Five fuzz targets under `fuzz/` cover the parsers that read hostile input: bearer tokens, config and bootstrap TOML, `X-Forwarded-For`, the token endpoint form and webhook deliveries. Each pull request fuzzes every target for 20 seconds, and the weekly workflow fuzzes each for ten minutes and runs the property tests with 100,000 cases. Locally, with a nightly toolchain and `cargo-fuzz`:
+
+```sh
+NIGHTLY=nightly-2026-10-01 scripts/fuzz.sh 60
+```
+
 [CONTRIBUTING.md](CONTRIBUTING.md) says how to propose a change and what a pull request needs. Release notes are on [GitHub Releases](https://github.com/marklauter/tsong/releases), and in [CHANGELOG.md](CHANGELOG.md) for 0.1.0.
 
 ## Security
