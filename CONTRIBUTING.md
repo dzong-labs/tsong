@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping with Tsong. This file says how to report a problem, propose a change, and what a pull request needs before it merges.
+Thanks for helping with Tsong. This file says how to report a problem, propose a change, and what a pull request needs before it merges. Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Reporting a bug or asking for a feature
 
