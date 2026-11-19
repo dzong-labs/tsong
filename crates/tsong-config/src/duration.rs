@@ -52,6 +52,7 @@ fn parse_duration(text: &str) -> Result<Duration, DurationError> {
                 .ok_or(DurationError)?
         }
     };
+    debug_assert!(nanos < 1_000_000_000, "seven digits at most");
     let clock = hours
         .checked_mul(3600)
         .zip(minutes.checked_mul(60))

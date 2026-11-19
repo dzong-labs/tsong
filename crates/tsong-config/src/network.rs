@@ -16,6 +16,18 @@ pub fn client_ip<'a>(
     forwarded_for: impl DoubleEndedIterator<Item = &'a [u8]>,
     trusted_proxies: &[IpNet],
 ) -> Option<IpAddr> {
+    let client = find_client(peer, forwarded_for, trusted_proxies);
+    // Allow lists compare canonical addresses: an IPv4-mapped IPv6 address
+    // here would let ::ffff:10.0.0.1 miss a rule for 10.0.0.1.
+    debug_assert!(client.is_none_or(|client| client == client.to_canonical()));
+    client
+}
+
+fn find_client<'a>(
+    peer: IpAddr,
+    forwarded_for: impl DoubleEndedIterator<Item = &'a [u8]>,
+    trusted_proxies: &[IpNet],
+) -> Option<IpAddr> {
     let trusted = |ip: &IpAddr| trusted_proxies.iter().any(|net| net.contains(ip));
     let mut client = peer.to_canonical();
     if !trusted(&client) {
