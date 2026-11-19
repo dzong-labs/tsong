@@ -39,6 +39,13 @@ impl KeySet {
         if by_algorithm.is_empty() {
             return Err(KeyError::NoActiveKey);
         }
+        // Each active key is filed under the algorithm it signs with, so a
+        // route's algorithm always finds a key that signs with it.
+        debug_assert!(
+            by_algorithm
+                .iter()
+                .all(|(algorithm, key)| key.algorithm() == *algorithm)
+        );
         Ok(Self {
             active: by_algorithm,
             retiring,

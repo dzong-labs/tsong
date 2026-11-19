@@ -22,7 +22,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tsong_clock::Clock;
-use tsong_config::{Config, Route, RouteTable, allowed, client_ip};
+use tsong_config::{Config, RESERVED_CLAIMS, Route, RouteTable, allowed, client_ip};
 use tsong_keys::KeySet;
 use tsong_validate::{Validated, Validator, scopes};
 
@@ -258,6 +258,13 @@ impl Issuer {
                 }
             }
         }
+        // Config validation refuses mappings onto reserved claims, so none
+        // can be here to overwrite the claims Tsong sets.
+        debug_assert!(
+            claims
+                .keys()
+                .all(|name| !RESERVED_CLAIMS.contains(&name.as_str()))
+        );
         claims
     }
 
@@ -440,6 +447,17 @@ fn granted_scopes(
         };
         return Err(ExchangeError::InvalidScope(reason));
     }
+    // A minted token holds only scopes the subject token held and the
+    // route allows, and every scope the route requires.
+    debug_assert!(granted.iter().all(|scope| {
+        held.contains(scope.as_str())
+            && route.refused_scope(std::iter::once(scope.as_str())).is_ok()
+    }));
+    debug_assert!(
+        route
+            .missing_scope(|scope| granted.iter().any(|kept| kept == scope))
+            .is_none()
+    );
     Ok(granted)
 }
 
@@ -453,5 +471,12 @@ fn minted_audiences<'a>(inbound: Vec<&'a str>, route: &'a Route) -> Vec<&'a str>
             minted.push(aud);
         }
     }
+    debug_assert!(
+        minted
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            == minted.len()
+    );
     minted
 }
