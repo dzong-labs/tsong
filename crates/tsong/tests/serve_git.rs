@@ -266,3 +266,28 @@ async fn a_signed_webhook_reloads_without_waiting_for_the_poll() -> TestResult {
     tokio::time::timeout(Duration::from_secs(10), server).await???;
     Ok(())
 }
+
+#[tokio::test]
+async fn a_webhook_secret_must_be_at_least_16_bytes() -> TestResult {
+    let origin = Origin::new()?;
+    origin.commit("https://one.test", 0)?;
+    let secret = origin.dir.path().join("hook.secret");
+    let reference = format!("{{ file = '{}' }}", secret.display());
+    std::fs::write(&secret, "fifteen-bytes!!")?;
+    let path = origin.bootstrap("00:00:00.05", 0, &webhook(0, &reference))?;
+    match tsong::serve_until(&path, async {}).await {
+        Err(error @ tsong::Error::WeakWebhookSecret) => assert_eq!(
+            error.to_string(),
+            "webhook: the secret must be at least 16 bytes"
+        ),
+        other => return Err(format!("expected a weak secret, got {other:?}").into()),
+    }
+    // Sixteen bytes pass the check; serving then stops at once.
+    std::fs::write(&secret, "sixteen-bytes!!!")?;
+    let started = tsong::serve_until(&path, async {}).await;
+    assert!(
+        !matches!(started, Err(tsong::Error::WeakWebhookSecret)),
+        "{started:?}"
+    );
+    Ok(())
+}

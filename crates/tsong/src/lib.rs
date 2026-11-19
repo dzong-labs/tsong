@@ -37,6 +37,10 @@ use crate::telemetry::{Metrics, ObservedFetcher};
 pub const USAGE: &str =
     "usage: tsong check [--deny-warnings] <config.toml> | tsong serve <bootstrap.toml>";
 
+/// The fewest bytes a webhook secret may have: 128 bits, as a symmetric
+/// key needs.
+pub const MIN_WEBHOOK_SECRET: usize = 16;
+
 /// The flag that makes `check` fail on warnings.
 pub const DENY_WARNINGS: &str = "--deny-warnings";
 
@@ -57,6 +61,8 @@ pub enum Error {
     Warnings(Warnings),
     #[error("webhook: {0}")]
     Webhook(SecretError),
+    #[error("webhook: the secret must be at least {MIN_WEBHOOK_SECRET} bytes")]
+    WeakWebhookSecret,
     #[error("serving: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -147,12 +153,16 @@ pub async fn serve_until(
     };
     let webhook = match (&bootstrap.webhook, &bootstrap.source) {
         (Some(webhook), Source::Git(git)) => {
+            let secret = secrets
+                .resolve(&webhook.secret)
+                .await
+                .map_err(Error::Webhook)?;
+            if secret.expose().len() < MIN_WEBHOOK_SECRET {
+                return Err(Error::WeakWebhookSecret);
+            }
             let hook = Hook {
                 host: webhook.host,
-                secret: secrets
-                    .resolve(&webhook.secret)
-                    .await
-                    .map_err(Error::Webhook)?,
+                secret,
                 branch: git.branch.clone(),
             };
             let router = admin::webhook_router(hook, trigger.clone()).layer(
