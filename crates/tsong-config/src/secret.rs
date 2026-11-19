@@ -109,8 +109,19 @@ pub(crate) struct RebaseError;
 /// The reference as a config writes it, such as `{ env = "NAME" }`.
 impl fmt::Display for SecretRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let id = Value::String(self.id.clone());
-        write!(f, "{{ {} = {id} }}", self.scheme)
+        write!(f, "{{ {} = \"", self.scheme)?;
+        for c in self.id.chars() {
+            match c {
+                '"' => f.write_str("\\\"")?,
+                '\\' => f.write_str("\\\\")?,
+                '\n' => f.write_str("\\n")?,
+                '\t' => f.write_str("\\t")?,
+                '\r' => f.write_str("\\r")?,
+                c if c.is_control() => write!(f, "\\u{:04X}", u32::from(c))?,
+                c => fmt::Write::write_char(f, c)?,
+            }
+        }
+        f.write_str("\" }")
     }
 }
 

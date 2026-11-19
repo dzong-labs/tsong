@@ -162,7 +162,7 @@ fn load_takes_relative_key_paths_from_the_config_directory() -> TestResult {
     let config = Config::load(&path)?;
     assert_eq!(
         private_key(&config),
-        Some(file_ref(&dir.path().join("k1.pem")))
+        Some(file_ref(&dir.path().join("k1.pem"))?)
     );
     Ok(())
 }
@@ -179,10 +179,34 @@ fn private_key(config: &Config) -> Option<String> {
 const NOT_A_REFERENCE: &str = r#"a secret must be a reference, such as { env = "NAME" } or { file = "path" }, never the secret"#;
 
 /// A `file` reference to `path`, as a config writes it.
-fn file_ref(path: &Path) -> String {
-    SecretRef::new(Scheme::File, path.display().to_string())
-        .map(|reference| reference.to_string())
-        .unwrap_or_default()
+fn file_ref(path: &Path) -> TestResult<String> {
+    Ok(SecretRef::new(Scheme::File, path.display().to_string())?.to_string())
+}
+
+#[test]
+fn a_reference_displays_as_toml_that_reads_back() -> TestResult {
+    for id in [
+        "NAME",
+        r"C:\keys\k1.pem",
+        r#"a "b" c"#,
+        "tab\there",
+        "e\u{301}",
+        "esc\u{1b}",
+    ] {
+        let reference = SecretRef::new(Scheme::File, id)?;
+        let text = format!("x = {reference}");
+        let table: toml::Table = toml::from_str(&text)?;
+        let read = table
+            .get("x")
+            .and_then(|x| x.get("file"))
+            .and_then(toml::Value::as_str);
+        assert_eq!(read, Some(id), "{text}");
+    }
+    assert_eq!(
+        SecretRef::new(Scheme::Env, "A")?.to_string(),
+        r#"{ env = "A" }"#
+    );
+    Ok(())
 }
 
 #[test]
@@ -820,7 +844,7 @@ async fn a_file_store_loads_its_file() -> TestResult {
     assert_eq!(snapshot.author, None);
     assert_eq!(
         private_key(&snapshot.config),
-        Some(file_ref(&dir.path().join("k1.pem")))
+        Some(file_ref(&dir.path().join("k1.pem"))?)
     );
     std::fs::write(
         &path,
@@ -1260,10 +1284,10 @@ fn without_a_directory_key_paths_must_be_absolute() -> TestResult {
     let absolute = std::env::temp_dir().join("k1.pem");
     let text = minimal().replace(
         r#"private_key = { file = "k1.pem" }"#,
-        &format!("private_key = {}", file_ref(&absolute)),
+        &format!("private_key = {}", file_ref(&absolute)?),
     );
     let config = Config::from_text(&text, None)?;
-    assert_eq!(private_key(&config), Some(file_ref(&absolute)));
+    assert_eq!(private_key(&config), Some(file_ref(&absolute)?));
     Ok(())
 }
 
@@ -1271,7 +1295,7 @@ fn without_a_directory_key_paths_must_be_absolute() -> TestResult {
 fn a_directory_resolves_relative_key_paths() -> TestResult {
     let dir = std::env::temp_dir();
     let config = Config::from_text(&minimal(), Some(&dir))?;
-    assert_eq!(private_key(&config), Some(file_ref(&dir.join("k1.pem"))));
+    assert_eq!(private_key(&config), Some(file_ref(&dir.join("k1.pem"))?));
     Ok(())
 }
 
@@ -1343,7 +1367,7 @@ fn a_client_secret_file_is_taken_from_the_config_directory() -> TestResult {
     let secret = trusted(&config, "okta")?.client_secret.as_ref();
     assert_eq!(
         secret.map(ToString::to_string),
-        Some(file_ref(&dir.join("okta.secret")))
+        Some(file_ref(&dir.join("okta.secret"))?)
     );
     match Config::from_text(&text, None) {
         Err(ConfigError::Invalid(problems)) => assert_eq!(
@@ -1390,7 +1414,7 @@ fn a_reference_is_its_scheme_and_id() -> TestResult {
         .ok_or("no client_secret")?;
     assert_eq!(reference.scheme(), Scheme::File);
     assert_eq!(reference.id(), r"C:\keys\k1.pem");
-    assert_eq!(reference.to_string(), r"{ file = 'C:\keys\k1.pem' }");
+    assert_eq!(reference.to_string(), r#"{ file = "C:\\keys\\k1.pem" }"#);
     let reference = SecretRef::new(Scheme::Env, "A:B")?;
     assert_eq!(reference.scheme(), Scheme::Env);
     assert_eq!(reference.id(), "A:B");
