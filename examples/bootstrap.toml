@@ -4,7 +4,7 @@
 # Durations are [d.]hh:mm:ss[.fffffff], as .NET writes a TimeSpan:
 # "00:15:00" is 15 minutes, "1.01:00:00" is 25 hours.
 
-# ── config source ─────────────────────────────────────
+# Config source
 # A folder on a Git branch, reloaded when the branch moves. Tsong reads
 # tsong.toml from the folder at the branch's tip.
 [source]
@@ -22,13 +22,13 @@ poll = "00:05:00"                         # fetch this often when no webhook arr
 # store = "file"
 # path = "tsong.toml"
 
-# ── admin listener ────────────────────────────────────
+# Admin listener
 # GET /status and GET /metrics. Only clients in the served config's
 # gateway.allow get in.
 [admin]
 listen = "0.0.0.0:8445"
 
-# ── webhook listener ──────────────────────────────────
+# Webhook listener
 # POST /hooks/config, on its own listener. Its allow list is deployed here,
 # never loaded from Git, and holds only the Git host's delivery addresses
 # (GitHub publishes them as "hooks" at api.github.com/meta). It is checked
@@ -42,7 +42,7 @@ host = "github"                           # or "gitlab"
 # At least 16 bytes; a random 32-byte value is better.
 secret = { env = "TSONG_WEBHOOK_SECRET" }
 
-# ── health listener ───────────────────────────────────
+# Health listener
 # GET /health/live and GET /health/ready, for the load balancer. Like the
 # webhook's, its allow list is deployed here and checked against each
 # connection's own address.

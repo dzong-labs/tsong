@@ -1,0 +1,31 @@
+name: Accessibility barrier
+description: Something in Tsong, its output or its docs is hard or impossible for you to use.
+labels: [accessibility]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting this. You never need to describe a disability or share personal information. [ACCESSIBILITY.md](https://github.com/marklauter/tsong/blob/main/ACCESSIBILITY.md) says how reports are handled.
+  - type: textarea
+    id: task
+    attributes:
+      label: What you were trying to do, and what got in the way
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: The command, the error message, the file or the doc page.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Your environment
+      description: Operating system, terminal or browser, and any assistive technology, with versions if you know them.
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Steps to reproduce, or a recording or screenshot if you're comfortable sharing one.
