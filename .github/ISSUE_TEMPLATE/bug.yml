@@ -1,0 +1,42 @@
+name: Bug report
+description: Tsong does something it shouldn't, or doesn't do something it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A security flaw goes through private reporting instead, never a public issue: see [SECURITY.md](https://github.com/marklauter/tsong/blob/main/SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The release tag, or the commit you built.
+      placeholder: v0.2.0
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: The request, the response or error, and any audit or log lines.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce it
+      description: The steps, or a failing test. The smallest case that shows it is best.
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Config
+      description: The relevant parts of tsong.toml and the bootstrap file. Remove host names and addresses you don't want public. Secret fields hold only references, such as `{ env = "NAME" }`, but check that no secret value appears anywhere.
+      render: toml

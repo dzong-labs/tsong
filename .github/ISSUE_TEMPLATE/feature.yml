@@ -1,0 +1,31 @@
+name: Feature request
+description: A concrete change you'd like Tsong to make.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        An idea that isn't concrete yet is better started in [Discussions](https://github.com/marklauter/tsong/discussions). Check [ROADMAP.md](https://github.com/marklauter/tsong/blob/main/ROADMAP.md) first: it lists what's planned and what isn't.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you're trying to do, and why Tsong can't do it today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: The change you propose
+      description: How Tsong would behave, including any new config.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+  - type: textarea
+    id: security
+    attributes:
+      label: Security
+      description: Does this let any input, such as a caller, an issuer or the config, control more than it does today? See the threat model in docs/notes/threat-model.md.
