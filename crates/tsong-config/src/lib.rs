@@ -415,13 +415,13 @@ impl Config {
         Ok(config)
     }
 
-    /// Reads, parses and validates a TOML file. Relative `file:` secret
+    /// Reads, parses and validates a TOML file. Relative `file` secret
     /// references are taken from the file's directory.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         Self::from_text(&store::read(path)?, Some(&store::directory(path)))
     }
 
-    /// Parses and validates a TOML document, taking relative `file:` secret
+    /// Parses and validates a TOML document, taking relative `file` secret
     /// references from `base_dir`. Without one, as for a config from Git, a
     /// relative path is a problem: it has nothing to be relative to.
     pub fn from_text(text: &str, base_dir: Option<&Path>) -> Result<Self, ConfigError> {

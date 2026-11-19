@@ -224,7 +224,7 @@ async fn a_config_whose_state_fails_to_build_is_rejected() -> TestResult {
         return Err("expected a rejection".into());
     };
     assert!(
-        error.starts_with(r#"key "k1": reading secret file:"#),
+        error.starts_with(r#"key "k1": reading secret { file = "#),
         "{error}"
     );
     let line = f.lines.parsed()?.get(1).cloned().ok_or("no second line")?;
@@ -515,10 +515,10 @@ async fn a_reload_reads_secrets_through_the_reloaders_sources() -> TestResult {
         .await?
         .with_secrets(secrets);
     let from_env = f.text("https://two.test", 8444, "").replace(
-        &format!("'file:{}'", f.key.display()),
-        "\"env:TSONG_TEST_KEY_THAT_IS_NEVER_SET\"",
+        &format!("{{ file = '{}' }}", f.key.display()),
+        "{ env = \"TSONG_TEST_KEY_THAT_IS_NEVER_SET\" }",
     );
-    assert!(from_env.contains("env:TSONG_TEST_KEY"));
+    assert!(from_env.contains("TSONG_TEST_KEY"));
     f.store.push(Ok(fetched(&from_env, "r2")?));
     assert_eq!(reloader.reload().await, Outcome::Applied);
     // The file the first config named isn't read through these sources.

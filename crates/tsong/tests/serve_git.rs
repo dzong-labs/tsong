@@ -91,7 +91,7 @@ listen = "127.0.0.1:{admin}"
 /// reference `secret`.
 fn webhook(port: u16, secret: &str) -> String {
     format!(
-        "\n[webhook]\nlisten = \"127.0.0.1:{port}\"\nallow = [\"127.0.0.0/8\"]\nhost = \"github\"\nsecret = \"{secret}\"\n"
+        "\n[webhook]\nlisten = \"127.0.0.1:{port}\"\nallow = [\"127.0.0.0/8\"]\nhost = \"github\"\nsecret = {secret}\n"
     )
 }
 
@@ -211,11 +211,11 @@ async fn a_webhook_secret_must_be_in_the_environment() -> TestResult {
     let origin = Origin::new()?;
     origin.commit("https://one.test", 0)?;
     let unset = "TSONG_TEST_SECRET_THAT_IS_NEVER_SET";
-    let path = origin.bootstrap("50ms", 0, &webhook(0, &format!("env:{unset}")))?;
+    let path = origin.bootstrap("50ms", 0, &webhook(0, &format!("{{ env = \"{unset}\" }}")))?;
     match tsong::serve_until(&path, async {}).await {
         Err(error @ tsong::Error::Webhook(_)) => assert_eq!(
             error.to_string(),
-            format!("webhook: secret env:{unset} is not set")
+            format!(r#"webhook: secret {{ env = "{unset}" }} is not set"#)
         ),
         other => return Err(format!("expected a missing secret, got {other:?}").into()),
     }
@@ -230,7 +230,8 @@ async fn a_signed_webhook_reloads_without_waiting_for_the_poll() -> TestResult {
     let hooks = free_port()?;
     let first = origin.commit("https://one.test", port)?;
     // PATH is always set, so it stands in for the secret's variable.
-    let (stop, server) = serve(origin.bootstrap("1h", admin, &webhook(hooks, "env:PATH"))?);
+    let (stop, server) =
+        serve(origin.bootstrap("1h", admin, &webhook(hooks, "{ env = \"PATH\" }"))?);
     serving(admin, &first).await?;
 
     let second = origin.commit("https://two.test", port)?;

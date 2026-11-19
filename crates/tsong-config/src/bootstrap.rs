@@ -169,7 +169,7 @@ impl Bootstrap {
         Ok(bootstrap)
     }
 
-    /// Reads a bootstrap file. Relative paths, including a `file:` webhook
+    /// Reads a bootstrap file. Relative paths, including a `file` webhook
     /// secret, are taken from the bootstrap file's directory.
     pub fn load(path: &Path) -> Result<Self, BootstrapError> {
         let text = std::fs::read_to_string(path).map_err(|source| BootstrapError::Read {
