@@ -89,3 +89,9 @@ git config core.hooksPath .githooks
 ```
 
 Tsong runs on Linux, so mutation testing runs on Linux only: in CI on each pull request, or locally in podman with `scripts/linux.sh mutants --workspace`.
+
+[CONTRIBUTING.md](CONTRIBUTING.md) says how to propose a change and what a pull request needs. Release notes are on [GitHub Releases](https://github.com/marklauter/tsong/releases), and in [CHANGELOG.md](CHANGELOG.md) for 0.1.0.
+
+## Security
+
+Report a vulnerability privately, as [SECURITY.md](SECURITY.md) describes, never in a public issue.
