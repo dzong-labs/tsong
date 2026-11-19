@@ -124,7 +124,7 @@ Five fuzz targets under `fuzz/` cover the parsers that read hostile input: beare
 NIGHTLY=nightly-2026-10-01 scripts/fuzz.sh 60
 ```
 
-[CONTRIBUTING.md](CONTRIBUTING.md) says how to propose a change and what a pull request needs. Release notes are on [GitHub Releases](https://github.com/marklauter/tsong/releases), and in [CHANGELOG.md](CHANGELOG.md) for 0.1.0.
+[CONTRIBUTING.md](CONTRIBUTING.md) says how to propose a change and what a pull request needs. [GOVERNANCE.md](GOVERNANCE.md) says how decisions are made, who holds which role, and how the project continues without its maintainer. Release notes are on [GitHub Releases](https://github.com/marklauter/tsong/releases), and in [CHANGELOG.md](CHANGELOG.md) for 0.1.0.
 
 ## Security
 
