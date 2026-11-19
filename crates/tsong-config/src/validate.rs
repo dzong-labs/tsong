@@ -8,10 +8,11 @@ use url::Url;
 
 use crate::{ANY, Config, KeyProvider, KeyState, Policy, PolicyKind, Validation};
 
-/// Claims Tsong sets on every token it issues, which claim mapping may not
-/// write.
-pub const RESERVED_CLAIMS: [&str; 10] = [
-    "iss", "aud", "exp", "iat", "nbf", "jti", "scope", "act", "cnf", "sub_id",
+/// Claims claim mapping may not write: those Tsong sets on every token it
+/// issues, and `scp`, which would carry the subject's scopes past
+/// narrowing and the route's scope policy.
+pub const RESERVED_CLAIMS: [&str; 11] = [
+    "iss", "aud", "exp", "iat", "nbf", "jti", "scope", "scp", "act", "cnf", "sub_id",
 ];
 
 /// Whether `text` is an https URL.

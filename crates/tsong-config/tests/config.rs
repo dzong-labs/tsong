@@ -649,11 +649,12 @@ fn keys_trusted_for_more_than_a_day_warn() -> TestResult {
 fn claim_mapping_may_not_write_reserved_claims() -> TestResult {
     let text = format!(
         "{}{OKTA}[claims]
-copy = [\"email\", \"aud\"]
+copy = [\"email\", \"aud\", \"scp\"]
 [claims.rename.okta]
 uid = \"sub\"
 x = \"exp\"
 y = \"sub_id\"
+z = \"scp\"
 ",
         minimal()
     );
@@ -661,8 +662,10 @@ y = \"sub_id\"
         problems(&text)?,
         [
             r#"claims.copy may not copy reserved claim "aud""#,
+            r#"claims.copy may not copy reserved claim "scp""#,
             r#"claims.rename.okta may not write reserved claim "exp""#,
             r#"claims.rename.okta may not write reserved claim "sub_id""#,
+            r#"claims.rename.okta may not write reserved claim "scp""#,
         ]
     );
     Ok(())
