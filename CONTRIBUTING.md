@@ -21,12 +21,14 @@ Then send a pull request against `main`. Each pull request is squashed into one 
 CI's `passed` check must succeed. It runs these, and the hooks run most of them locally:
 
 - Formatting: `cargo fmt --all --check`.
-- Lints: `cargo clippy --workspace --all-targets --all-features` with warnings denied. The workspace denies `unwrap`, `expect`, `panic!`, indexing and their kin, tests included: failures are values, and tests return `Result` and propagate with `?`.
+- Lints: `cargo clippy --workspace --all-targets --all-features` with warnings denied. The workspace forbids `unsafe` and denies `unwrap`, `expect`, `panic!`, indexing and their kin, tests included: failures are values, and tests return `Result` and propagate with `?`. Every crate must inherit the workspace lints.
 - Docs: `cargo doc --workspace --no-deps` with warnings denied.
 - Tests: `cargo test --workspace`, in the dev and release profiles.
 - Coverage: line coverage stays at or above 95%, measured with `cargo llvm-cov`.
 - Mutation testing: no mutant of a line the pull request changes survives `cargo mutants`.
 - Dependency audit: `cargo audit --deny warnings`.
+- Dependency graph: `cargo deny --locked check bans licenses sources`, under the rules in `deny.toml`.
+- Fuzzing: every target under `fuzz/` for 20 seconds, with `scripts/fuzz.sh`.
 - CodeQL, for Rust and for the workflows.
 
 Enable the hooks once per clone:
@@ -35,7 +37,7 @@ Enable the hooks once per clone:
 git config core.hooksPath .githooks
 ```
 
-The pre-push hook needs `cargo-llvm-cov` and `cargo-audit`. Mutation testing runs on Linux only: `scripts/linux.sh mutants --workspace` runs it locally in podman.
+The pre-push hook needs `cargo-llvm-cov`, `cargo-audit` and `cargo-deny`. Mutation testing runs on Linux only: `scripts/linux.sh mutants --workspace` runs it locally in podman.
 
 ## Tests
 
