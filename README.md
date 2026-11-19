@@ -1,5 +1,6 @@
 # Tsong
 
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16914/badge)](https://www.bestpractices.dev/projects/16914)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/marklauter/tsong/badge)](https://scorecard.dev/viewer/?uri=github.com/marklauter/tsong)
 
 Tsong is an API gateway and an RFC 8693 token exchange issuer. It replaces each caller's access token, issued by any of several trusted identity providers, with a token signed by Tsong, so your services trust one issuer instead of many.
