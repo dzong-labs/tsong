@@ -1,14 +1,18 @@
 name: Dependabot auto-merge
 on: pull_request
 
-permissions:
-  contents: write
-  pull-requests: write
+# Read-only unless a job asks for more.
+permissions: read-all
 
 jobs:
   auto-merge:
     if: ${{ github.actor == 'dependabot[bot]' }}
     runs-on: ubuntu-latest
+    # Turning on auto-merge needs write access to the pull request and to
+    # the contents it merges into.
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Fetch Dependabot metadata
         id: meta
