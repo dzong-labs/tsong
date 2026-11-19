@@ -22,6 +22,15 @@ The first release.
 - A readiness drain on SIGTERM, and a container image that runs as an unprivileged user.
 - The `tsong check` and `tsong serve` commands.
 
+### Security and testing
+
+- A [threat model](docs/notes/threat-model.md).
+- Unsafe code forbidden in every crate, and dependencies checked with cargo-deny.
+- Tests that known JWT attacks are refused.
+- Property tests of client addresses, route policy and minting.
+- Fuzzing of the parsers that read hostile input.
+- An [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/marklauter/tsong) score for the repository.
+
 ## Later releases
 
 Release notes after 0.1.0 are published with each [GitHub release](https://github.com/marklauter/tsong/releases), not in this file.
