@@ -36,7 +36,7 @@ name = "{name}"
 host = "{host}"
 downstream = "https://{name}-lb.example.com"
 append_audience = ""
-allowed_audiences = ["*"]
+audiences = {{ allow = ["*"] }}
 allowed_scopes = [{scopes}]
 "#
     )
