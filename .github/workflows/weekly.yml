@@ -1,0 +1,55 @@
+name: Weekly
+
+# The long runs: every fuzz target for ten minutes, and the property tests
+# with many more cases than a pull request tries. Weekly and by hand, not
+# on every change, because runner minutes are limited.
+on:
+  schedule:
+    - cron: "17 8 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    env:
+      # libFuzzer needs a nightly compiler; pinned like every other tool.
+      NIGHTLY: nightly-2026-10-01
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Install nightly
+      run: rustup toolchain install $NIGHTLY --profile minimal
+    - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      with:
+        tool: cargo-fuzz@0.13.2
+    # The same corpus the pull request runs grow, so the long run starts
+    # where they left off and they start where it left off.
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: fuzz/corpus
+        key: fuzz-corpus-${{ github.run_id }}
+        restore-keys: fuzz-corpus-
+    - name: Fuzz every target for ten minutes
+      run: scripts/fuzz.sh 600
+    # A crash leaves its input under fuzz/artifacts; keep it to reproduce.
+    - name: Keep crashing inputs
+      if: failure()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: fuzz-artifacts
+        path: fuzz/artifacts
+
+  properties:
+    runs-on: ubuntu-latest
+    env:
+      PROPTEST_CASES: "100000"
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: ./.github/actions/setup-rust
+    - name: Property tests with 100,000 cases each
+      run: cargo test -p tsong-config -p tsong-issuer --locked --release --test properties --test mint_properties

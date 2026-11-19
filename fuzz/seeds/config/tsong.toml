@@ -1,0 +1,99 @@
+# A sample Tsong configuration. `tsong check examples/tsong.toml` validates
+# it, once the key files exist.
+
+# ── token exchange issuer ─────────────────────────────
+[issuer]
+url = "https://tsong.internal.example.com"
+listen = "0.0.0.0:8444"
+token_lifetime = "15m"          # longest lifetime of a minted token
+clock_skew = "30s"
+
+[issuer.signing]
+provider = "file"
+
+[[issuer.signing.keys]]
+kid = "2026-11"
+algorithm = "ES256"             # the default; one active key per algorithm
+# A secret reference: { env = "NAME" } or { file = "path" }.
+private_key = { file = "/etc/tsong/keys/2026-11.pem" }
+state = "active"
+
+[[issuer.signing.keys]]
+kid = "2026-11-rsa"
+algorithm = "RS256"             # for routes whose services need RSA
+# The PEM itself, in an environment variable.
+private_key = { env = "TSONG_RSA_KEY" }
+state = "active"
+
+[[issuer.signing.keys]]
+kid = "2026-08"
+private_key = { file = "/etc/tsong/keys/2026-08.pem" }
+state = "retiring"              # still published in JWKS, never signs
+
+# ── gateway ───────────────────────────────────────────
+[gateway]
+listen = "0.0.0.0:8443"
+trusted_proxies = ["10.0.0.0/8"]
+allow = ["10.0.0.0/8", "172.16.0.0/12"]  # empty denies all; ["0.0.0.0/0", "::/0"] allows all
+read_timeout = "60s"            # longest wait on a downstream between reads; a route may override
+
+[gateway.cache]
+max_entries = 100_000
+
+# ── trusted inbound issuers ───────────────────────────
+[trusted_issuers.okta]
+sub_prefix = "okta"   # minted sub is "okta:<sub>"; unique; a-z, 0-9 and -
+issuer = "https://example.okta.com/oauth2/default"
+audiences = ["api://default"]
+algorithms = ["RS256"]
+jwks_max_age = "1h"   # keys are trusted this long, then refetched; tokens are refused until a refetch succeeds
+jwks_retry = "10s"    # how often a failed refetch of expired keys is retried
+jwks_refetch = "30s"  # least time between refetches an unknown kid or a failed signature triggers
+jwks_timeout = "10s"  # longest a discovery or JWKS request may take
+
+[trusted_issuers.entra]
+sub_prefix = "entra"
+issuer = "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0"
+# One trusted issuer per tenant. discovery_url, or jwks_url, replaces the well-known path when an issuer doesn't use it.
+discovery_url = "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0/.well-known/openid-configuration"
+audiences = ["api://tsong"]
+algorithms = ["RS256"]
+
+[trusted_issuers.gitlab]
+sub_prefix = "gitlab"
+issuer = "https://gitlab.example.com"
+audiences = ["tsong"]
+validation = "introspection"
+introspection_url = "https://gitlab.example.com/oauth/introspect"
+client_id = "tsong"
+client_secret = { env = "TSONG_GITLAB_SECRET" }
+
+# ── claim mapping ─────────────────────────────────────
+[claims]
+copy = ["sub", "email", "groups"]
+
+[claims.rename.entra]
+oid = "sub"
+
+# ── routes ────────────────────────────────────────────
+# One route per host. The request's path and query go to the downstream
+# unchanged. Empty allowed_* lists deny every request; "*" accepts any value.
+[[routes]]
+name = "orders"
+host = "orders.example.com"
+downstream = "https://orders-lb.internal.example.com"
+append_audience = "orders.example.com"      # added to the minted aud; "" adds nothing
+allowed_audiences = ["api://default", "api://tsong"]
+allowed_scopes = ["orders.read", "orders.write"]
+required_scopes = ["orders.read"]          # optional: the token must carry all of these
+
+[[routes]]
+name = "builds"
+host = "builds.example.com"
+downstream = "https://builds-lb.internal.example.com"
+append_audience = "builds.example.com"
+allowed_audiences = ["tsong"]
+allowed_scopes = ["api", "read_api"]
+allow = ["10.20.0.0/16"]                     # narrows gateway.allow for this route
+read_timeout = "5m"                          # long-running builds
+signing_algorithm = "RS256"                  # ES256 unless set

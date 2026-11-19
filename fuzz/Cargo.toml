@@ -1,0 +1,59 @@
+[package]
+name = "tsong-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+# A workspace of its own: libFuzzer needs a nightly compiler and sanitizer
+# flags the main workspace never builds with.
+[workspace]
+
+[dependencies]
+ipnet = "2.12.2"
+libfuzzer-sys = "0.4"
+serde_urlencoded = "0.7.1"
+tokio = { version = "1.54.1", features = ["rt"] }
+tsong-clock = { path = "../crates/tsong-clock", features = ["test-util"] }
+tsong-config = { path = "../crates/tsong-config" }
+tsong-git = { path = "../crates/tsong-git" }
+tsong-issuer = { path = "../crates/tsong-issuer" }
+tsong-validate = { path = "../crates/tsong-validate", features = ["test-util"] }
+
+[[bin]]
+name = "jwt"
+path = "fuzz_targets/jwt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config"
+path = "fuzz_targets/config.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "forwarded"
+path = "fuzz_targets/forwarded.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "token_form"
+path = "fuzz_targets/token_form.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "webhook"
+path = "fuzz_targets/webhook.rs"
+test = false
+doc = false
+bench = false

@@ -32,7 +32,7 @@ jobs:
     - id: rust
       uses: ./.github/actions/changes
       with:
-        pattern: '\.rs$|(^|/)Cargo\.(toml|lock)$|^\.cargo/|^rust-toolchain\.toml$|^deny\.toml$|^\.github/(workflows/rust\.yml|actions/)'
+        pattern: '\.rs$|(^|/)Cargo\.(toml|lock)$|^\.cargo/|^rust-toolchain\.toml$|^deny\.toml$|^fuzz/|^scripts/fuzz\.sh$|^\.github/(workflows/rust\.yml|actions/)'
 
   format:
     needs: changes
@@ -139,6 +139,32 @@ jobs:
     - name: Check where dependencies come from and their licenses
       run: cargo deny --locked check bans licenses sources
 
+  # A short run of every fuzz target, so a change that makes one panic
+  # fails here; the weekly workflow fuzzes each for longer.
+  fuzz:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    env:
+      # libFuzzer needs a nightly compiler; pinned like every other tool.
+      NIGHTLY: nightly-2026-10-01
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Install nightly
+      run: rustup toolchain install $NIGHTLY --profile minimal
+    - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      with:
+        tool: cargo-fuzz@0.13.2
+    # The corpus a run grows is kept for the next, so each starts where the
+    # last left off.
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: fuzz/corpus
+        key: fuzz-corpus-${{ github.run_id }}
+        restore-keys: fuzz-corpus-
+    - name: Fuzz every target for 20 seconds
+      run: scripts/fuzz.sh 20
+
   mutants:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
@@ -176,7 +202,7 @@ jobs:
   # matrix legs. Skipped jobs pass only when there were no Rust changes.
   passed:
     if: always()
-    needs: [ changes, format, lint, test, coverage, audit, deny, mutants ]
+    needs: [ changes, format, lint, test, coverage, audit, deny, fuzz, mutants ]
     runs-on: ubuntu-latest
     steps:
     - name: Require every job to succeed
