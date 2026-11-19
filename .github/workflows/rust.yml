@@ -66,13 +66,26 @@ jobs:
     # The workspace lints, unsafe_code = "forbid" among them, reach only
     # the crates that inherit them.
     - name: Every crate inherits the workspace lints
+      # Fails closed: a broken query or an empty list fails the step
+      # rather than checking nothing.
       run: |
-        missing=$(cargo metadata --no-deps --format-version 1 --locked |
-          jq -r '.packages[] | select(.manifest_path | contains("/crates/")) | .manifest_path' |
-          while read -r manifest; do
-            grep -Pzq '\[lints\]\s*\nworkspace = true' "$manifest" || echo "$manifest"
-          done)
-        if [ -n "$missing" ]; then echo "missing [lints] workspace = true:"; echo "$missing"; exit 1; fi
+        set -euo pipefail
+        manifests=$(cargo metadata --no-deps --format-version 1 --locked |
+          jq -r '.packages[] | select(.manifest_path | contains("/crates/")) | .manifest_path')
+        expected=$(find crates -mindepth 2 -maxdepth 2 -name Cargo.toml | wc -l)
+        found=$(printf '%s\n' "$manifests" | grep -c . || true)
+        if [ "$expected" -eq 0 ] || [ "$found" -ne "$expected" ]; then
+          echo "found $found crate manifests in the metadata, expected $expected"
+          exit 1
+        fi
+        missing=0
+        while read -r manifest; do
+          if ! grep -Pzq '\[lints\]\s*\nworkspace = true' "$manifest"; then
+            echo "missing [lints] workspace = true: $manifest"
+            missing=1
+          fi
+        done <<< "$manifests"
+        exit "$missing"
 
   test:
     needs: changes
