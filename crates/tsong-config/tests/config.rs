@@ -1461,3 +1461,39 @@ fn a_long_number_written_in_by_mistake_is_never_quoted() -> TestResult {
     }
     Ok(())
 }
+
+/// Every shape a secret written in by mistake might take. The secret is
+/// `SEKRET`, and no error may quote it.
+const MISTAKES: [&str; 16] = [
+    r#"client_secret = "SEKRET""#,
+    r#"client_secret = "SEK\qRET""#,
+    "client_secret = SEKRET",
+    "client_secret = -SEKRET",
+    "client_secret = 0xSEKRET",
+    "client_secret = '''SEKRET\nmore'''\nclient_secret = 1",
+    r#"client_secret = [ "SEKRET" ]"#,
+    r#"client_secret = { SEKRET = "x" }"#,
+    r#"client_secret = { env = "x", env = "SEKRET" }"#,
+    r#"client_secret = { env = "x", SEKRET }"#,
+    r#"client_secret = { env = { SEKRET = 1 } }"#,
+    r#"client_secret = { "$__toml_private_datetime" = "SEKRET" }"#,
+    "client_secret = 9999999999999999999999SEKRET",
+    "client_secret = 1.5e300",
+    "client_secret = 1979-05-27T07:32:00Z",
+    "client_secret = { env = 1979-05-27 }",
+];
+
+#[test]
+fn no_mistaken_secret_reaches_an_error() -> TestResult {
+    for mistake in MISTAKES {
+        let text = okta_with(mistake);
+        let error = Config::from_toml(&text)
+            .err()
+            .ok_or("a mistaken secret was accepted")?
+            .to_string();
+        assert!(!error.contains("SEKRET"), "{mistake}\n{error}");
+        assert!(!error.contains("1979"), "{mistake}\n{error}");
+        assert!(!error.contains("1.5e300"), "{mistake}\n{error}");
+    }
+    Ok(())
+}
