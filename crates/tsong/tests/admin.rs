@@ -35,7 +35,7 @@ fn webhook(host: GitHost) -> TestResult<Fixture> {
     let secret = secret()?;
     let hook = Hook {
         host,
-        secret: secret.clone().into_bytes(),
+        secret: tsong_secrets::Secret::new(secret.clone().into_bytes()),
         branch: "main".into(),
     };
     Ok(Fixture {

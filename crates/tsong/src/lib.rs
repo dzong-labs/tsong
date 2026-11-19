@@ -25,6 +25,7 @@ use tsong_config::{
 use tsong_gateway::GatewayError;
 use tsong_git::GitStore;
 use tsong_keys::{KeyError, KeySet};
+use tsong_secrets::{SecretError, Secrets};
 use tsong_validate::{HttpFetcher, JwksFetcher};
 
 use crate::admin::Hook;
@@ -54,8 +55,8 @@ pub enum Error {
     Gateway(#[from] GatewayError),
     #[error("{0}warnings are denied")]
     Warnings(Warnings),
-    #[error("the environment variable {0} is not set")]
-    Secret(String),
+    #[error("webhook: {0}")]
+    Webhook(SecretError),
     #[error("serving: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -81,7 +82,7 @@ pub async fn run(args: impl IntoIterator<Item = String>) -> Result<String, Error
 /// warnings. With `deny_warnings`, a warning fails the check.
 pub async fn check(path: &Path, deny_warnings: bool) -> Result<String, Error> {
     let config = FileStore::new(path).load().await?.parse()?.config;
-    let keys = KeySet::from_config(&config.issuer.signing)?;
+    let keys = KeySet::from_config(&config.issuer.signing, &Secrets::default()).await?;
     let warnings = config.warnings();
     if deny_warnings && !warnings.0.is_empty() {
         return Err(Error::Warnings(warnings));
@@ -116,19 +117,23 @@ pub async fn serve_until(
         audit.clone(),
         clock.clone(),
     ));
+    let secrets = Secrets::default();
     let first = State::build_with(
         store.load().await?.parse()?,
         clock.clone(),
         &metrics,
         audit.clone(),
         fetcher.clone(),
-    )?;
+        &secrets,
+    )
+    .await?;
     let issuer_address = first.config.issuer.listen;
     let gateway_address = first.config.gateway.listen;
     let reloader = Arc::new(
         Reloader::new(store, first, audit, clock)
             .with_metrics(metrics.clone())
-            .with_fetcher(fetcher),
+            .with_fetcher(fetcher)
+            .with_secrets(secrets.clone()),
     );
     let trigger = Arc::new(Notify::new());
     let admin = match &bootstrap.admin {
@@ -144,7 +149,10 @@ pub async fn serve_until(
         (Some(webhook), Source::Git(git)) => {
             let hook = Hook {
                 host: webhook.host,
-                secret: secret(&webhook.secret_env)?,
+                secret: secrets
+                    .resolve(&webhook.secret)
+                    .await
+                    .map_err(Error::Webhook)?,
                 branch: git.branch.clone(),
             };
             let router = admin::webhook_router(hook, trigger.clone()).layer(
@@ -235,15 +243,6 @@ fn store(source: &Source) -> (Box<dyn ConfigStore>, Option<Duration>) {
         Source::Git(git) => (Box::new(GitStore::new(git)), Some(git.poll)),
         Source::File { path } => (Box::new(FileStore::new(path)), None),
     }
-}
-
-/// The secret in the environment variable `name`.
-fn secret(name: &str) -> Result<Vec<u8>, Error> {
-    std::env::var(name)
-        .ok()
-        .filter(|secret| !secret.is_empty())
-        .map(String::into_bytes)
-        .ok_or_else(|| Error::Secret(name.to_owned()))
 }
 
 /// Serves `router` on `listener`, when there is one, until `stopped`.

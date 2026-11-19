@@ -42,7 +42,7 @@ provider = "file"
 
 [[issuer.signing.keys]]
 kid = "k1"
-path = '{}'
+private_key = 'file:{}'
 state = "active"
 
 [gateway]
@@ -293,13 +293,13 @@ async fn a_fetch_that_runs_too_long_is_abandoned() -> TestResult {
 async fn key_paths_in_a_config_from_git_are_absolute() -> TestResult {
     let f = Fixture::new()?;
     let key = std::env::temp_dir().join("k1.pem").display().to_string();
-    let relative = config(10).replace(&format!("'{key}'"), "\"k1.pem\"");
+    let relative = config(10).replace(&format!("'file:{key}'"), "\"file:k1.pem\"");
     f.commit("tsong.toml", &relative)?;
     match f.store("main", "")?.load().await?.parse() {
         Err(ConfigError::Invalid(problems)) => assert_eq!(
             problems.0,
             [
-                r#"issuer.signing.keys "k1" path must be absolute, since the config has no directory"#
+                r#"issuer.signing.keys "k1" private_key must be an absolute path, since the config has no directory"#
             ]
         ),
         other => return Err(format!("expected invalid, got {other:?}").into()),

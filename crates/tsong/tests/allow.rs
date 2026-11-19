@@ -16,13 +16,17 @@ use tsong::state::State;
 use tsong_clock::{Clock, ManualClock};
 
 /// State for a config allowing `allow` through `trusted_proxies`.
-fn state(key: &std::path::Path, allow: &str, trusted_proxies: &str) -> TestResult<Arc<State>> {
+async fn state(
+    key: &std::path::Path,
+    allow: &str,
+    trusted_proxies: &str,
+) -> TestResult<Arc<State>> {
     let text = config_text(key, "https://one.test", 8444, "").replace(
         r#"allow = ["127.0.0.0/8"]"#,
         &format!("allow = {allow}\ntrusted_proxies = {trusted_proxies}"),
     );
     let clock: Arc<dyn Clock> = Arc::new(ManualClock::at(NOW));
-    Ok(Arc::new(State::build(snapshot(&text, "r1")?, clock)?))
+    Ok(Arc::new(State::build(snapshot(&text, "r1")?, clock).await?))
 }
 
 fn guarded(state: watch::Receiver<Arc<State>>) -> Router {
@@ -51,7 +55,7 @@ async fn status(
 async fn only_clients_in_the_global_allow_list_get_through() -> TestResult {
     let dir = tempfile::tempdir()?;
     let key = write_key(dir.path())?;
-    let (_sender, receiver) = watch::channel(state(&key, r#"["10.1.0.0/16"]"#, "[]")?);
+    let (_sender, receiver) = watch::channel(state(&key, r#"["10.1.0.0/16"]"#, "[]").await?);
     let router = guarded(receiver);
     assert_eq!(status(&router, "10.1.2.3:1", None).await?, StatusCode::OK);
     assert_eq!(
@@ -75,7 +79,7 @@ async fn a_trusted_proxy_forwards_the_client() -> TestResult {
     let dir = tempfile::tempdir()?;
     let key = write_key(dir.path())?;
     let (_sender, receiver) =
-        watch::channel(state(&key, r#"["10.1.0.0/16"]"#, r#"["10.0.0.0/24"]"#)?);
+        watch::channel(state(&key, r#"["10.1.0.0/16"]"#, r#"["10.0.0.0/24"]"#).await?);
     let router = guarded(receiver);
     assert_eq!(
         status(&router, "10.0.0.5:1", Some("10.1.2.3")).await?,
@@ -96,10 +100,10 @@ async fn a_trusted_proxy_forwards_the_client() -> TestResult {
 async fn a_reload_changes_who_gets_through() -> TestResult {
     let dir = tempfile::tempdir()?;
     let key = write_key(dir.path())?;
-    let (sender, receiver) = watch::channel(state(&key, r#"["10.1.0.0/16"]"#, "[]")?);
+    let (sender, receiver) = watch::channel(state(&key, r#"["10.1.0.0/16"]"#, "[]").await?);
     let router = guarded(receiver);
     assert_eq!(status(&router, "10.1.2.3:1", None).await?, StatusCode::OK);
-    sender.send_replace(state(&key, r#"["10.9.0.0/16"]"#, "[]")?);
+    sender.send_replace(state(&key, r#"["10.9.0.0/16"]"#, "[]").await?);
     assert_eq!(
         status(&router, "10.1.2.3:1", None).await?,
         StatusCode::FORBIDDEN

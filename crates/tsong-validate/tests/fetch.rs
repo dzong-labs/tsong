@@ -59,7 +59,7 @@ fn trusted(issuer: &str, jwks_url: Option<&str>) -> TestResult<TrustedIssuer> {
         jwks_timeout: Duration::from_secs(10),
         introspection_url: None,
         client_id: None,
-        client_secret_env: None,
+        client_secret: None,
     })
 }
 

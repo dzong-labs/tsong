@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use tsong_config::{KeyProvider, KeyState, Signing};
+use tsong_secrets::Secrets;
 
 use crate::{FileKey, KeyError, SigningAlgorithm, SigningKey};
 
@@ -44,19 +45,32 @@ impl KeySet {
         })
     }
 
-    /// Loads the keys a config lists.
-    pub fn from_config(signing: &Signing) -> Result<Self, KeyError> {
+    /// Loads the keys a config lists, reading each through `secrets`.
+    pub async fn from_config(signing: &Signing, secrets: &Secrets) -> Result<Self, KeyError> {
         let mut active = Vec::new();
         let mut retiring = Vec::new();
         for entry in &signing.keys {
-            let key: Arc<dyn SigningKey> = match signing.provider {
-                KeyProvider::File => {
-                    let path = entry.path.as_deref().ok_or_else(|| KeyError::MissingPath {
-                        kid: entry.kid.clone(),
-                    })?;
-                    Arc::new(FileKey::load(&entry.kid, entry.algorithm, path)?)
-                }
-            };
+            let key: Arc<dyn SigningKey> =
+                match signing.provider {
+                    KeyProvider::File => {
+                        let reference = entry.private_key.as_ref().ok_or_else(|| {
+                            KeyError::MissingPrivateKey {
+                                kid: entry.kid.clone(),
+                            }
+                        })?;
+                        let pem = secrets.resolve(reference).await.map_err(|source| {
+                            KeyError::Secret {
+                                kid: entry.kid.clone(),
+                                source,
+                            }
+                        })?;
+                        Arc::new(FileKey::from_pem(
+                            &entry.kid,
+                            entry.algorithm,
+                            pem.expose(),
+                        )?)
+                    }
+                };
             match entry.state {
                 KeyState::Active => active.push(key),
                 KeyState::Retiring => retiring.push(key),

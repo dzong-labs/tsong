@@ -3198,6 +3198,7 @@ dependencies = [
  "tsong-git",
  "tsong-issuer",
  "tsong-keys",
+ "tsong-secrets",
  "tsong-validate",
 ]
 
@@ -3297,6 +3298,17 @@ dependencies = [
  "p256",
  "pem",
  "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tsong-config",
+ "tsong-secrets",
+]
+
+[[package]]
+name = "tsong-secrets"
+version = "0.1.0"
+dependencies = [
  "tempfile",
  "thiserror",
  "tokio",

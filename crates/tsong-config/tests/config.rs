@@ -26,7 +26,7 @@ provider = "file"
 const ACTIVE_KEY: &str = r#"
 [[issuer.signing.keys]]
 kid = "k1"
-path = "k1.pem"
+private_key = "file:k1.pem"
 state = "active"
 "#;
 
@@ -160,12 +160,23 @@ fn load_takes_relative_key_paths_from_the_config_directory() -> TestResult {
     std::fs::write(&path, minimal())?;
     let config = Config::load(&path)?;
     assert_eq!(
-        config
-            .active_key(SigningAlgorithm::ES256)
-            .and_then(|key| key.path.as_deref()),
-        Some(&*dir.path().join("k1.pem"))
+        private_key(&config),
+        Some(file_ref(&dir.path().join("k1.pem")))
     );
     Ok(())
+}
+
+/// The active ES256 key's private_key reference, as written.
+fn private_key(config: &Config) -> Option<String> {
+    config
+        .active_key(SigningAlgorithm::ES256)
+        .and_then(|key| key.private_key.as_ref())
+        .map(ToString::to_string)
+}
+
+/// A `file:` reference to `path`.
+fn file_ref(path: &Path) -> String {
+    format!("file:{}", path.display())
 }
 
 #[test]
@@ -379,11 +390,11 @@ fn kids_are_unique_and_not_empty() -> TestResult {
 }
 
 #[test]
-fn file_keys_need_a_path() -> TestResult {
-    let text = minimal().replace("path = \"k1.pem\"\n", "");
+fn file_keys_need_a_private_key() -> TestResult {
+    let text = minimal().replace("private_key = \"file:k1.pem\"\n", "");
     assert_eq!(
         problems(&text)?,
-        [r#"issuer.signing.keys "k1" needs a path for the file provider"#]
+        [r#"issuer.signing.keys "k1" needs a private_key for the file provider"#]
     );
     Ok(())
 }
@@ -422,7 +433,7 @@ fn introspection_urls_are_https() -> TestResult {
             "validation = \"introspection\"
 introspection_url = \"http://okta.example.com/introspect\"
 client_id = \"tsong\"
-client_secret_env = \"SECRET\"
+client_secret = \"env:SECRET\"
 algorithms"
         )
     );
@@ -597,7 +608,7 @@ fn keys_trusted_for_more_than_a_day_warn() -> TestResult {
         longer.warnings()
     );
     let introspected = Config::from_toml(&okta_with(
-        "jwks_max_age = \"25h\"\nvalidation = \"introspection\"\nintrospection_url = \"https://okta.example.com/introspect\"\nclient_id = \"tsong\"\nclient_secret_env = \"SECRET\"",
+        "jwks_max_age = \"25h\"\nvalidation = \"introspection\"\nintrospection_url = \"https://okta.example.com/introspect\"\nclient_id = \"tsong\"\nclient_secret = \"env:SECRET\"",
     ))?;
     assert!(
         !introspected.warnings().0.contains(&warning),
@@ -731,7 +742,7 @@ fn introspection_needs_its_endpoint_and_credentials() -> TestResult {
         [
             "trusted_issuers.okta.introspection_url is required for introspection",
             "trusted_issuers.okta.client_id is required for introspection",
-            "trusted_issuers.okta.client_secret_env is required for introspection",
+            "trusted_issuers.okta.client_secret is required for introspection",
         ]
     );
     Ok(())
@@ -802,11 +813,8 @@ async fn a_file_store_loads_its_file() -> TestResult {
     assert_eq!(snapshot.content, snapshot.revision);
     assert_eq!(snapshot.author, None);
     assert_eq!(
-        snapshot
-            .config
-            .active_key(SigningAlgorithm::ES256)
-            .and_then(|key| key.path.clone()),
-        Some(dir.path().join("k1.pem"))
+        private_key(&snapshot.config),
+        Some(file_ref(&dir.path().join("k1.pem")))
     );
     std::fs::write(
         &path,
@@ -1238,21 +1246,18 @@ fn without_a_directory_key_paths_must_be_absolute() -> TestResult {
         Err(ConfigError::Invalid(problems)) => assert_eq!(
             problems.0,
             [
-                r#"issuer.signing.keys "k1" path must be absolute, since the config has no directory"#
+                r#"issuer.signing.keys "k1" private_key must be an absolute path, since the config has no directory"#
             ]
         ),
         other => return Err(format!("expected invalid, got {other:?}").into()),
     }
     let absolute = std::env::temp_dir().join("k1.pem");
     let text = minimal().replace(
-        r#"path = "k1.pem""#,
-        &format!("path = '{}'", absolute.display()),
+        r#"private_key = "file:k1.pem""#,
+        &format!("private_key = '{}'", file_ref(&absolute)),
     );
     let config = Config::from_text(&text, None)?;
-    let path = config
-        .active_key(SigningAlgorithm::ES256)
-        .and_then(|key| key.path.clone());
-    assert_eq!(path, Some(absolute));
+    assert_eq!(private_key(&config), Some(file_ref(&absolute)));
     Ok(())
 }
 
@@ -1260,10 +1265,7 @@ fn without_a_directory_key_paths_must_be_absolute() -> TestResult {
 fn a_directory_resolves_relative_key_paths() -> TestResult {
     let dir = std::env::temp_dir();
     let config = Config::from_text(&minimal(), Some(&dir))?;
-    let path = config
-        .active_key(SigningAlgorithm::ES256)
-        .and_then(|key| key.path.clone());
-    assert_eq!(path, Some(dir.join("k1.pem")));
+    assert_eq!(private_key(&config), Some(file_ref(&dir.join("k1.pem"))));
     Ok(())
 }
 
@@ -1271,4 +1273,95 @@ fn a_directory_resolves_relative_key_paths() -> TestResult {
 fn hex_is_lowercase_and_two_digits_a_byte() {
     assert_eq!(hex(&[0x00, 0x0f, 0xa0, 0xff]), "000fa0ff");
     assert_eq!(hex(&[]), "");
+}
+
+#[test]
+fn the_retired_secret_fields_are_refused() {
+    let path = minimal().replace("private_key = \"file:k1.pem\"", "path = \"k1.pem\"");
+    assert!(Config::from_toml(&path).is_err());
+    let env = okta_with("client_secret_env = \"SECRET\"");
+    assert!(Config::from_toml(&env).is_err());
+}
+
+#[test]
+fn a_secret_field_takes_only_a_reference() -> TestResult {
+    for (secret, expected) in [
+        (
+            "hunter2",
+            "a secret must be a reference, <scheme>:<id>, with scheme env or file",
+        ),
+        (
+            "C:\\keys\\k1.pem",
+            "a secret reference's scheme must be env or file",
+        ),
+        (
+            "aws-sm:arn",
+            "a secret reference's scheme must be env or file",
+        ),
+        ("file:", "a secret reference needs an id after its scheme"),
+    ] {
+        let text = okta_with(&format!("client_secret = '{secret}'"));
+        let error = Config::from_toml(&text)
+            .err()
+            .ok_or("a bad reference was accepted")?
+            .to_string();
+        assert!(error.contains(expected), "{error}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_client_secret_file_is_taken_from_the_config_directory() -> TestResult {
+    let dir = std::env::temp_dir();
+    let text = okta_with("client_secret = \"file:okta.secret\"");
+    let config = Config::from_text(&text, Some(&dir))?;
+    let secret = trusted(&config, "okta")?.client_secret.as_ref();
+    assert_eq!(
+        secret.map(ToString::to_string),
+        Some(file_ref(&dir.join("okta.secret")))
+    );
+    match Config::from_text(&text, None) {
+        Err(ConfigError::Invalid(problems)) => assert_eq!(
+            problems.0,
+            [
+                r#"issuer.signing.keys "k1" private_key must be an absolute path, since the config has no directory"#,
+                "trusted_issuers.okta.client_secret must be an absolute path, since the config has no directory",
+            ]
+        ),
+        other => return Err(format!("expected invalid, got {other:?}").into()),
+    }
+    let env = okta_with("client_secret = \"env:OKTA\"");
+    let config = Config::from_text(&env, Some(&dir))?;
+    assert_eq!(
+        trusted(&config, "okta")?
+            .client_secret
+            .as_ref()
+            .map(ToString::to_string),
+        Some("env:OKTA".to_owned())
+    );
+    Ok(())
+}
+
+#[test]
+fn a_secret_written_in_by_mistake_is_never_quoted() -> TestResult {
+    let text = okta_with("client_secret = \"hunter2\"");
+    let error = Config::from_toml(&text)
+        .err()
+        .ok_or("a raw secret was accepted")?
+        .to_string();
+    assert!(!error.contains("hunter2"), "{error}");
+    assert!(error.contains("a secret must be a reference"), "{error}");
+    assert!(error.contains("line 27"), "{error}");
+    Ok(())
+}
+
+#[test]
+fn a_reference_is_its_scheme_and_id() -> TestResult {
+    let reference: tsong_config::SecretRef = "file:C:/keys/k1.pem".parse()?;
+    assert_eq!(reference.scheme(), tsong_config::Scheme::File);
+    assert_eq!(reference.id(), "C:/keys/k1.pem");
+    let reference: tsong_config::SecretRef = "env:A:B".parse()?;
+    assert_eq!(reference.scheme(), tsong_config::Scheme::Env);
+    assert_eq!(reference.id(), "A:B");
+    Ok(())
 }

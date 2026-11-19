@@ -10,6 +10,8 @@ mod bootstrap;
 mod duration;
 mod lint;
 mod network;
+mod parse;
+mod secret;
 mod store;
 mod validate;
 
@@ -27,6 +29,8 @@ pub use bootstrap::{
 };
 pub use lint::Warnings;
 pub use network::{allowed, client_ip};
+pub use parse::ParseError;
+pub use secret::{Scheme, SecretRef, SecretRefError};
 pub use store::{ConfigStore, Fetched, FileStore, LoadFuture, Snapshot, hex};
 pub use validate::{Problems, RESERVED_CLAIMS};
 
@@ -75,7 +79,8 @@ pub struct Signing {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum KeyProvider {
-    /// PKCS#8 PEM files on disk.
+    /// A PKCS#8 PEM private key, read through its secret reference and
+    /// signing in process.
     File,
 }
 
@@ -127,8 +132,8 @@ pub struct KeyEntry {
     #[serde(default)]
     pub algorithm: SigningAlgorithm,
     pub state: KeyState,
-    /// The key's file, for the file provider.
-    pub path: Option<PathBuf>,
+    /// The PKCS#8 PEM private key, for the file provider.
+    pub private_key: Option<SecretRef>,
 }
 
 /// Whether a key signs, or is only published.
@@ -212,8 +217,8 @@ pub struct TrustedIssuer {
     pub jwks_timeout: Duration,
     pub introspection_url: Option<Url>,
     pub client_id: Option<String>,
-    /// The environment variable holding the introspection client secret.
-    pub client_secret_env: Option<String>,
+    /// The introspection client secret.
+    pub client_secret: Option<SecretRef>,
 }
 
 fn default_jwks_max_age() -> Duration {
@@ -394,7 +399,7 @@ pub enum ConfigError {
         source: std::io::Error,
     },
     #[error("parsing: {0}")]
-    Parse(#[from] toml::de::Error),
+    Parse(#[from] ParseError),
     #[error("invalid config:\n{0}")]
     Invalid(Problems),
     /// The store couldn't produce the config, such as a failed fetch.
@@ -405,32 +410,45 @@ pub enum ConfigError {
 impl Config {
     /// Parses and validates a TOML document.
     pub fn from_toml(text: &str) -> Result<Self, ConfigError> {
-        let config: Self = toml::from_str(text)?;
+        let config: Self = parse::from_str(text)?;
         config.validate().map_err(ConfigError::Invalid)?;
         Ok(config)
     }
 
-    /// Reads, parses and validates a TOML file. Relative key paths are
-    /// taken from the file's directory.
+    /// Reads, parses and validates a TOML file. Relative `file:` secret
+    /// references are taken from the file's directory.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         Self::from_text(&store::read(path)?, Some(&store::directory(path)))
     }
 
-    /// Parses and validates a TOML document, taking relative key paths from
-    /// `base_dir`. Without one, as for a config from Git, a relative key
-    /// path is a problem: it has nothing to be relative to.
+    /// Parses and validates a TOML document, taking relative `file:` secret
+    /// references from `base_dir`. Without one, as for a config from Git, a
+    /// relative path is a problem: it has nothing to be relative to.
     pub fn from_text(text: &str, base_dir: Option<&Path>) -> Result<Self, ConfigError> {
         let mut config = Self::from_toml(text)?;
         let mut problems = Vec::new();
-        for key in &mut config.issuer.signing.keys {
-            let Some(key_path) = &mut key.path else {
-                continue;
-            };
+        let keys = config.issuer.signing.keys.iter_mut().filter_map(|key| {
+            let field = format!("issuer.signing.keys {:?} private_key", key.kid);
+            key.private_key.as_mut().map(|secret| (field, secret))
+        });
+        let clients = config
+            .trusted_issuers
+            .iter_mut()
+            .filter_map(|(name, trusted)| {
+                let field = format!("trusted_issuers.{name}.client_secret");
+                trusted.client_secret.as_mut().map(|secret| (field, secret))
+            });
+        for (field, secret) in keys.chain(clients) {
             match base_dir {
-                Some(dir) => *key_path = dir.join(&*key_path),
-                None if key_path.is_relative() => problems.push(format!(
-                    "issuer.signing.keys {:?} path must be absolute, since the config has no directory",
-                    key.kid
+                Some(dir) => {
+                    if secret.rebase(dir).is_err() {
+                        problems.push(format!(
+                            "{field} is relative to a directory whose name isn't UTF-8"
+                        ));
+                    }
+                }
+                None if secret.is_relative_file() => problems.push(format!(
+                    "{field} must be an absolute path, since the config has no directory"
                 )),
                 None => {}
             }

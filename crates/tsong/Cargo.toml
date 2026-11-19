@@ -21,6 +21,7 @@ tsong-gateway.workspace = true
 tsong-git.workspace = true
 tsong-issuer.workspace = true
 tsong-keys.workspace = true
+tsong-secrets.workspace = true
 tsong-validate.workspace = true
 tower = { workspace = true, features = ["util"] }
 

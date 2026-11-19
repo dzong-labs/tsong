@@ -38,11 +38,12 @@ Tsong caches the new token until shortly before it expires, so a repeat request 
 10. IP allow lists. `gateway.allow` applies everywhere, and a route's optional `allow` narrows it. Tsong believes `X-Forwarded-For` only from trusted proxies.
 11. Header hygiene. Tsong strips hop-by-hop and `Forwarded` headers, and sets `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host`. It keeps a trusted proxy's values.
 12. Fails closed. 401 for a missing or bad token; 403 for a refused client, audience or scope; 503 when an issuer is unavailable; 502 when the downstream is unreachable; 504 when it stops answering past its read timeout.
-13. Signing keys. Behind the `SigningKey` trait, with PKCS#8 PEM files today. Each key names its algorithm, and Tsong refuses a key of the wrong type: P-256 for ES256, P-384 for ES384, Ed25519 for EdDSA, and a 2048- to 8192-bit RSA key (`openssl genpkey -algorithm RSA`, not `RSA-PSS`) for the RS and PS algorithms. One key is active for each algorithm the routes sign with, and retiring keys stay published in the JWKS.
+13. Signing keys. Behind the `SigningKey` trait, with PKCS#8 PEM keys today, read through secret references. Each key names its algorithm, and Tsong refuses a key of the wrong type: P-256 for ES256, P-384 for ES384, Ed25519 for EdDSA, and a 2048- to 8192-bit RSA key (`openssl genpkey -algorithm RSA`, not `RSA-PSS`) for the RS and PS algorithms. One key is active for each algorithm the routes sign with, and retiring keys stay published in the JWKS.
 14. Config. One TOML file, read through the `ConfigStore` trait from disk or from a folder on a Git branch. Unknown fields are errors, and Tsong reports every problem at once.
 15. Reload from Git. A signed push webhook from GitHub or GitLab, or a poll, fetches the branch over SSH with a deploy key. Tsong validates a new config and builds its state in full before swapping it in. A config that fails leaves the old one serving. Tsong audits each reload as a JSON line on stdout, and `GET /status` on the admin listener reports the revision being served and when the store was last read. If Git can't be read, the last good config keeps serving, and metrics show its age and each replica's revision.
 16. Observability. Liveness and readiness on their own listener, Prometheus metrics at `GET /metrics` (cache hits and misses, requests and downstream latency by route, exchanges, JWKS failures and key age, reloads), one JSON audit line per token exchange with the caller's `iss` and `sub`, an audit line for each failed JWKS fetch and for the fetch that recovers, and every request correlated by `X-Request-Id` and W3C `traceparent`.
 17. CLI. `tsong check` validates a config and loads its keys. It warns on empty or accept-anything lists, and on issuer keys trusted for more than a day. `--deny-warnings` fails on warnings in CI. `tsong serve` reads a bootstrap file, deployed with Tsong, that names the config source and the admin and webhook listeners, then runs the gateway and the issuer.
+18. Secret references. A secret field holds a reference, never the secret: `env:<name>` reads an environment variable, and `file:<path>` reads a file of up to 64 KiB, without one trailing line ending, a relative path taken from the config file's directory. The secret fields are a signing key's `private_key`, a trusted issuer's `client_secret` and the bootstrap file's `webhook.secret`. Anything else in them is refused, as are a missing or empty secret.
 
 ## Usage
 
@@ -69,6 +70,7 @@ deploy/podman/run.sh stop     # SIGTERM, then the drain
 
 - `tsong-config`: the TOML model, its validation and warnings, the host route table, the client-address rules, the bootstrap file, and the `ConfigStore` trait with the file store.
 - `tsong-clock`: the injected `Clock`.
+- `tsong-secrets`: the `SecretSource` trait, and the sources that read secret references.
 - `tsong-keys`: the `SigningKey` trait, the `KeySet` that rotates keys, and the file provider.
 - `tsong-validate`: inbound token validation and JWKS fetching, shared by the issuer and the gateway.
 - `tsong-issuer`: the RFC 8693 token endpoint, JWKS and discovery.

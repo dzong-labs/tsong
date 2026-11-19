@@ -1,6 +1,5 @@
-//! A PKCS#8 PEM private key in a file, signing in process.
+//! A PKCS#8 PEM private key, signing in process.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use aws_lc_rs::rand::SystemRandom;
@@ -11,7 +10,7 @@ use serde_json::{Value, json};
 
 use crate::{KeyError, SignFuture, SigningAlgorithm, SigningKey};
 
-/// A private key read from a PEM file, for one algorithm.
+/// A private key read from PEM, for one algorithm.
 pub struct FileKey {
     kid: String,
     algorithm: SigningAlgorithm,
@@ -42,17 +41,12 @@ fn key_type(algorithm: SigningAlgorithm) -> &'static str {
 }
 
 impl FileKey {
-    /// Reads the key at `path`, which must suit `algorithm`.
-    pub fn load(kid: &str, algorithm: SigningAlgorithm, path: &Path) -> Result<Self, KeyError> {
-        let pem = std::fs::read_to_string(path).map_err(|source| KeyError::Read {
-            kid: kid.to_owned(),
-            source,
-        })?;
-        Self::from_pem(kid, algorithm, &pem)
-    }
-
     /// Parses a PKCS#8 PEM private key of the type `algorithm` signs with.
-    pub fn from_pem(kid: &str, algorithm: SigningAlgorithm, pem: &str) -> Result<Self, KeyError> {
+    pub fn from_pem(
+        kid: &str,
+        algorithm: SigningAlgorithm,
+        pem: impl AsRef<[u8]>,
+    ) -> Result<Self, KeyError> {
         let decode = || KeyError::Decode {
             kid: kid.to_owned(),
             expected: key_type(algorithm),
