@@ -20,6 +20,11 @@ Tsong is a technical project. This code covers how people treat each other in it
 
 ## Enforcement
 
-Report a problem to the maintainers privately, by email to the address on the maintainer's GitHub profile, or in a private vulnerability report if that's the only private channel you have. Reports are kept confidential.
+Report a problem to the maintainers through GitHub:
+
+- Privately, with the repository's [private report form](https://github.com/marklauter/tsong/security/advisories/new). Start the title with "Code of conduct" so it isn't mistaken for a vulnerability. Only the maintainers see it, and it's kept confidential.
+- In an [issue](https://github.com/marklauter/tsong/issues), if the matter needn't be private.
+
+You can also report a comment or an account to GitHub itself, with the "Report content" option on the comment or the profile.
 
 The maintainers decide what action to take, in proportion to what happened: a warning, removing or editing a comment, locking a thread, or blocking someone from the project, temporarily or for good. The maintainers' decision is final.
