@@ -64,8 +64,8 @@ pub fn config_on(key: &Path, issuer: &str, port: u16, gateway_port: u16, routes:
 [issuer]
 url = "{issuer}"
 listen = "127.0.0.1:{port}"
-token_lifetime = "15m"
-clock_skew = "30s"
+token_lifetime = "00:15:00"
+clock_skew = "00:00:30"
 
 [issuer.signing]
 provider = "file"

@@ -17,8 +17,8 @@ const ISSUER: &str = r#"
 [issuer]
 url = "https://tsong.example.com"
 listen = "127.0.0.1:8444"
-token_lifetime = "15m"
-clock_skew = "30s"
+token_lifetime = "00:15:00"
+clock_skew = "00:00:30"
 
 [issuer.signing]
 provider = "file"
@@ -227,7 +227,7 @@ fn unknown_fields_are_rejected() -> TestResult {
 
 #[test]
 fn durations_must_parse() -> TestResult {
-    let text = minimal().replace("\"30s\"", "\"soon\"");
+    let text = minimal().replace("\"00:00:30\"", "\"soon\"");
     parse_error(&text)?;
     Ok(())
 }
@@ -250,7 +250,7 @@ fn issuer_url_must_be_https() -> TestResult {
 
 #[test]
 fn clock_skew_must_be_shorter_than_token_lifetime() -> TestResult {
-    let text = minimal().replace("\"30s\"", "\"15m\"");
+    let text = minimal().replace("\"00:00:30\"", "\"00:15:00\"");
     assert_eq!(
         problems(&text)?,
         ["issuer.clock_skew must be shorter than issuer.token_lifetime"]
@@ -527,7 +527,7 @@ fn jwks_refetch_is_configurable() -> TestResult {
         minimal(),
         OKTA.replace(
             "algorithms",
-            "jwks_refetch = \"5m\"
+            "jwks_refetch = \"00:05:00\"
 algorithms"
         )
     );
@@ -567,7 +567,7 @@ fn key_timing_has_defaults_and_is_configurable() -> TestResult {
         )
     );
     let config = Config::from_toml(&okta_with(
-        "jwks_max_age = \"2h\"\njwks_retry = \"5s\"\njwks_timeout = \"3s\"",
+        "jwks_max_age = \"02:00:00\"\njwks_retry = \"00:00:05\"\njwks_timeout = \"00:00:03\"",
     ))?;
     let okta = trusted(&config, "okta")?;
     assert_eq!(
@@ -585,7 +585,7 @@ fn key_timing_has_defaults_and_is_configurable() -> TestResult {
 fn key_timing_is_above_zero() -> TestResult {
     for field in ["jwks_max_age", "jwks_retry", "jwks_refetch", "jwks_timeout"] {
         assert_eq!(
-            problems(&okta_with(&format!("{field} = \"0s\"")))?,
+            problems(&okta_with(&format!("{field} = \"00:00:00\"")))?,
             [format!("trusted_issuers.okta.{field} must be above zero")]
         );
     }
@@ -629,16 +629,16 @@ fn a_discovery_url_and_a_jwks_url_are_not_both_set() -> TestResult {
 #[test]
 fn keys_trusted_for_more_than_a_day_warn() -> TestResult {
     let warning = "trusted_issuers.okta.jwks_max_age is over 24h; a key the issuer withdraws stays trusted that long".to_owned();
-    let day = Config::from_toml(&okta_with("jwks_max_age = \"24h\""))?;
+    let day = Config::from_toml(&okta_with("jwks_max_age = \"1.00:00:00\""))?;
     assert!(!day.warnings().0.contains(&warning), "{}", day.warnings());
-    let longer = Config::from_toml(&okta_with("jwks_max_age = \"25h\""))?;
+    let longer = Config::from_toml(&okta_with("jwks_max_age = \"1.01:00:00\""))?;
     assert!(
         longer.warnings().0.contains(&warning),
         "{}",
         longer.warnings()
     );
     let introspected = Config::from_toml(&okta_with(
-        "jwks_max_age = \"25h\"\nvalidation = \"introspection\"\nintrospection_url = \"https://okta.example.com/introspect\"\nclient_id = \"tsong\"\nclient_secret = { env = \"SECRET\" }",
+        "jwks_max_age = \"1.01:00:00\"\nvalidation = \"introspection\"\nintrospection_url = \"https://okta.example.com/introspect\"\nclient_id = \"tsong\"\nclient_secret = { env = \"SECRET\" }",
     ))?;
     assert!(
         !introspected.warnings().0.contains(&warning),
@@ -1207,7 +1207,7 @@ fn the_read_timeout_defaults_to_a_minute_and_a_route_may_override_it() -> TestRe
         )
         .replace(
             r#"allowed_scopes = ["orders.read"]"#,
-            "allowed_scopes = [\"orders.read\"]\nread_timeout = \"5m\"",
+            "allowed_scopes = [\"orders.read\"]\nread_timeout = \"00:05:00\"",
         );
     let config = Config::from_toml(&with_route(&format!("{ROUTE}{second}")))?;
     assert_eq!(config.gateway.read_timeout, Duration::from_secs(60));
@@ -1221,7 +1221,7 @@ fn the_read_timeout_defaults_to_a_minute_and_a_route_may_override_it() -> TestRe
     );
     let text = with_route(ROUTE).replace(
         "[gateway.cache]",
-        "read_timeout = \"90s\"\n\n[gateway.cache]",
+        "read_timeout = \"00:01:30\"\n\n[gateway.cache]",
     );
     let config = Config::from_toml(&text)?;
     assert_eq!(
@@ -1235,11 +1235,11 @@ fn the_read_timeout_defaults_to_a_minute_and_a_route_may_override_it() -> TestRe
 fn read_timeouts_are_above_zero() -> TestResult {
     let text = route_with(
         r#"allowed_scopes = ["orders.read"]"#,
-        "allowed_scopes = [\"orders.read\"]\nread_timeout = \"0s\"",
+        "allowed_scopes = [\"orders.read\"]\nread_timeout = \"00:00:00\"",
     )
     .replace(
         "[gateway.cache]",
-        "read_timeout = \"0s\"\n\n[gateway.cache]",
+        "read_timeout = \"00:00:00\"\n\n[gateway.cache]",
     );
     assert_eq!(
         problems(&text)?,
