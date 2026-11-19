@@ -38,7 +38,7 @@ provider = "file"
 
 [[issuer.signing.keys]]
 kid = "tsong-1"
-private_key = "file:unused.pem"
+private_key = { file = "unused.pem" }
 state = "active"
 
 [gateway]

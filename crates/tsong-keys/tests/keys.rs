@@ -311,9 +311,9 @@ fn a_key_set_needs_one_active_key_per_algorithm() -> TestResult {
     Ok(())
 }
 
-/// A `file:` reference to `path`.
+/// A `file` reference to `path`.
 fn file_ref(path: &Path) -> TestResult<SecretRef> {
-    Ok(format!("file:{}", path.display()).parse()?)
+    Ok(SecretRef::new(Scheme::File, path.display().to_string())?)
 }
 
 /// The keys `signing` lists, read through the default sources.
@@ -414,7 +414,7 @@ async fn a_private_key_is_read_through_its_source() -> TestResult {
     let dir = tempfile::tempdir()?;
     let mut signing = signing(dir.path(), &[("k1", KeyState::Active)])?;
     for key in &mut signing.keys {
-        key.private_key = Some("env:TSONG_K1".parse()?);
+        key.private_key = Some(SecretRef::new(Scheme::Env, "TSONG_K1")?);
     }
     let secrets = Secrets::empty().with(Scheme::Env, Arc::new(Fixed(pem(1)?)));
     let set = KeySet::from_config(&signing, &secrets).await?;
@@ -439,7 +439,7 @@ async fn a_missing_private_key_names_its_reference() -> TestResult {
         key.private_key = Some(file_ref(&missing)?);
     }
     let error = failure(load(&signing).await)?.to_string();
-    let prefix = format!(r#"key "k1": reading secret file:{}: "#, missing.display());
+    let prefix = format!(r#"key "k1": reading secret {}: "#, file_ref(&missing)?);
     assert!(error.starts_with(&prefix), "{error}");
     Ok(())
 }

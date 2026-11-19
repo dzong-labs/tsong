@@ -27,7 +27,7 @@ provider = "file"
 
 [[issuer.signing.keys]]
 kid = "k1"
-private_key = "file:k1.pem"
+private_key = { file = "k1.pem" }
 state = "active"
 
 [gateway]
@@ -53,7 +53,7 @@ audiences = ["tsong"]
 validation = "introspection"
 introspection_url = "https://gitlab.test/introspect"
 client_id = "tsong"
-client_secret = "env:SECRET"
+client_secret = { env = "SECRET" }
 "#;
 
 struct Harness {

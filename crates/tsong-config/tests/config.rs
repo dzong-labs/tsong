@@ -5,7 +5,8 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 use tsong_config::{
     ANY, Config, ConfigError, ConfigStore, FileStore, InboundAlgorithm, KeyProvider, KeyState,
-    Route, RouteTable, SigningAlgorithm, TrustedIssuer, Validation, Warnings, hex,
+    Route, RouteTable, Scheme, SecretRef, SecretRefError, SigningAlgorithm, TrustedIssuer,
+    Validation, Warnings, hex,
 };
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
@@ -26,7 +27,7 @@ provider = "file"
 const ACTIVE_KEY: &str = r#"
 [[issuer.signing.keys]]
 kid = "k1"
-private_key = "file:k1.pem"
+private_key = { file = "k1.pem" }
 state = "active"
 "#;
 
@@ -161,7 +162,7 @@ fn load_takes_relative_key_paths_from_the_config_directory() -> TestResult {
     let config = Config::load(&path)?;
     assert_eq!(
         private_key(&config),
-        Some(file_ref(&dir.path().join("k1.pem")))
+        Some(file_ref(&dir.path().join("k1.pem"))?)
     );
     Ok(())
 }
@@ -174,9 +175,38 @@ fn private_key(config: &Config) -> Option<String> {
         .map(ToString::to_string)
 }
 
-/// A `file:` reference to `path`.
-fn file_ref(path: &Path) -> String {
-    format!("file:{}", path.display())
+/// The error for a secret field that holds anything but a reference.
+const NOT_A_REFERENCE: &str = r#"a secret must be a reference, such as { env = "NAME" } or { file = "path" }, never the secret"#;
+
+/// A `file` reference to `path`, as a config writes it.
+fn file_ref(path: &Path) -> TestResult<String> {
+    Ok(SecretRef::new(Scheme::File, path.display().to_string())?.to_string())
+}
+
+#[test]
+fn a_reference_displays_as_toml_that_reads_back() -> TestResult {
+    for id in [
+        "NAME",
+        r"C:\keys\k1.pem",
+        r#"a "b" c"#,
+        "tab\there",
+        "e\u{301}",
+        "esc\u{1b}",
+    ] {
+        let reference = SecretRef::new(Scheme::File, id)?;
+        let text = format!("x = {reference}");
+        let table: toml::Table = toml::from_str(&text)?;
+        let read = table
+            .get("x")
+            .and_then(|x| x.get("file"))
+            .and_then(toml::Value::as_str);
+        assert_eq!(read, Some(id), "{text}");
+    }
+    assert_eq!(
+        SecretRef::new(Scheme::Env, "A")?.to_string(),
+        r#"{ env = "A" }"#
+    );
+    Ok(())
 }
 
 #[test]
@@ -391,7 +421,7 @@ fn kids_are_unique_and_not_empty() -> TestResult {
 
 #[test]
 fn file_keys_need_a_private_key() -> TestResult {
-    let text = minimal().replace("private_key = \"file:k1.pem\"\n", "");
+    let text = minimal().replace("private_key = { file = \"k1.pem\" }\n", "");
     assert_eq!(
         problems(&text)?,
         [r#"issuer.signing.keys "k1" needs a private_key for the file provider"#]
@@ -433,7 +463,7 @@ fn introspection_urls_are_https() -> TestResult {
             "validation = \"introspection\"
 introspection_url = \"http://okta.example.com/introspect\"
 client_id = \"tsong\"
-client_secret = \"env:SECRET\"
+client_secret = { env = \"SECRET\" }
 algorithms"
         )
     );
@@ -608,7 +638,7 @@ fn keys_trusted_for_more_than_a_day_warn() -> TestResult {
         longer.warnings()
     );
     let introspected = Config::from_toml(&okta_with(
-        "jwks_max_age = \"25h\"\nvalidation = \"introspection\"\nintrospection_url = \"https://okta.example.com/introspect\"\nclient_id = \"tsong\"\nclient_secret = \"env:SECRET\"",
+        "jwks_max_age = \"25h\"\nvalidation = \"introspection\"\nintrospection_url = \"https://okta.example.com/introspect\"\nclient_id = \"tsong\"\nclient_secret = { env = \"SECRET\" }",
     ))?;
     assert!(
         !introspected.warnings().0.contains(&warning),
@@ -814,7 +844,7 @@ async fn a_file_store_loads_its_file() -> TestResult {
     assert_eq!(snapshot.author, None);
     assert_eq!(
         private_key(&snapshot.config),
-        Some(file_ref(&dir.path().join("k1.pem")))
+        Some(file_ref(&dir.path().join("k1.pem"))?)
     );
     std::fs::write(
         &path,
@@ -1253,11 +1283,11 @@ fn without_a_directory_key_paths_must_be_absolute() -> TestResult {
     }
     let absolute = std::env::temp_dir().join("k1.pem");
     let text = minimal().replace(
-        r#"private_key = "file:k1.pem""#,
-        &format!("private_key = '{}'", file_ref(&absolute)),
+        r#"private_key = { file = "k1.pem" }"#,
+        &format!("private_key = {}", file_ref(&absolute)?),
     );
     let config = Config::from_text(&text, None)?;
-    assert_eq!(private_key(&config), Some(file_ref(&absolute)));
+    assert_eq!(private_key(&config), Some(file_ref(&absolute)?));
     Ok(())
 }
 
@@ -1265,7 +1295,7 @@ fn without_a_directory_key_paths_must_be_absolute() -> TestResult {
 fn a_directory_resolves_relative_key_paths() -> TestResult {
     let dir = std::env::temp_dir();
     let config = Config::from_text(&minimal(), Some(&dir))?;
-    assert_eq!(private_key(&config), Some(file_ref(&dir.join("k1.pem"))));
+    assert_eq!(private_key(&config), Some(file_ref(&dir.join("k1.pem"))?));
     Ok(())
 }
 
@@ -1277,7 +1307,7 @@ fn hex_is_lowercase_and_two_digits_a_byte() {
 
 #[test]
 fn the_retired_secret_fields_are_refused() {
-    let path = minimal().replace("private_key = \"file:k1.pem\"", "path = \"k1.pem\"");
+    let path = minimal().replace("private_key = { file = \"k1.pem\" }", "path = \"k1.pem\"");
     assert!(Config::from_toml(&path).is_err());
     let env = okta_with("client_secret_env = \"SECRET\"");
     assert!(Config::from_toml(&env).is_err());
@@ -1285,27 +1315,46 @@ fn the_retired_secret_fields_are_refused() {
 
 #[test]
 fn a_secret_field_takes_only_a_reference() -> TestResult {
-    for (secret, expected) in [
+    let not_a_table = NOT_A_REFERENCE;
+    let not_one = "a secret reference must have exactly one key, env or file";
+    for (written, expected) in [
+        ("\"hunter2\"", not_a_table),
+        ("\"env:SECRET\"", not_a_table),
+        ("1234", not_a_table),
+        ("true", not_a_table),
+        ("[\"hunter2\"]", not_a_table),
+        ("2026-11-18", not_a_table),
+        ("2026-11-18T10:00:00Z", not_a_table),
         (
-            "hunter2",
-            "a secret must be a reference, <scheme>:<id>, with scheme env or file",
+            "{ env = 2026-11-18 }",
+            "a secret reference's id must be a string",
+        ),
+        ("{}", not_one),
+        ("{ env = \"A\", file = \"b\" }", not_one),
+        (
+            "{ aws-sm = \"arn\" }",
+            "a secret reference's key must be env or file",
+        ),
+        ("{ env = 1234 }", "a secret reference's id must be a string"),
+        (
+            "{ env = [\"x\"] }",
+            "a secret reference's id must be a string",
         ),
         (
-            "C:\\keys\\k1.pem",
-            "a secret reference's scheme must be env or file",
+            "{ env = { a = \"x\" } }",
+            "a secret reference's id must be a string",
         ),
         (
-            "aws-sm:arn",
-            "a secret reference's scheme must be env or file",
+            "{ file = \"\" }",
+            "a secret reference's id must not be empty",
         ),
-        ("file:", "a secret reference needs an id after its scheme"),
     ] {
-        let text = okta_with(&format!("client_secret = '{secret}'"));
+        let text = okta_with(&format!("client_secret = {written}"));
         let error = Config::from_toml(&text)
             .err()
             .ok_or("a bad reference was accepted")?
             .to_string();
-        assert!(error.contains(expected), "{error}");
+        assert!(error.contains(expected), "{written}: {error}");
     }
     Ok(())
 }
@@ -1313,12 +1362,12 @@ fn a_secret_field_takes_only_a_reference() -> TestResult {
 #[test]
 fn a_client_secret_file_is_taken_from_the_config_directory() -> TestResult {
     let dir = std::env::temp_dir();
-    let text = okta_with("client_secret = \"file:okta.secret\"");
+    let text = okta_with("client_secret = { file = \"okta.secret\" }");
     let config = Config::from_text(&text, Some(&dir))?;
     let secret = trusted(&config, "okta")?.client_secret.as_ref();
     assert_eq!(
         secret.map(ToString::to_string),
-        Some(file_ref(&dir.join("okta.secret")))
+        Some(file_ref(&dir.join("okta.secret"))?)
     );
     match Config::from_text(&text, None) {
         Err(ConfigError::Invalid(problems)) => assert_eq!(
@@ -1330,14 +1379,14 @@ fn a_client_secret_file_is_taken_from_the_config_directory() -> TestResult {
         ),
         other => return Err(format!("expected invalid, got {other:?}").into()),
     }
-    let env = okta_with("client_secret = \"env:OKTA\"");
+    let env = okta_with("client_secret = { env = \"OKTA\" }");
     let config = Config::from_text(&env, Some(&dir))?;
     assert_eq!(
         trusted(&config, "okta")?
             .client_secret
             .as_ref()
             .map(ToString::to_string),
-        Some("env:OKTA".to_owned())
+        Some(r#"{ env = "OKTA" }"#.to_owned())
     );
     Ok(())
 }
@@ -1357,11 +1406,94 @@ fn a_secret_written_in_by_mistake_is_never_quoted() -> TestResult {
 
 #[test]
 fn a_reference_is_its_scheme_and_id() -> TestResult {
-    let reference: tsong_config::SecretRef = "file:C:/keys/k1.pem".parse()?;
-    assert_eq!(reference.scheme(), tsong_config::Scheme::File);
-    assert_eq!(reference.id(), "C:/keys/k1.pem");
-    let reference: tsong_config::SecretRef = "env:A:B".parse()?;
-    assert_eq!(reference.scheme(), tsong_config::Scheme::Env);
+    let text = okta_with(r#"client_secret = { file = 'C:\keys\k1.pem' }"#);
+    let config = Config::from_toml(&text)?;
+    let reference = trusted(&config, "okta")?
+        .client_secret
+        .as_ref()
+        .ok_or("no client_secret")?;
+    assert_eq!(reference.scheme(), Scheme::File);
+    assert_eq!(reference.id(), r"C:\keys\k1.pem");
+    assert_eq!(reference.to_string(), r#"{ file = "C:\\keys\\k1.pem" }"#);
+    let reference = SecretRef::new(Scheme::Env, "A:B")?;
+    assert_eq!(reference.scheme(), Scheme::Env);
     assert_eq!(reference.id(), "A:B");
+    assert_eq!(reference.to_string(), r#"{ env = "A:B" }"#);
+    assert_eq!(
+        SecretRef::new(Scheme::Env, "").err(),
+        Some(SecretRefError::NoId)
+    );
+    Ok(())
+}
+
+#[test]
+fn a_reference_from_another_format_is_refused_by_shape() {
+    use serde::Deserialize;
+    use serde::de::value::{Error, MapDeserializer, UnitDeserializer};
+    let unit = SecretRef::deserialize(UnitDeserializer::<Error>::new());
+    assert_eq!(
+        unit.err().map(|error| error.to_string()),
+        Some(NOT_A_REFERENCE.into())
+    );
+    let map = MapDeserializer::<_, Error>::new([("env", ())].into_iter());
+    assert_eq!(
+        SecretRef::deserialize(map)
+            .err()
+            .map(|error| error.to_string()),
+        Some(NOT_A_REFERENCE.into())
+    );
+}
+
+#[test]
+fn a_long_number_written_in_by_mistake_is_never_quoted() -> TestResult {
+    for written in [
+        "99999999999999999999",
+        "-99999999999999999999",
+        "{ env = 99999999999999999999 }",
+        "{ env = -99999999999999999999 }",
+    ] {
+        let text = okta_with(&format!("client_secret = {written}"));
+        let error = Config::from_toml(&text)
+            .err()
+            .ok_or("a raw secret was accepted")?
+            .to_string();
+        assert!(!error.contains("99999"), "{written}: {error}");
+    }
+    Ok(())
+}
+
+/// Every shape a secret written in by mistake might take. The secret is
+/// `SEKRET`, and no error may quote it.
+const MISTAKES: [&str; 16] = [
+    r#"client_secret = "SEKRET""#,
+    r#"client_secret = "SEK\qRET""#,
+    "client_secret = SEKRET",
+    "client_secret = -SEKRET",
+    "client_secret = 0xSEKRET",
+    "client_secret = '''SEKRET\nmore'''\nclient_secret = 1",
+    r#"client_secret = [ "SEKRET" ]"#,
+    r#"client_secret = { SEKRET = "x" }"#,
+    r#"client_secret = { env = "x", env = "SEKRET" }"#,
+    r#"client_secret = { env = "x", SEKRET }"#,
+    r#"client_secret = { env = { SEKRET = 1 } }"#,
+    r#"client_secret = { "$__toml_private_datetime" = "SEKRET" }"#,
+    "client_secret = 9999999999999999999999SEKRET",
+    "client_secret = 1.5e300",
+    "client_secret = 1979-05-27T07:32:00Z",
+    "client_secret = { env = 1979-05-27 }",
+];
+
+#[test]
+fn no_mistaken_secret_reaches_an_error() -> TestResult {
+    for mistake in MISTAKES {
+        let text = okta_with(mistake);
+        let error = Config::from_toml(&text)
+            .err()
+            .ok_or("a mistaken secret was accepted")?
+            .to_string();
+        assert!(!error.contains("SEKRET"), "{mistake}\n{error}");
+        assert!(!error.contains("1979"), "{mistake}\n{error}");
+        assert!(!error.contains("1.5e300"), "{mistake}\n{error}");
+    }
     Ok(())
 }

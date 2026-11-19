@@ -16,7 +16,7 @@ provider = "file"
 # and mounts it read-only.
 [[issuer.signing.keys]]
 kid = "local-1"
-private_key = "file:/etc/tsong/keys/signing.pem"
+private_key = { file = "/etc/tsong/keys/signing.pem" }
 state = "active"
 
 [gateway]

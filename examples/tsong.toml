@@ -14,18 +14,20 @@ provider = "file"
 [[issuer.signing.keys]]
 kid = "2026-11"
 algorithm = "ES256"             # the default; one active key per algorithm
-private_key = "file:/etc/tsong/keys/2026-11.pem"   # a secret reference: env:<name> or file:<path>
+# A secret reference: { env = "NAME" } or { file = "path" }.
+private_key = { file = "/etc/tsong/keys/2026-11.pem" }
 state = "active"
 
 [[issuer.signing.keys]]
 kid = "2026-11-rsa"
 algorithm = "RS256"             # for routes whose services need RSA
-private_key = "env:TSONG_RSA_KEY"   # the PEM itself, in an environment variable
+# The PEM itself, in an environment variable.
+private_key = { env = "TSONG_RSA_KEY" }
 state = "active"
 
 [[issuer.signing.keys]]
 kid = "2026-08"
-private_key = "file:/etc/tsong/keys/2026-08.pem"
+private_key = { file = "/etc/tsong/keys/2026-08.pem" }
 state = "retiring"              # still published in JWKS, never signs
 
 # ── gateway ───────────────────────────────────────────
@@ -64,7 +66,7 @@ audiences = ["tsong"]
 validation = "introspection"
 introspection_url = "https://gitlab.example.com/oauth/introspect"
 client_id = "tsong"
-client_secret = "env:TSONG_GITLAB_SECRET"
+client_secret = { env = "TSONG_GITLAB_SECRET" }
 
 # ── claim mapping ─────────────────────────────────────
 [claims]

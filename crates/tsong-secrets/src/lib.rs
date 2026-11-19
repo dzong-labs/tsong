@@ -63,7 +63,7 @@ pub trait SecretSource: Send + Sync {
     fn resolve<'a>(&'a self, reference: &'a SecretRef) -> ResolveFuture<'a>;
 }
 
-/// Reads `env:` secrets from environment variables.
+/// Reads `env` secrets from environment variables.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Env;
 
@@ -80,7 +80,7 @@ impl SecretSource for Env {
     }
 }
 
-/// Reads `file:` secrets from files. One trailing line ending is dropped,
+/// Reads `file` secrets from files. One trailing line ending is dropped,
 /// as `echo` and most editors write one.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct File;

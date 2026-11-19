@@ -42,7 +42,7 @@ provider = "file"
 
 [[issuer.signing.keys]]
 kid = "k1"
-private_key = 'file:{}'
+private_key = {{ file = '{}' }}
 state = "active"
 
 [gateway]
@@ -293,7 +293,7 @@ async fn a_fetch_that_runs_too_long_is_abandoned() -> TestResult {
 async fn key_paths_in_a_config_from_git_are_absolute() -> TestResult {
     let f = Fixture::new()?;
     let key = std::env::temp_dir().join("k1.pem").display().to_string();
-    let relative = config(10).replace(&format!("'file:{key}'"), "\"file:k1.pem\"");
+    let relative = config(10).replace(&format!("'{key}'"), "\"k1.pem\"");
     f.commit("tsong.toml", &relative)?;
     match f.store("main", "")?.load().await?.parse() {
         Err(ConfigError::Invalid(problems)) => assert_eq!(

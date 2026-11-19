@@ -15,6 +15,11 @@ fn failure<T, E>(result: Result<T, E>) -> TestResult<E> {
     }
 }
 
+/// A `file` reference to `path`.
+fn file_ref(path: &std::path::Path) -> TestResult<SecretRef> {
+    Ok(SecretRef::new(Scheme::File, path.display().to_string())?)
+}
+
 /// A source that answers every reference with the same bytes.
 struct Fixed(&'static [u8]);
 
@@ -28,7 +33,7 @@ impl SecretSource for Fixed {
 #[tokio::test]
 async fn an_env_secret_is_its_variable() -> TestResult {
     // PATH is always set and never empty.
-    let reference: SecretRef = "env:PATH".parse()?;
+    let reference = SecretRef::new(Scheme::Env, "PATH")?;
     let secret = Secrets::default().resolve(&reference).await?;
     assert_eq!(secret.expose(), std::env::var("PATH")?.as_bytes());
     Ok(())
@@ -36,12 +41,12 @@ async fn an_env_secret_is_its_variable() -> TestResult {
 
 #[tokio::test]
 async fn an_unset_variable_is_reported() -> TestResult {
-    let reference = "env:TSONG_TEST_SECRET_THAT_IS_NEVER_SET".parse()?;
+    let reference = SecretRef::new(Scheme::Env, "TSONG_TEST_SECRET_THAT_IS_NEVER_SET")?;
     let error = failure(Env.resolve(&reference).await)?;
     assert!(matches!(error, SecretError::NotSet(_)));
     assert_eq!(
         error.to_string(),
-        "secret env:TSONG_TEST_SECRET_THAT_IS_NEVER_SET is not set"
+        r#"secret { env = "TSONG_TEST_SECRET_THAT_IS_NEVER_SET" } is not set"#
     );
     Ok(())
 }
@@ -51,7 +56,7 @@ async fn a_file_secret_is_its_bytes() -> TestResult {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("secret");
     std::fs::write(&path, b" s3cret\t")?;
-    let reference = format!("file:{}", path.display()).parse()?;
+    let reference = file_ref(&path)?;
     let secret = Secrets::default().resolve(&reference).await?;
     assert_eq!(secret.expose(), b" s3cret\t");
     Ok(())
@@ -61,10 +66,10 @@ async fn a_file_secret_is_its_bytes() -> TestResult {
 async fn a_missing_file_is_reported() -> TestResult {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("missing");
-    let reference = format!("file:{}", path.display()).parse()?;
+    let reference = file_ref(&path)?;
     let error = failure(File.resolve(&reference).await)?;
     assert!(matches!(error, SecretError::Read { .. }));
-    let prefix = format!("reading secret file:{}: ", path.display());
+    let prefix = format!("reading secret {reference}: ");
     assert!(error.to_string().starts_with(&prefix), "{error}");
     Ok(())
 }
@@ -74,12 +79,9 @@ async fn an_empty_secret_is_refused() -> TestResult {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("empty");
     std::fs::write(&path, b"")?;
-    let reference = format!("file:{}", path.display()).parse()?;
+    let reference = file_ref(&path)?;
     let error = failure(Secrets::default().resolve(&reference).await)?;
-    assert_eq!(
-        error.to_string(),
-        format!("secret file:{} is empty", path.display())
-    );
+    assert_eq!(error.to_string(), format!("secret {reference} is empty"));
     Ok(())
 }
 
@@ -88,8 +90,10 @@ async fn each_scheme_goes_to_its_own_source() -> TestResult {
     let secrets = Secrets::empty()
         .with(Scheme::Env, Arc::new(Fixed(b"from env")))
         .with(Scheme::File, Arc::new(Fixed(b"from file")));
-    let env = secrets.resolve(&"env:A".parse()?).await?;
-    let file = secrets.resolve(&"file:/a".parse()?).await?;
+    let env = secrets.resolve(&SecretRef::new(Scheme::Env, "A")?).await?;
+    let file = secrets
+        .resolve(&SecretRef::new(Scheme::File, "/a")?)
+        .await?;
     assert_eq!(env.expose(), b"from env");
     assert_eq!(file.expose(), b"from file");
     Ok(())
@@ -98,7 +102,7 @@ async fn each_scheme_goes_to_its_own_source() -> TestResult {
 #[tokio::test]
 async fn a_scheme_without_a_source_is_refused() -> TestResult {
     let secrets = Secrets::empty().with(Scheme::File, Arc::new(Fixed(b"x")));
-    let error = failure(secrets.resolve(&"env:A".parse()?).await)?;
+    let error = failure(secrets.resolve(&SecretRef::new(Scheme::Env, "A")?).await)?;
     assert_eq!(error.to_string(), "no source reads env secrets");
     Ok(())
 }
@@ -114,7 +118,7 @@ fn debug_never_shows_a_secret() {
 async fn a_file_secret_drops_one_trailing_line_ending() -> TestResult {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("secret");
-    let reference = format!("file:{}", path.display()).parse()?;
+    let reference = file_ref(&path)?;
     for (written, read) in [
         (&b"s3cret\n"[..], &b"s3cret"[..]),
         (b"s3cret\r\n", b"s3cret"),
@@ -135,7 +139,7 @@ async fn a_file_secret_drops_one_trailing_line_ending() -> TestResult {
 async fn a_file_secret_over_the_limit_is_refused() -> TestResult {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("big");
-    let reference = format!("file:{}", path.display()).parse()?;
+    let reference = file_ref(&path)?;
     std::fs::write(&path, vec![b'a'; tsong_secrets::MAX_SECRET_BYTES])?;
     let secret = Secrets::default().resolve(&reference).await?;
     assert_eq!(secret.expose().len(), tsong_secrets::MAX_SECRET_BYTES);
@@ -144,8 +148,8 @@ async fn a_file_secret_over_the_limit_is_refused() -> TestResult {
     assert_eq!(
         error.to_string(),
         format!(
-            "secret file:{} is over {} bytes",
-            path.display(),
+            "secret {} is over {} bytes",
+            reference,
             tsong_secrets::MAX_SECRET_BYTES
         )
     );
