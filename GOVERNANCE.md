@@ -18,7 +18,7 @@ A contributor with a record of accepted changes can be invited to become a maint
 
 ## Releasing
 
-The maintainer cuts a release by pushing a version tag, such as `v0.2.0`, signed with `git tag -s`. The [release workflow](.github/workflows/release.yml) builds the binary and the container image, signs each with an artifact attestation, and puts the binary and its `SHA256SUMS` on a draft GitHub release. The maintainer reviews the draft's notes and publishes it. [SECURITY.md](SECURITY.md#verifying-a-release) says how to verify a release.
+The maintainer cuts a release by pushing a version tag, such as `v0.2.0`, signed with `git tag -s`. The [release workflow](.github/workflows/release.yml) builds the binary and the container image, signs each with an artifact attestation, and puts the binary and its `SHA256SUMS` on a draft GitHub release. The maintainer reviews the draft's notes and publishes it. [SECURITY.md](SECURITY.md#verifying-a-release) says how to verify a release. [docs/notes/releases.md](docs/notes/releases.md) explains how a release is cut, built and signed.
 
 ## Continuity
 
