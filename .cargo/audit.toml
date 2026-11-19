@@ -1,4 +1,5 @@
 [advisories]
 # humantime is unmaintained, with no known vulnerability. Tsong uses it
-# only to parse durations in its own config.
+# only to parse durations in its own config. deny.toml repeats this list;
+# change both together.
 ignore = ["RUSTSEC-2026-0542"]

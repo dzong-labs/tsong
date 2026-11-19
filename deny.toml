@@ -1,0 +1,56 @@
+# cargo-deny checks the dependency graph: where crates come from, which
+# licenses they carry, and which crates and versions are banned. CI and the
+# pre-push hook leave advisories to cargo audit:
+#
+#   cargo deny check bans licenses sources
+
+[graph]
+# Tsong runs on Linux, so dependencies only other platforms pull in don't
+# count.
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+all-features = true
+
+[licenses]
+# Permissive licenses only. A dependency under any other license fails the
+# check until someone reads it and adds it here.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.93
+
+[bans]
+# A version requirement of "*" lets any release in, so none is allowed.
+wildcards = "deny"
+# Two versions of one crate build twice and audit twice. It isn't a fault
+# on its own, since it usually waits on an upstream release, so it warns.
+multiple-versions = "warn"
+# OpenSSL would be a second TLS and crypto stack beside rustls and
+# aws-lc-rs; native-tls is how it usually arrives.
+deny = [
+    { crate = "native-tls", reason = "rustls and aws-lc-rs are Tsong's TLS and crypto" },
+    { crate = "openssl", reason = "rustls and aws-lc-rs are Tsong's TLS and crypto" },
+    { crate = "openssl-sys", reason = "rustls and aws-lc-rs are Tsong's TLS and crypto" },
+]
+
+[sources]
+# Every crate comes from crates.io: no other registry, no Git dependency.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+[advisories]
+# A plain cargo deny check reads advisories too. These ignores match
+# .cargo/audit.toml, which CI uses; change both together.
+ignore = [
+    { id = "RUSTSEC-2026-0542", reason = "humantime is unmaintained; replaced in issue #15" },
+]

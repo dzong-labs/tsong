@@ -42,6 +42,11 @@ tsong-secrets = { version = "0.1.0", path = "crates/tsong-secrets" }
 tsong-validate = { version = "0.1.0", path = "crates/tsong-validate" }
 url = { version = "2.5.8", features = ["serde"] }
 
+# Tsong's own code is safe Rust, tests included; only dependencies may use
+# unsafe.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
 # No code panics, tests included: failures are values, and tests return
 # Result and propagate with ?. assert! and its kin are how a test fails.
 [workspace.lints.clippy]
