@@ -1,8 +1,9 @@
 name: Weekly
 
-# The long runs: every fuzz target for ten minutes, and the property tests
-# with many more cases than a pull request tries. Weekly and by hand, not
-# on every change, because runner minutes are limited.
+# The long runs: every fuzz target for ten minutes, the property tests
+# with many more cases than a pull request tries, and a check that the
+# release build is reproducible. Weekly and by hand, not on every change,
+# because runner minutes are limited.
 on:
   schedule:
     - cron: "17 8 * * 3"
@@ -53,3 +54,13 @@ jobs:
     - uses: ./.github/actions/setup-rust
     - name: Property tests with 100,000 cases each
       run: cargo test -p tsong-config -p tsong-issuer --locked --release --test properties --test mint_properties
+
+  # Two release builds from two copies of the tree must be identical bit
+  # for bit.
+  reproducible:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: ./.github/actions/setup-rust
+    - name: Build twice and compare
+      run: scripts/reproducible.sh
