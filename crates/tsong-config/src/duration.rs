@@ -39,14 +39,28 @@ fn parse_duration(text: &str) -> Result<Duration, DurationError> {
     let hours = below(number(hours, 2..=2)?, 24)?;
     let minutes = below(number(minutes, 2..=2)?, 60)?;
     let seconds = below(number(seconds, 2..=2)?, 60)?;
-    // Seven digits at most, so the nanoseconds stay under a billion.
     let nanos = match fraction {
         None => 0,
-        Some(fraction) => number(fraction, 1..=7)? * 10u64.pow(9 - fraction.len() as u32),
+        Some(fraction) => {
+            let value = number(fraction, 1..=7)?;
+            // Pad to nine digits: seven digits at most, so under a billion.
+            u32::try_from(fraction.len())
+                .ok()
+                .and_then(|digits| 9u32.checked_sub(digits))
+                .and_then(|missing| 10u64.checked_pow(missing))
+                .and_then(|scale| value.checked_mul(scale))
+                .ok_or(DurationError)?
+        }
     };
+    let clock = hours
+        .checked_mul(3600)
+        .zip(minutes.checked_mul(60))
+        .and_then(|(hours, minutes)| hours.checked_add(minutes))
+        .and_then(|clock| clock.checked_add(seconds));
     let whole = days
         .checked_mul(SECONDS_PER_DAY)
-        .and_then(|days| days.checked_add(hours * 3600 + minutes * 60 + seconds))
+        .zip(clock)
+        .and_then(|(days, clock)| days.checked_add(clock))
         .ok_or(DurationError)?;
     Duration::from_secs(whole)
         .checked_add(Duration::from_nanos(nanos))
