@@ -1,8 +1,8 @@
 name: Weekly
 
 # The long runs: every fuzz target for ten minutes, the property tests
-# with many more cases than a pull request tries, and a check that the
-# release build is reproducible. Weekly and by hand, not on every change,
+# with many more cases than a pull request tries, a check that the release
+# build is reproducible, and branch coverage. Weekly and by hand, not on every change,
 # because runner minutes are limited.
 on:
   schedule:
@@ -64,3 +64,21 @@ jobs:
     - uses: ./.github/actions/setup-rust
     - name: Build twice and compare
       run: scripts/reproducible.sh
+
+  # Branch coverage needs a nightly compiler, so it runs here rather than
+  # on every pull request; line coverage is enforced on every pull request.
+  branch-coverage:
+    runs-on: ubuntu-latest
+    env:
+      NIGHTLY: nightly-2026-10-01
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Install nightly
+      run: rustup toolchain install $NIGHTLY --profile minimal --component llvm-tools-preview
+    - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      with:
+        tool: cargo-llvm-cov@0.9.1
+    - name: Measure branch coverage
+      run: |
+        cargo +$NIGHTLY llvm-cov --branch --workspace --locked --summary-only | tee coverage.txt
+        { echo '```'; grep -E '^(Filename|TOTAL)' coverage.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
