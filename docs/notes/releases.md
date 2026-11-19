@@ -8,7 +8,7 @@ created: 2026-11-19
 
 # A release is a signed tag on main, built and signed by the release workflow
 
-No release is built on a developer's machine. The maintainer tags a commit on `main`, and `.github/workflows/release.yml` builds, signs and publishes it. [GOVERNANCE.md](../../GOVERNANCE.md) assigns the job to the maintainer, and [SECURITY.md](../../SECURITY.md#verifying-a-release) tells users how to verify what ships.
+No release is built on a developer's machine. The maintainer tags a commit on `main`, and `.github/workflows/release.yml` builds, signs and publishes it. A tag ruleset, "release tags", lets only repository admins create, move or delete a `v*` tag, so no other account, token or app can start a release. [GOVERNANCE.md](../../GOVERNANCE.md) assigns the job to the maintainer, and [SECURITY.md](../../SECURITY.md#verifying-a-release) tells users how to verify what ships.
 
 ## Cutting a release
 
