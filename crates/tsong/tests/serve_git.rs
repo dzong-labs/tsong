@@ -12,7 +12,16 @@ use serde_json::Value;
 
 /// Runs `git` in `dir` and returns its trimmed output.
 fn git(dir: &Path, args: &[&str]) -> TestResult<String> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    // A git hook passes its repository and the commit's author through
+    // GIT_* variables; none may send this git to the repository running
+    // the tests.
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("GIT_") {
+            command.env_remove(name);
+        }
+    }
+    let output = command
         .args(["-c", "user.name=Ada", "-c", "user.email=ada@example.test"])
         .args([
             "-c",

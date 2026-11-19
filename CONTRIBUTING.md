@@ -30,6 +30,7 @@ CI's `passed` check must succeed. It runs these, and the hooks run most of them 
 - Dependency graph: `cargo deny --locked check bans licenses sources`, under the rules in `deny.toml`.
 - Fuzzing: every target under `fuzz/` for 20 seconds, with `scripts/fuzz.sh`.
 - CodeQL, for Rust and for the workflows.
+- Sign-off: every commit is signed off by its author, as [License](#license) describes. The `DCO` check verifies it on every pull request.
 
 Enable the hooks once per clone:
 
@@ -37,7 +38,7 @@ Enable the hooks once per clone:
 git config core.hooksPath .githooks
 ```
 
-The pre-push hook needs `cargo-llvm-cov`, `cargo-audit` and `cargo-deny`. Mutation testing runs on Linux only: `scripts/linux.sh mutants --workspace` runs it locally in podman.
+The prepare-commit-msg hook signs off each commit. The pre-push hook needs `cargo-llvm-cov`, `cargo-audit` and `cargo-deny`. Mutation testing runs on Linux only: `scripts/linux.sh mutants --workspace` runs it locally in podman.
 
 ## Tests
 
@@ -55,3 +56,5 @@ Tests come with the change, written first where you can. New behaviour gets test
 ## License
 
 Tsong is licensed under [Apache-2.0](LICENSE). By sending a pull request you agree that your contribution is licensed under the same terms, as section 5 of the license says.
+
+Each commit must be signed off under the [Developer Certificate of Origin](https://developercertificate.org): a `Signed-off-by` line with your name and email certifies that you have the right to submit the change under the project's license. `git commit -s` adds the line, and so does the prepare-commit-msg hook in `.githooks`. A commit without it fails the `DCO` check.

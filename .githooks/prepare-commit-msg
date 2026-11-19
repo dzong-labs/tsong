@@ -1,0 +1,9 @@
+#!/bin/sh
+# Signs off each commit under the Developer Certificate of Origin
+# (https://developercertificate.org), as CONTRIBUTING.md requires: adds a
+# Signed-off-by line for the committer unless the message already has it.
+set -e
+name=$(git config user.name)
+email=$(git config user.email)
+git interpret-trailers --in-place --if-exists doNothing \
+  --trailer "Signed-off-by: $name <$email>" "$1"
