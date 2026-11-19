@@ -24,6 +24,21 @@ A useful report says:
 
 Please give us until the fix is released before you disclose the flaw publicly.
 
+## Verifying a release
+
+From 0.2.0, each release is built and signed by the [release workflow](.github/workflows/release.yml), never on a developer's machine. The binary on the [GitHub release](https://github.com/marklauter/tsong/releases) and the container image at `ghcr.io/marklauter/tsong` each carry a GitHub artifact attestation: a Sigstore signature, made with a short-lived certificate for that workflow, binding the file to the commit and workflow run that built it. There is no long-lived signing key to obtain or trust; the signature is checked against GitHub's public Sigstore trust root.
+
+With the [GitHub CLI](https://cli.github.com):
+
+```sh
+gh attestation verify tsong-x86_64-linux --repo marklauter/tsong   --signer-workflow marklauter/tsong/.github/workflows/release.yml
+gh attestation verify SHA256SUMS --repo marklauter/tsong   --signer-workflow marklauter/tsong/.github/workflows/release.yml
+gh attestation verify oci://ghcr.io/marklauter/tsong:v0.2.0 --repo marklauter/tsong   --signer-workflow marklauter/tsong/.github/workflows/release.yml
+sha256sum -c SHA256SUMS
+```
+
+Each fails unless the file was built and signed by this repository's release workflow, from a tagged commit on `main`. A version is signed once: the workflow refuses to change a published release or to move an existing image tag. The release binary is reproducible: `scripts/reproducible.sh` rebuilds it bit for bit from the tagged commit.
+
 ## Supported versions
 
 Tsong is before 1.0. Only the latest release gets security fixes.

@@ -16,6 +16,10 @@ Tsong has one maintainer, Mark Lauter ([@marklauter](https://github.com/marklaut
 
 A contributor with a record of accepted changes can be invited to become a maintainer. With a second maintainer, pull requests will need an approving review from a maintainer other than their author.
 
+## Releasing
+
+The maintainer cuts a release by pushing a version tag, such as `v0.2.0`, signed with `git tag -s`. The [release workflow](.github/workflows/release.yml) builds the binary and the container image, signs each with an artifact attestation, and puts the binary and its `SHA256SUMS` on a draft GitHub release. The maintainer reviews the draft's notes and publishes it. [SECURITY.md](SECURITY.md#verifying-a-release) says how to verify a release.
+
 ## Continuity
 
 The project can continue if the maintainer dies, is incapacitated, or stops working on it:

@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Builds the release binary twice, from two copies of the tree in different
-# directories, and fails unless the two are identical bit for bit. Paths
-# that differ between builds, the source directory and the cargo home, are
-# remapped to fixed ones, in the Rust code and in the C code of native
-# dependencies, so they don't reach the binary.
+# Builds the release binary twice, with scripts/release-build.sh, from two
+# copies of the tree in different directories, and fails unless the two
+# are identical bit for bit.
 #
 #   scripts/reproducible.sh
 set -euo pipefail
@@ -17,12 +15,7 @@ for copy in a b; do
   dir="$work/$copy"
   mkdir -p "$dir"
   git -C "$repo" archive HEAD | tar -x -C "$dir"
-  (
-    cd "$dir"
-    RUSTFLAGS="--remap-path-prefix=$dir=/build --remap-path-prefix=$cargo_home=/cargo" \
-      CFLAGS="-ffile-prefix-map=$dir=/build" \
-      cargo build --release --locked -p tsong
-  )
+  CARGO_HOME="$cargo_home" "$dir/scripts/release-build.sh"
   sha256sum "$dir/target/release/tsong"
 done
 
