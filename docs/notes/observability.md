@@ -4,7 +4,6 @@ type: note
 summary: Liveness and readiness on their own listener, Prometheus metrics on the admin listener, one JSON audit line per token exchange, and every request correlated by X-Request-Id and W3C traceparent.
 status: evolving
 created: 2026-11-16
-part-of: "[[roadmap]]"
 ---
 
 # Tsong reports health, metrics and an audit line per exchange
@@ -16,7 +15,7 @@ Tsong reports four things about itself:
 - one audit line per token exchange
 - a request ID and trace context on every gateway request
 
-This is item 9 of the [[roadmap]]; config reloads are audited as described in [[config-from-git]].
+This is item 9 of the [roadmap](../../ROADMAP.md); config reloads are audited as described in [[config-from-git]].
 
 ## Health
 
