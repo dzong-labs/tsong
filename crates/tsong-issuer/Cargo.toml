@@ -20,6 +20,7 @@ tsong-keys.workspace = true
 tsong-validate.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 aws-lc-rs.workspace = true
 http-body-util.workspace = true
 jsonwebtoken = { workspace = true, features = ["use_pem"] }
