@@ -33,6 +33,12 @@ What Tsong has built and what comes next. The open items are the plan for the ne
 29. Secret references: a secret field holds a table with one key, the scheme, such as `{ env = "NAME" }`, never the secret, and the `SecretSource` for the scheme reads it (`crates/tsong-secrets/src/lib.rs`). A string is a value and a table is a reference, so neither needs escaping. `env` and `file` are built (done). Next, `{ aws-sm = "arn" }` for AWS Secrets Manager, then other secret stores as they are needed. The introspection `client_secret` is parsed and required, but read only once introspection (item 3) uses it.
 30. Inbound TLS, low priority: a listener speaks HTTPS when the config gives it a certificate chain and private key, both secret references, through rustls, which Tsong already uses outbound. TLS 1.2 and 1.3 only, HTTP/2 over ALPN, and a new certificate loaded on reload. Plain HTTP stays for listeners behind a TLS-terminating load balancer, which is how Tsong is meant to run until then.
 
+## On request
+
+Tsong would build these once someone needs them, but they aren't scheduled. If you need one, open an issue that describes your case.
+
+- JWT-bearer grant: accept RFC 7523's `urn:ietf:params:oauth:grant-type:jwt-bearer` at the token endpoint, for clients written for that grant, such as Microsoft Entra's on-behalf-of flow, that can't send an RFC 8693 exchange. The `assertion` is validated as a subject token is and goes through the same exchange path. The grant has no `audience` parameter, so part of the work is deciding how a request names the minted token's audience.
+
 ## Not planned
 
 Tsong will not do these, this year or later:
