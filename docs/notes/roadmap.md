@@ -8,7 +8,7 @@ created: 2026-11-15
 
 # Roadmap
 
-Done means built, tested above the 95% line-coverage floor, and merged. Until something is merged it stays on the list.
+Done means built, tested above the 95% line-coverage floor, and merged. Until something is merged it stays on the list. [[threat-model]] names what each input to Tsong may control.
 
 1. Skeleton: the config model and its validation, the `SigningKey` trait with the file provider, and `tsong check` (done).
 2. Issuer: the RFC 8693 token endpoint, JWT validation of subject tokens against each trusted issuer's JWKS, minting, the JWKS and the discovery document, and `tsong serve` (done).
