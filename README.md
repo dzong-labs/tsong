@@ -76,7 +76,7 @@ tsong serve <bootstrap.toml>
 
 ### Container
 
-The [Containerfile](Containerfile) builds an image that runs `tsong serve /etc/tsong/bootstrap.toml` as an unprivileged user. Its base is Debian slim, which carries the `ssh` a Git source needs. The root filesystem can be read-only: the only writable path is `/var/lib/tsong`, for a Git source's clone. [deploy/podman](deploy/podman) runs it in local podman with a stub bootstrap file and config:
+Releases from 0.2.0 publish a signed image, `ghcr.io/marklauter/tsong:<tag>`, and a signed Linux binary on the GitHub release; [SECURITY.md](SECURITY.md#verifying-a-release) says how to verify them. The [Containerfile](Containerfile) builds an image that runs `tsong serve /etc/tsong/bootstrap.toml` as an unprivileged user. Its base is Debian slim, which carries the `ssh` a Git source needs. The root filesystem can be read-only: the only writable path is `/var/lib/tsong`, for a Git source's clone. [deploy/podman](deploy/podman) runs it in local podman with a stub bootstrap file and config:
 
 ```sh
 deploy/podman/run.sh build    # build tsong:local

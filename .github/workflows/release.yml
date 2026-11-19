@@ -1,0 +1,93 @@
+name: Release
+
+# Pushing a version tag, such as v0.2.0, builds the release and signs it:
+# the Linux binary and its SHA256SUMS go on a draft GitHub release, and
+# the container image goes to ghcr.io/marklauter/tsong. Each is signed
+# with a GitHub artifact attestation, a Sigstore signature tied to this
+# workflow and commit, so no signing key is stored anywhere.
+# SECURITY.md says how to verify them. The maintainer reviews the draft's
+# notes and publishes it.
+on:
+  push:
+    tags: [ "v*" ]
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  binary:
+    runs-on: ubuntu-latest
+    permissions:
+      # Creates the draft release and uploads its files.
+      contents: write
+      # Signs the attestation with a certificate for this workflow.
+      id-token: write
+      attestations: write
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - uses: ./.github/actions/setup-rust
+
+    - name: Build the release binary
+      run: scripts/release-build.sh
+
+    - name: Name it and sum it
+      run: |
+        mkdir dist
+        cp target/release/tsong dist/tsong-x86_64-linux
+        (cd dist && sha256sum tsong-x86_64-linux > SHA256SUMS)
+        cat dist/SHA256SUMS
+
+    - name: Sign it with an attestation
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      with:
+        subject-path: dist/tsong-x86_64-linux
+
+    - name: Attach it to a draft release
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ github.ref_name }}
+      run: |
+        if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+          gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+        else
+          gh release create "$TAG" dist/* --draft --verify-tag --generate-notes \
+            --title "${TAG#v}" --repo "$GITHUB_REPOSITORY"
+        fi
+
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      # Pushes the image to ghcr.io/marklauter/tsong.
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+    - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
+    - name: Build and push the image
+      id: push
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        file: Containerfile
+        push: true
+        tags: ghcr.io/marklauter/tsong:${{ github.ref_name }}
+
+    - name: Sign it with an attestation
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      with:
+        subject-name: ghcr.io/marklauter/tsong
+        subject-digest: ${{ steps.push.outputs.digest }}
+        push-to-registry: true
