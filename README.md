@@ -48,6 +48,21 @@ Tsong caches the new token until shortly before it expires, so a repeat request 
 17. CLI. `tsong check` validates a config and loads its keys. It warns on empty or accept-anything lists, and on issuer keys trusted for more than a day. `--deny-warnings` fails on warnings in CI. `tsong serve` reads a bootstrap file, deployed with Tsong, that names the config source and the admin and webhook listeners, then runs the gateway and the issuer.
 18. Secret references. A secret field holds a reference, never the secret: a table with one key, the scheme. `{ env = "NAME" }` reads an environment variable, and `{ file = "path" }` reads a file of up to 64 KiB, without one trailing line ending, a relative path taken from the config file's directory. The secret fields are a signing key's `private_key`, a trusted issuer's `client_secret` and the bootstrap file's `webhook.secret`. Anything else in them is refused, as are a missing or empty secret.
 
+## Quick start
+
+With podman and a Git checkout, this runs Tsong locally with a stub config:
+
+```sh
+git clone https://github.com/marklauter/tsong && cd tsong
+deploy/podman/run.sh build    # build the image, tsong:local
+deploy/podman/run.sh start    # gateway :8443, issuer :8444, admin :8445, health :8447
+curl http://127.0.0.1:8444/.well-known/openid-configuration
+curl http://127.0.0.1:8444/jwks.json
+deploy/podman/run.sh stop
+```
+
+The discovery document and the JWKS are what a service uses to trust tokens signed by Tsong. To exchange real tokens, add a trusted issuer and a route to `deploy/podman/tsong.toml`, following the commented [examples/tsong.toml](examples/tsong.toml), and check it with `deploy/podman/run.sh check`.
+
 ## Usage
 
 ```sh
@@ -55,9 +70,9 @@ tsong check [--deny-warnings] <config.toml>
 tsong serve <bootstrap.toml>
 ```
 
-[examples/tsong.toml](examples/tsong.toml) is a sample config, and [examples/bootstrap.toml](examples/bootstrap.toml) a sample bootstrap file. [docs/notes/gateway-plan.md](docs/notes/gateway-plan.md) describes how the gateway works, and [docs/notes/roadmap.md](docs/notes/roadmap.md) lists what comes next: introspection for opaque tokens, actor tokens, and keys from a secrets manager.
+[examples/tsong.toml](examples/tsong.toml) is a sample config, and [examples/bootstrap.toml](examples/bootstrap.toml) a sample bootstrap file. [ARCHITECTURE.md](ARCHITECTURE.md) describes how the parts fit together, [docs/notes/gateway-plan.md](docs/notes/gateway-plan.md) how the gateway works, and [ROADMAP.md](ROADMAP.md) lists what comes next: introspection for opaque tokens, actor tokens, and keys from a secrets manager.
 
-`tsong serve` stops on SIGTERM or Ctrl+C. With a `[health]` listener in the bootstrap file, readiness fails first and stays failed for `health.drain`, 5s by default. The load balancer stops sending requests, and then the listeners close. A second signal ends the drain at once. Without a `[health]` listener, the listeners close at once. [docs/notes/shutdown-and-draining.md](docs/notes/shutdown-and-draining.md) explains how the drain, the load balancer's health check and the orchestrator's deregistration fit together.
+`tsong serve` stops on SIGTERM or Ctrl+C. With a `[health]` listener in the bootstrap file, readiness fails first and stays failed for `health.drain`, `"00:00:05"` (5 seconds) by default. The load balancer stops sending requests, and then the listeners close. A second signal ends the drain at once. Without a `[health]` listener, the listeners close at once. [docs/notes/shutdown-and-draining.md](docs/notes/shutdown-and-draining.md) explains how the drain, the load balancer's health check and the orchestrator's deregistration fit together.
 
 ### Container
 
@@ -68,6 +83,14 @@ deploy/podman/run.sh build    # build tsong:local
 deploy/podman/run.sh start    # gateway :8443, issuer :8444, admin :8445, health :8447
 deploy/podman/run.sh stop     # SIGTERM, then the drain
 ```
+
+## Upgrading
+
+Before 1.0, a minor release can change the config or the API; only the latest release gets fixes. Each release's notes on [GitHub Releases](https://github.com/marklauter/tsong/releases) list what changed and how to move an existing config across. To upgrade:
+
+1. Read the release notes for every release you skip.
+2. Run the new binary's `tsong check --deny-warnings` on your config. It refuses a config the new release can't load and names every problem.
+3. Fix what it reports, merge the config, then roll out the new image. With a config from Git, a replica that can't load the new config keeps serving the last good one.
 
 ## Crates
 

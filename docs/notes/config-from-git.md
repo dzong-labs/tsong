@@ -4,12 +4,11 @@ type: note
 summary: A bootstrap file names the config source; a Git source fetches the branch over SSH with gitoxide, reloads on a webhook or a slow poll, and swaps in fully validated state through a watch channel.
 status: evolving
 created: 2026-11-16
-part-of: "[[roadmap]]"
 ---
 
 # Config reloads from Git when the watched branch moves
 
-Tsong reads its config from a Git branch and reloads when the branch moves. A reload builds the whole runtime state from the new commit, validates it, and swaps it in at once. A config that fails validation never replaces the one being served. This is item 7 of the [[roadmap]].
+Tsong reads its config from a Git branch and reloads when the branch moves. A reload builds the whole runtime state from the new commit, validates it, and swaps it in at once. A config that fails validation never replaces the one being served. This is item 7 of the [roadmap](../../ROADMAP.md).
 
 ## Bootstrap
 
@@ -50,7 +49,7 @@ A `ConfigStore` only fetches: it returns the config's text with a revision, a co
 
 A fetch is abandoned after two minutes, and `ssh` gives up on a dead connection through `ConnectTimeout` and `ServerAliveInterval`. A shutdown cancels a reload in progress and interrupts its fetch, so a stalled Git host can't hold Tsong open.
 
-Secrets never live in Git. A secret field holds a reference, a table naming one source: `{ env = "NAME" }` or `{ file = "path" }` today, and `{ aws-sm = "arn" }` once [[roadmap]] item 29 adds it. A `file` path in a config from Git must be absolute, because a relative path would point into the clone.
+Secrets never live in Git. A secret field holds a reference, a table naming one source: `{ env = "NAME" }` or `{ file = "path" }` today, and `{ aws-sm = "arn" }` once [roadmap](../../ROADMAP.md) item 29 adds it. A `file` path in a config from Git must be absolute, because a relative path would point into the clone.
 
 ## Triggers
 

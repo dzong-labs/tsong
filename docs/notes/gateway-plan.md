@@ -4,7 +4,6 @@ type: note
 summary: The gateway looks up a route by host, exchanges the bearer token through a read-through cache, swaps it in, and streams the request to the route's downstream.
 status: evolving
 created: 2026-11-15
-part-of: "[[roadmap]]"
 ---
 
 # The gateway exchanges each bearer token once and forwards by host
@@ -17,7 +16,7 @@ The gateway authenticates callers. Downstreams own authorization. A request flow
 4. Get the exchanged token from the cache, exchanging on a miss.
 5. Replace the bearer token and stream the request to the route's downstream.
 
-The gateway is item 5 of the [[roadmap]], and its exchange cache is item 6.
+The gateway is item 5 of the [roadmap](../../ROADMAP.md), and its exchange cache is item 6.
 
 ## Routes
 
