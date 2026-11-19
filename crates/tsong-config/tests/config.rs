@@ -1293,7 +1293,7 @@ fn the_retired_secret_fields_are_refused() {
 fn a_secret_field_takes_only_a_reference() -> TestResult {
     let not_a_table = NOT_A_REFERENCE;
     let not_one = "a secret reference must have exactly one key, env or file";
-    for (secret, expected) in [
+    for (written, expected) in [
         ("\"hunter2\"", not_a_table),
         ("\"env:SECRET\"", not_a_table),
         ("1234", not_a_table),
@@ -1325,12 +1325,12 @@ fn a_secret_field_takes_only_a_reference() -> TestResult {
             "a secret reference's id must not be empty",
         ),
     ] {
-        let text = okta_with(&format!("client_secret = {secret}"));
+        let text = okta_with(&format!("client_secret = {written}"));
         let error = Config::from_toml(&text)
             .err()
             .ok_or("a bad reference was accepted")?
             .to_string();
-        assert!(error.contains(expected), "{secret}: {error}");
+        assert!(error.contains(expected), "{written}: {error}");
     }
     Ok(())
 }
@@ -1422,18 +1422,18 @@ fn a_reference_from_another_format_is_refused_by_shape() {
 
 #[test]
 fn a_long_number_written_in_by_mistake_is_never_quoted() -> TestResult {
-    for secret in [
+    for written in [
         "99999999999999999999",
         "-99999999999999999999",
         "{ env = 99999999999999999999 }",
         "{ env = -99999999999999999999 }",
     ] {
-        let text = okta_with(&format!("client_secret = {secret}"));
+        let text = okta_with(&format!("client_secret = {written}"));
         let error = Config::from_toml(&text)
             .err()
             .ok_or("a raw secret was accepted")?
             .to_string();
-        assert!(!error.contains("99999"), "{secret}: {error}");
+        assert!(!error.contains("99999"), "{written}: {error}");
     }
     Ok(())
 }
