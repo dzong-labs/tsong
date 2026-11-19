@@ -2,7 +2,9 @@ use std::error::Error;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use tsong_config::{Bootstrap, BootstrapError, CONFIG_FILE, GitHost, GitSource, Source};
+use tsong_config::{
+    Bootstrap, BootstrapError, CONFIG_FILE, GitHost, GitSource, Scheme, SecretRef, Source,
+};
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
@@ -430,12 +432,12 @@ fn the_retired_secret_env_field_is_refused() {
 fn load_takes_a_relative_webhook_secret_file_from_the_bootstrap_directory() -> TestResult {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("bootstrap.toml");
-    let file = dir.path().join("hook.secret").display().to_string();
+    let file = SecretRef::new(
+        Scheme::File,
+        dir.path().join("hook.secret").display().to_string(),
+    )?;
     for (written, expected) in [
-        (
-            r#"{ file = "hook.secret" }"#.to_owned(),
-            format!("{{ file = {file:?} }}"),
-        ),
+        (r#"{ file = "hook.secret" }"#.to_owned(), file.to_string()),
         (
             r#"{ env = "HOOK" }"#.to_owned(),
             r#"{ env = "HOOK" }"#.to_owned(),

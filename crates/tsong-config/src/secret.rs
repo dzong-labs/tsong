@@ -7,7 +7,8 @@
 use std::fmt;
 use std::path::Path;
 
-use serde::de::{self, Deserialize, Deserializer, MapAccess, Visitor};
+use serde::de::{Deserialize, Deserializer, Error};
+use toml::Value;
 
 /// Where a secret is read from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -108,123 +109,34 @@ pub(crate) struct RebaseError;
 /// The reference as a config writes it, such as `{ env = "NAME" }`.
 impl fmt::Display for SecretRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{{ {} = {:?} }}", self.scheme, self.id)
+        let id = Value::String(self.id.clone());
+        write!(f, "{{ {} = {id} }}", self.scheme)
     }
 }
 
 impl<'de> Deserialize<'de> for SecretRef {
+    /// Reads any value first, so a value that isn't a reference is refused
+    /// by shape, and its contents never reach an error.
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_any(ReferenceVisitor)
-    }
-}
-
-struct ReferenceVisitor;
-
-/// A value that isn't a table: refused without being quoted.
-fn not_a_table<E: de::Error>() -> Result<SecretRef, E> {
-    Err(E::custom(SecretRefError::NotATable))
-}
-
-impl<'de> Visitor<'de> for ReferenceVisitor {
-    type Value = SecretRef;
-
-    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("a secret reference table")
-    }
-
-    fn visit_str<E: de::Error>(self, _: &str) -> Result<SecretRef, E> {
-        not_a_table()
-    }
-
-    fn visit_bool<E: de::Error>(self, _: bool) -> Result<SecretRef, E> {
-        not_a_table()
-    }
-
-    fn visit_i64<E: de::Error>(self, _: i64) -> Result<SecretRef, E> {
-        not_a_table()
-    }
-
-    fn visit_u64<E: de::Error>(self, _: u64) -> Result<SecretRef, E> {
-        not_a_table()
-    }
-
-    fn visit_f64<E: de::Error>(self, _: f64) -> Result<SecretRef, E> {
-        not_a_table()
-    }
-
-    fn visit_seq<A: de::SeqAccess<'de>>(self, _: A) -> Result<SecretRef, A::Error> {
-        not_a_table()
-    }
-
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<SecretRef, A::Error> {
-        let fail = |error: SecretRefError| <A::Error as de::Error>::custom(error);
-        let key: String = map
-            .next_key()?
-            .ok_or_else(|| fail(SecretRefError::NotOneScheme))?;
+        let fail = |error: SecretRefError| D::Error::custom(error);
+        // A value TOML can't hold, such as an integer past 64 bits, fails
+        // here; that error would quote it.
+        let value =
+            Value::deserialize(deserializer).map_err(|_| fail(SecretRefError::NotATable))?;
+        let Value::Table(table) = value else {
+            return Err(fail(SecretRefError::NotATable));
+        };
+        let mut entries = table.into_iter();
+        let (Some((key, id)), None) = (entries.next(), entries.next()) else {
+            return Err(fail(SecretRefError::NotOneScheme));
+        };
         let scheme = Scheme::ALL
             .into_iter()
             .find(|known| known.name() == key)
             .ok_or_else(|| fail(SecretRefError::UnknownScheme))?;
-        let id = map
-            .next_value::<Id>()?
-            .0
-            .ok_or_else(|| fail(SecretRefError::IdNotAString))?;
-        if map.next_key::<de::IgnoredAny>()?.is_some() {
-            return Err(fail(SecretRefError::NotOneScheme));
-        }
-        SecretRef::new(scheme, id).map_err(fail)
-    }
-}
-
-/// A reference's id: a string, or nothing for any other value, which is
-/// refused without being quoted.
-struct Id(Option<String>);
-
-impl<'de> Deserialize<'de> for Id {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct IdVisitor;
-
-        impl<'de> Visitor<'de> for IdVisitor {
-            type Value = Id;
-
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a string")
-            }
-
-            fn visit_str<E: de::Error>(self, id: &str) -> Result<Id, E> {
-                Ok(Id(Some(id.to_owned())))
-            }
-
-            fn visit_bool<E: de::Error>(self, _: bool) -> Result<Id, E> {
-                Ok(Id(None))
-            }
-
-            fn visit_i64<E: de::Error>(self, _: i64) -> Result<Id, E> {
-                Ok(Id(None))
-            }
-
-            fn visit_u64<E: de::Error>(self, _: u64) -> Result<Id, E> {
-                Ok(Id(None))
-            }
-
-            fn visit_f64<E: de::Error>(self, _: f64) -> Result<Id, E> {
-                Ok(Id(None))
-            }
-
-            fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Id, A::Error> {
-                while seq.next_element::<de::IgnoredAny>()?.is_some() {}
-                Ok(Id(None))
-            }
-
-            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Id, A::Error> {
-                while map
-                    .next_entry::<de::IgnoredAny, de::IgnoredAny>()?
-                    .is_some()
-                {}
-                Ok(Id(None))
-            }
-        }
-
-        deserializer.deserialize_any(IdVisitor)
+        let Value::String(id) = id else {
+            return Err(fail(SecretRefError::IdNotAString));
+        };
+        Self::new(scheme, id).map_err(fail)
     }
 }

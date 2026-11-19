@@ -35,7 +35,8 @@ listen = "0.0.0.0:8446"
 # An example; take the current list from api.github.com/meta.
 allow = ["192.30.252.0/22", "185.199.108.0/22", "140.82.112.0/20", "143.55.64.0/20"]
 host = "github"                           # or "gitlab"
-secret = { env = "TSONG_WEBHOOK_SECRET" }       # a secret reference: { env = "NAME" } or { file = "path" }
+# A secret reference: { env = "NAME" } or { file = "path" }.
+secret = { env = "TSONG_WEBHOOK_SECRET" }
 
 # ── health listener ───────────────────────────────────
 # GET /health/live and GET /health/ready, for the load balancer. Like the

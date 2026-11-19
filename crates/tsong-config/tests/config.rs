@@ -175,9 +175,14 @@ fn private_key(config: &Config) -> Option<String> {
         .map(ToString::to_string)
 }
 
+/// The error for a secret field that holds anything but a reference.
+const NOT_A_REFERENCE: &str = r#"a secret must be a reference, such as { env = "NAME" } or { file = "path" }, never the secret"#;
+
 /// A `file` reference to `path`, as a config writes it.
 fn file_ref(path: &Path) -> String {
-    format!("{{ file = {:?} }}", path.display().to_string())
+    SecretRef::new(Scheme::File, path.display().to_string())
+        .map(|reference| reference.to_string())
+        .unwrap_or_default()
 }
 
 #[test]
@@ -1286,7 +1291,7 @@ fn the_retired_secret_fields_are_refused() {
 
 #[test]
 fn a_secret_field_takes_only_a_reference() -> TestResult {
-    let not_a_table = "a secret must be a reference, such as { env = \"NAME\" } or { file = \"path\" }, never the secret";
+    let not_a_table = NOT_A_REFERENCE;
     let not_one = "a secret reference must have exactly one key, env or file";
     for (secret, expected) in [
         ("\"hunter2\"", not_a_table),
@@ -1294,6 +1299,12 @@ fn a_secret_field_takes_only_a_reference() -> TestResult {
         ("1234", not_a_table),
         ("true", not_a_table),
         ("[\"hunter2\"]", not_a_table),
+        ("2026-11-18", not_a_table),
+        ("2026-11-18T10:00:00Z", not_a_table),
+        (
+            "{ env = 2026-11-18 }",
+            "a secret reference's id must be a string",
+        ),
         ("{}", not_one),
         ("{ env = \"A\", file = \"b\" }", not_one),
         (
@@ -1379,7 +1390,7 @@ fn a_reference_is_its_scheme_and_id() -> TestResult {
         .ok_or("no client_secret")?;
     assert_eq!(reference.scheme(), Scheme::File);
     assert_eq!(reference.id(), r"C:\keys\k1.pem");
-    assert_eq!(reference.to_string(), r#"{ file = "C:\\keys\\k1.pem" }"#);
+    assert_eq!(reference.to_string(), r"{ file = 'C:\keys\k1.pem' }");
     let reference = SecretRef::new(Scheme::Env, "A:B")?;
     assert_eq!(reference.scheme(), Scheme::Env);
     assert_eq!(reference.id(), "A:B");
@@ -1388,5 +1399,41 @@ fn a_reference_is_its_scheme_and_id() -> TestResult {
         SecretRef::new(Scheme::Env, "").err(),
         Some(SecretRefError::NoId)
     );
+    Ok(())
+}
+
+#[test]
+fn a_reference_from_another_format_is_refused_by_shape() {
+    use serde::Deserialize;
+    use serde::de::value::{Error, MapDeserializer, UnitDeserializer};
+    let unit = SecretRef::deserialize(UnitDeserializer::<Error>::new());
+    assert_eq!(
+        unit.err().map(|error| error.to_string()),
+        Some(NOT_A_REFERENCE.into())
+    );
+    let map = MapDeserializer::<_, Error>::new([("env", ())].into_iter());
+    assert_eq!(
+        SecretRef::deserialize(map)
+            .err()
+            .map(|error| error.to_string()),
+        Some(NOT_A_REFERENCE.into())
+    );
+}
+
+#[test]
+fn a_long_number_written_in_by_mistake_is_never_quoted() -> TestResult {
+    for secret in [
+        "99999999999999999999",
+        "-99999999999999999999",
+        "{ env = 99999999999999999999 }",
+        "{ env = -99999999999999999999 }",
+    ] {
+        let text = okta_with(&format!("client_secret = {secret}"));
+        let error = Config::from_toml(&text)
+            .err()
+            .ok_or("a raw secret was accepted")?
+            .to_string();
+        assert!(!error.contains("99999"), "{secret}: {error}");
+    }
     Ok(())
 }
