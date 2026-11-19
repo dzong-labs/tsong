@@ -1354,3 +1354,14 @@ fn a_secret_written_in_by_mistake_is_never_quoted() -> TestResult {
     assert!(error.contains("line 27"), "{error}");
     Ok(())
 }
+
+#[test]
+fn a_reference_is_its_scheme_and_id() -> TestResult {
+    let reference: tsong_config::SecretRef = "file:C:/keys/k1.pem".parse()?;
+    assert_eq!(reference.scheme(), tsong_config::Scheme::File);
+    assert_eq!(reference.id(), "C:/keys/k1.pem");
+    let reference: tsong_config::SecretRef = "env:A:B".parse()?;
+    assert_eq!(reference.scheme(), tsong_config::Scheme::Env);
+    assert_eq!(reference.id(), "A:B");
+    Ok(())
+}

@@ -151,3 +151,8 @@ async fn a_file_secret_over_the_limit_is_refused() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn the_limit_is_64_kib() {
+    assert_eq!(tsong_secrets::MAX_SECRET_BYTES, 65_536);
+}
