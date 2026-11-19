@@ -46,8 +46,9 @@ email-domain = 'claims.email.endsWith("@example.com")'
 admins-only = '"orders-admins" in claims.groups'
 ```
 
-Tsong applies it in this order, to the validated subject token:
+Tsong applies it in this order:
 
+0. Validation, as today (`Validator::validate` in `crates/tsong-validate/src/lib.rs`): the signature first, then `iss`, `exp`, `nbf` and the trusted issuer's `audiences`. The signature comes first so no claim is read from a token that may be forged, and a forgery is reported as one, never as expired.
 1. Audiences: at least one allowed, none outside `allow`, every `require` present, no `deny` present.
 2. Scopes: the same four checks. The request's `scope` parameter then narrows the scopes, in inbound names, as it does today.
 3. Rules: every rule must evaluate to `true`.
