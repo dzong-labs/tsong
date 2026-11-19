@@ -11,7 +11,10 @@ fuzz_target!(|data: &[u8]| {
     let _ = pushed_branch(data);
     // The first line is the signature header, the rest the body.
     let (signature, body) = match data.iter().position(|&byte| byte == b'\n') {
-        Some(end) => (data.get(..end).unwrap_or_default(), data.get(end + 1..).unwrap_or_default()),
+        Some(end) => (
+            data.get(..end).unwrap_or_default(),
+            data.get(end + 1..).unwrap_or_default(),
+        ),
         None => (data, &[][..]),
     };
     let secret = b"a webhook secret the fuzzer doesn't know";
