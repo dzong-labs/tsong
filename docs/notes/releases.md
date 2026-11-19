@@ -34,8 +34,8 @@ The `binary` job:
 1. Refuses the tag unless its commit is on `main`.
 2. Builds the release binary with `scripts/release-build.sh`: locked dependencies, paths remapped, no build cache. It is the same build that `scripts/reproducible.sh` checks weekly, so anyone can rebuild the tagged commit and get the same bytes.
 3. Names the binary `tsong-x86_64-linux` and writes `SHA256SUMS`.
-4. Signs both with a GitHub artifact attestation.
-5. Creates a draft release with both files, or adds them to a draft that already exists. It refuses a release that is already published.
+4. Signs both with a GitHub artifact attestation, and keeps the signed bundle as `tsong.intoto.jsonl`.
+5. Creates a draft release with the binary, `SHA256SUMS` and the bundle, or adds them to a draft that already exists. It refuses a release that is already published.
 
 The `image` job:
 

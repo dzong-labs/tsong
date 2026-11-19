@@ -37,6 +37,12 @@ gh attestation verify oci://ghcr.io/marklauter/tsong:v0.2.0 --repo marklauter/ts
 sha256sum -c SHA256SUMS
 ```
 
+Each release also carries the signed provenance itself, `tsong.intoto.jsonl`, so the binary can be verified without asking GitHub for the attestation:
+
+```sh
+gh attestation verify tsong-x86_64-linux --bundle tsong.intoto.jsonl   --repo marklauter/tsong --signer-workflow marklauter/tsong/.github/workflows/release.yml
+```
+
 Each fails unless the file was built and signed by this repository's release workflow, from a tagged commit on `main`. A version is signed once: the workflow refuses to change a published release or to move an existing image tag. The release binary is reproducible: `scripts/reproducible.sh` rebuilds it bit for bit from the tagged commit.
 
 ## Supported versions
