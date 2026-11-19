@@ -6,6 +6,8 @@ Thanks for helping with Tsong. This file says how to report a problem, propose a
 
 Open a [GitHub issue](https://github.com/marklauter/tsong/issues). For a bug, give the version or commit, the config with secrets removed, what you expected and what happened.
 
+A question about using Tsong, or an idea that isn't a concrete request yet, goes to [GitHub Discussions](https://github.com/marklauter/tsong/discussions). Issues are for bugs and for work that is agreed or ready to agree on.
+
 A security flaw goes through [SECURITY.md](SECURITY.md) instead, never a public issue.
 
 ## Proposing a change
