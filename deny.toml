@@ -34,6 +34,15 @@ wildcards = "deny"
 # Two versions of one crate build twice and audit twice. It isn't a fault
 # on its own, since it usually waits on an upstream release, so it warns.
 multiple-versions = "warn"
+# Duplicates that only an upstream release can remove, each the older
+# version. A new duplicate, or a newer version of one of these, still
+# warns.
+skip = [
+    { crate = "untrusted@0.7.1", reason = "aws-lc-rs uses it; rustls-webpki uses 0.9" },
+    { crate = "syn@2.0.119", reason = "gix-macros uses it; other proc macros use syn 3" },
+    { crate = "hashbrown@0.14.5", reason = "dashmap, through gix-tempfile, uses it" },
+    { crate = "hashbrown@0.16.1", reason = "clru, through gix-pack, uses it" },
+]
 # OpenSSL would be a second TLS and crypto stack beside rustls and
 # aws-lc-rs; native-tls is how it usually arrives.
 deny = [
