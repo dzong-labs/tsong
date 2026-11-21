@@ -43,7 +43,7 @@ Each release also carries the signed provenance itself, `tsong.intoto.jsonl`, so
 gh attestation verify tsong-x86_64-linux --bundle tsong.intoto.jsonl   --repo dzong-labs/tsong --signer-workflow dzong-labs/tsong/.github/workflows/release.yml
 ```
 
-Release 0.2.0 was published before the repository moved from `marklauter/tsong` to `dzong-labs/tsong`. Its image is `ghcr.io/marklauter/tsong`, and its attestations name `marklauter/tsong`, so verify it with `marklauter/tsong` in place of `dzong-labs/tsong`.
+Release 0.2.0 was published before the repository moved from `marklauter/tsong` to `dzong-labs/tsong`. Its image is `ghcr.io/marklauter/tsong`, and its attestations name `marklauter/tsong`, so verify it with `marklauter/tsong` in place of `dzong-labs/tsong`. Its binary, `tsong-x86_64-linux`, has the SHA-256 digest `34fcbcec604d13a719d46fca5a1914c2541d5802bada6e59cf93b27954823133`, which doesn't depend on either name.
 
 Each fails unless the file was built and signed by this repository's release workflow, from a tagged commit on `main`. A version is signed once: the workflow refuses to change a published release or to move an existing image tag. The release binary is reproducible: `scripts/reproducible.sh` rebuilds it bit for bit from the tagged commit.
 
