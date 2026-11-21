@@ -17,7 +17,7 @@ The gateway and the issuer read their address and policy from the config. The ad
 
 Tsong builds one immutable `State` from each config. It holds the signing keys, the trusted issuers' key caches, the route table, the exchange cache and the HTTP clients. The listeners serve from whichever `State` is current when a request arrives, and a request keeps that state until it finishes.
 
-The config is a file, read once at start. The reloader fetches the config, validates it, and builds a whole new `State` before swapping it in. A config that fails to parse, validate or build never replaces the one being served. Nothing carries over between states. Nothing triggers a reload after the first load yet. [docs/notes/config-source.md](docs/notes/config-source.md) describes the store and the reloader.
+The config is a file, read once at start, and a config that fails to parse, validate or build stops Tsong from starting. The reloader can fetch a config, validate it, and build a whole new `State` before swapping it in, so a config that fails never replaces the one being served, and nothing carries over between states. Nothing triggers a reload until roadmap item 32 adds a poll. [docs/notes/config-source.md](docs/notes/config-source.md) describes the store and the reloader.
 
 ## How a request is handled
 

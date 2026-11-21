@@ -1,4 +1,5 @@
-//! The bootstrap file: where the config comes from, and the admin listener.
+//! The bootstrap file: where the config comes from, and the admin and health
+//! listeners.
 //! It is deployed with Tsong, because the settings that say where the
 //! config lives can't live in that config.
 

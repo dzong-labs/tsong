@@ -37,7 +37,7 @@ multiple-versions = "warn"
 # warns.
 skip = [
     { crate = "untrusted@0.7.1", reason = "aws-lc-rs uses it; rustls-webpki uses 0.9" },
-    { crate = "syn@2.0.119", reason = "zeroize_derive uses it; other proc macros use syn 3" },
+    { crate = "syn@2.0.119", reason = "zeroize_derive and the jni macros use it; other proc macros use syn 3" },
 ]
 # OpenSSL would be a second TLS and crypto stack beside rustls and
 # aws-lc-rs; native-tls is how it usually arrives.
