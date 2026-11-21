@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tokio::net::TcpListener;
-use tokio::sync::{Notify, watch};
+use tokio::sync::watch;
 use tsong_clock::{Clock, SystemClock};
 use tsong_config::{
     Bootstrap, BootstrapError, ConfigError, ConfigStore, FileStore, Source, Warnings,
@@ -156,7 +156,7 @@ pub async fn serve_until(
     // The config is loaded and every listener is bound.
     ready.store(true, Ordering::Release);
 
-    // One shutdown, heard by every server and the reload loop.
+    // One shutdown, heard by every server.
     let (stop, stopping) = watch::channel(false);
     let stopped = |mut stopping: watch::Receiver<bool>| async move {
         let _ = stopping.wait_for(|stop| *stop).await;
@@ -224,29 +224,6 @@ async fn optional(
             .await
         }
         None => Ok(()),
-    }
-}
-
-/// Reloads on each trigger and each poll until `stopped` completes, even
-/// when a reload is in progress.
-pub async fn reload_loop(
-    reloader: &Reloader,
-    trigger: &Notify,
-    poll: Duration,
-    stopped: impl Future<Output = ()>,
-) {
-    tokio::pin!(stopped);
-    loop {
-        tokio::select! {
-            () = &mut stopped => return,
-            () = trigger.notified() => {}
-            () = tokio::time::sleep(poll) => {}
-        }
-        // A shutdown cancels a reload in progress, which interrupts its fetch.
-        tokio::select! {
-            () = &mut stopped => return,
-            _ = reloader.reload() => {}
-        }
     }
 }
 

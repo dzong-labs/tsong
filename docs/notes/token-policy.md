@@ -84,7 +84,7 @@ A rule that is false refuses the exchange. So does a rule that fails to evaluate
 
 ### Reloading
 
-A reload builds a new `Gateway` with an empty exchange cache (`crates/tsong/src/state.rs`), so a policy change applies from the next request. No token minted under the old policy is served from the cache after a reload.
+Tsong reloads a config only once roadmap item 32 adds a poll. A reload builds a new `Gateway` with an empty exchange cache (`crates/tsong/src/state.rs`), so a policy change applies from the next request. No token minted under the old policy is served from the cache after a reload.
 
 ## Pull requests
 

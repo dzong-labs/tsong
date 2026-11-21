@@ -19,7 +19,7 @@ This is item 9 of the [roadmap](../../ROADMAP.md); config loads are audited as d
 
 ## Health
 
-`GET /health/live` answers 200 while the process runs. `GET /health/ready` answers 200 once the config is loaded and every listener is bound, and 503 from the moment shutdown begins, so a load balancer stops sending before the listeners close ([[shutdown-and-draining]]). A failed reload doesn't make Tsong unready: the last good config keeps serving. A JWKS outage doesn't either, because the gateway answers 503 for the affected requests already.
+`GET /health/live` answers 200 while the process runs. `GET /health/ready` answers 200 once the config is loaded and every listener is bound, and 503 from the moment shutdown begins, so a load balancer stops sending before the listeners close ([[shutdown-and-draining]]). A failed first load stops Tsong from starting. A failed reload doesn't make Tsong unready: the last good config keeps serving. The config is read only at start until roadmap item 32 adds a poll ([[config-source]]). A JWKS outage doesn't either, because the gateway answers 503 for the affected requests already.
 
 The health checks have their own listener, for the load balancer in front of Tsong, set in the bootstrap file:
 
@@ -46,7 +46,7 @@ The list is deployed in the bootstrap file, never loaded from the config, and ch
 | `tsong_jwks_fetch_failures_total` | `issuer` | Failed JWKS fetches, by the trusted issuer's `iss` |
 | `tsong_jwks_age_seconds` | `issuer` | Seconds since the trusted issuer's keys were fetched, for the config being served. Past its `jwks_max_age`, its tokens are refused. An issuer whose keys were never fetched has no series |
 | `tsong_config_reloads_total` | `outcome` | Reloads that found a new revision: `applied`, `fetch_failed`, `invalid_config` or `build_failed` |
-| `tsong_config_last_fetch_timestamp_seconds` | | When the config store was last read, new revision or not. While it can't be read, the last good config keeps serving. A file source is read once at startup, so the value stays there |
+| `tsong_config_last_fetch_timestamp_seconds` | | When the config store was last read, new revision or not. The config is read only at start until roadmap item 32, so the value stays fixed after start |
 | `tsong_config_revision_info` | `revision` | The revision being served, set to 1: the newest revision read whose config is in use. Across replicas, more than one `revision` means they haven't converged |
 | `tsong_config_tip_rejected` | | 1 while the newest config read was invalid or failed to build, so an older one is still served |
 

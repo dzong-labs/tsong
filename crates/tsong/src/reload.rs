@@ -59,7 +59,7 @@ impl<W: Write + Send> Audit for Lines<W> {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Status {
     /// The revision being served: the newest revision read whose config is
-    /// the one in use, even when that revision changed only other files.
+    /// the one in use.
     pub revision: String,
     /// When it was loaded, in Unix seconds.
     pub loaded_at: u64,

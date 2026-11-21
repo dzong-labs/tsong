@@ -3,7 +3,7 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16914/badge)](https://www.bestpractices.dev/projects/16914)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/dzong-labs/tsong/badge)](https://scorecard.dev/viewer/?uri=github.com/dzong-labs/tsong)
 
-Tsong is an API gateway and RFC 8693 token exchange issuer that centralizes access-token validation. It validates every caller's token against the identity providers you trust, such as Entra, Okta or GitLab, enforcing each route's audience, scope and IP policy from a single config file, and replaces the token with one Tsong signs and scopes to that route. Services then trust one issuer and one JWKS instead of many, and never see the caller's original token. Every check is mandatory: config sets the values, never turns a check off. The config can live in Git and reload on push, with each new version fully validated before it replaces the last.
+Tsong is an API gateway and RFC 8693 token exchange issuer that centralizes access-token validation. It validates every caller's token against the identity providers you trust, such as Entra, Okta or GitLab, enforcing each route's audience, scope and IP policy from a single config file, and replaces the token with one Tsong signs and scopes to that route. Services then trust one issuer and one JWKS instead of many, and never see the caller's original token. Every check is mandatory: config sets the values, never turns a check off. Tsong reads the config from a file at start, and validates it in full before serving it.
 
 ## Request flow
 

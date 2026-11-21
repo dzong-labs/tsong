@@ -73,32 +73,6 @@ fn unknown_fields_and_stores_are_rejected() -> TestResult {
 }
 
 #[test]
-fn a_git_source_is_refused() -> TestResult {
-    let git = r#"
-[source]
-store = "git"
-url = "ssh://git@github.com/example/config.git"
-branch = "main"
-folder = ""
-checkout = "/var/lib/tsong/config.git"
-"#;
-    let error = parse_error(git)?;
-    assert!(error.contains("unknown variant `git`"), "{error}");
-    assert!(error.contains("expected `file`"), "{error}");
-    Ok(())
-}
-
-#[test]
-fn a_webhook_table_is_refused() -> TestResult {
-    let text = format!(
-        "{FILE}\n[webhook]\nlisten = \"127.0.0.1:8446\"\nallow = [\"10.0.0.0/8\"]\nhost = \"github\"\nsecret = {{ env = \"TSONG_WEBHOOK_SECRET\" }}\n"
-    );
-    let error = parse_error(&text)?;
-    assert!(error.contains("unknown field `webhook`"), "{error}");
-    Ok(())
-}
-
-#[test]
 fn the_sample_bootstrap_loads() -> TestResult {
     let sample = include_str!("../../../examples/bootstrap.toml");
     let bootstrap = Bootstrap::from_toml(sample)?;
@@ -106,10 +80,14 @@ fn the_sample_bootstrap_loads() -> TestResult {
     Ok(())
 }
 
+/// `FILE` with a health listener.
+fn with_health() -> String {
+    format!("{FILE}\n[health]\nlisten = \"127.0.0.1:8447\"\nallow = [\"10.20.0.0/16\"]\n")
+}
+
 #[test]
 fn health_checks_have_their_own_listener_and_allow_list() -> TestResult {
-    let text =
-        format!("{FILE}\n[health]\nlisten = \"127.0.0.1:8447\"\nallow = [\"10.20.0.0/16\"]\n");
+    let text = with_health();
     let health = Bootstrap::from_toml(&text)?.health.ok_or("no health")?;
     assert_eq!(health.listen.port(), 8447);
     assert_eq!(health.allow.len(), 1);
@@ -131,8 +109,7 @@ fn health_checks_have_their_own_listener_and_allow_list() -> TestResult {
 
 #[test]
 fn the_drain_defaults_to_five_seconds_and_may_be_zero() -> TestResult {
-    let text =
-        format!("{FILE}\n[health]\nlisten = \"127.0.0.1:8447\"\nallow = [\"10.20.0.0/16\"]\n");
+    let text = with_health();
     let health = Bootstrap::from_toml(&text)?.health.ok_or("no health")?;
     assert_eq!(health.drain, std::time::Duration::from_secs(5));
     for (drain, seconds) in [("00:00:30", 30), ("00:00:00", 0)] {
