@@ -191,7 +191,7 @@ impl Reloader {
         self.lock().fetched_at = self.clock.unix_seconds();
         let content = fetched.content.clone();
         if content == current.content {
-            // A commit that leaves the config alone is still the one served,
+            // A revision that leaves the config alone is still the one served,
             // and a rejected config that comes back is judged again.
             *self.rejected() = None;
             let mut status = self.lock();

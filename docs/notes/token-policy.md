@@ -100,5 +100,5 @@ Per-route claim mapping is not part of this work. Claims stay global and per tru
 ## Related
 
 - [[gateway-plan]], which plans the exchange the token policy runs inside.
-- [[threat-model]], which says what a config from Git may control.
+- [[threat-model]], which says what a config may control.
 - `ROADMAP.md` item 31.

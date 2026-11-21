@@ -27,6 +27,5 @@ rustc-ice-*.txt
 /tmp/
 *.secret
 
-# Local podman signing keys and SSH keys
+# Local podman signing keys
 /deploy/podman/keys/
-/deploy/podman/ssh/
