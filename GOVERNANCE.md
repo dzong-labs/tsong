@@ -4,7 +4,7 @@ Tsong has one maintainer, Mark Lauter ([@marklauter](https://github.com/marklaut
 
 ## How decisions are made
 
-- A bug report or a concrete request is an [issue](https://github.com/marklauter/tsong/issues). A question, or an idea that isn't a request yet, is a [discussion](https://github.com/marklauter/tsong/discussions).
+- A bug report or a concrete request is an [issue](https://github.com/dzong-labs/tsong/issues). A question, or an idea that isn't a request yet, is a [discussion](https://github.com/dzong-labs/tsong/discussions).
 - A design change is agreed in its issue before code is written, as [CONTRIBUTING.md](CONTRIBUTING.md) asks. The maintainer decides, giving the reasons in the issue.
 - Every change reaches `main` through a pull request that passes CI's required checks. The maintainer decides whether it merges.
 - [ROADMAP.md](ROADMAP.md) records what is planned for the next year and what is not planned. The maintainer changes it as plans change.

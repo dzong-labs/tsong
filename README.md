@@ -1,7 +1,7 @@
 # Tsong
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16914/badge)](https://www.bestpractices.dev/projects/16914)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/marklauter/tsong/badge)](https://scorecard.dev/viewer/?uri=github.com/marklauter/tsong)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/dzong-labs/tsong/badge)](https://scorecard.dev/viewer/?uri=github.com/dzong-labs/tsong)
 
 Tsong is an API gateway and RFC 8693 token exchange issuer that centralizes access-token validation. It validates every caller's token against the identity providers you trust, such as Entra, Okta or GitLab, enforcing each route's audience, scope and IP policy from a single config file, and replaces the token with one Tsong signs and scopes to that route. Services then trust one issuer and one JWKS instead of many, and never see the caller's original token. Every check is mandatory: config sets the values, never turns a check off. The config can live in Git and reload on push, with each new version fully validated before it replaces the last.
 
@@ -53,7 +53,7 @@ Tsong caches the new token until shortly before it expires, so a repeat request 
 With podman and a Git checkout, this runs Tsong locally with a stub config:
 
 ```sh
-git clone https://github.com/marklauter/tsong && cd tsong
+git clone https://github.com/dzong-labs/tsong && cd tsong
 deploy/podman/run.sh build    # build the image, tsong:local
 deploy/podman/run.sh start    # gateway :8443, issuer :8444, admin :8445, health :8447
 curl http://127.0.0.1:8444/.well-known/openid-configuration
@@ -76,7 +76,7 @@ tsong serve <bootstrap.toml>
 
 ### Container
 
-Releases from 0.2.0 publish a signed image, `ghcr.io/marklauter/tsong:<tag>`, and a signed Linux binary on the GitHub release; [SECURITY.md](SECURITY.md#verifying-a-release) says how to verify them. The [Containerfile](Containerfile) builds an image that runs `tsong serve /etc/tsong/bootstrap.toml` as an unprivileged user. Its base is Debian slim, which carries the `ssh` a Git source needs. The root filesystem can be read-only: the only writable path is `/var/lib/tsong`, for a Git source's clone. [deploy/podman](deploy/podman) runs it in local podman with a stub bootstrap file and config:
+Releases from 0.2.0 publish a signed image, `ghcr.io/dzong-labs/tsong:<tag>`, and a signed Linux binary on the GitHub release; [SECURITY.md](SECURITY.md#verifying-a-release) says how to verify them. The [Containerfile](Containerfile) builds an image that runs `tsong serve /etc/tsong/bootstrap.toml` as an unprivileged user. Its base is Debian slim, which carries the `ssh` a Git source needs. The root filesystem can be read-only: the only writable path is `/var/lib/tsong`, for a Git source's clone. [deploy/podman](deploy/podman) runs it in local podman with a stub bootstrap file and config:
 
 ```sh
 deploy/podman/run.sh build    # build tsong:local
@@ -86,7 +86,7 @@ deploy/podman/run.sh stop     # SIGTERM, then the drain
 
 ## Upgrading
 
-Before 1.0, a minor release can change the config or the API; only the latest release gets fixes. Each release's notes on [GitHub Releases](https://github.com/marklauter/tsong/releases) list what changed and how to move an existing config across. To upgrade:
+Before 1.0, a minor release can change the config or the API; only the latest release gets fixes. Each release's notes on [GitHub Releases](https://github.com/dzong-labs/tsong/releases) list what changed and how to move an existing config across. To upgrade:
 
 1. Read the release notes for every release you skip.
 2. Run the new binary's `tsong check --deny-warnings` on your config. It refuses a config the new release can't load and names every problem.
@@ -124,7 +124,7 @@ Five fuzz targets under `fuzz/` cover the parsers that read hostile input: beare
 NIGHTLY=nightly-2026-10-01 scripts/fuzz.sh 60
 ```
 
-[CONTRIBUTING.md](CONTRIBUTING.md) says how to propose a change and what a pull request needs. [GOVERNANCE.md](GOVERNANCE.md) says how decisions are made, who holds which role, and how the project continues without its maintainer. [ACCESSIBILITY.md](ACCESSIBILITY.md) says what Tsong commits to for people using assistive technology, and how to report a barrier. Release notes are on [GitHub Releases](https://github.com/marklauter/tsong/releases), and in [CHANGELOG.md](CHANGELOG.md) for 0.1.0.
+[CONTRIBUTING.md](CONTRIBUTING.md) says how to propose a change and what a pull request needs. [GOVERNANCE.md](GOVERNANCE.md) says how decisions are made, who holds which role, and how the project continues without its maintainer. [ACCESSIBILITY.md](ACCESSIBILITY.md) says what Tsong commits to for people using assistive technology, and how to report a barrier. Release notes are on [GitHub Releases](https://github.com/dzong-labs/tsong/releases), and in [CHANGELOG.md](CHANGELOG.md) for 0.1.0.
 
 ## Security
 

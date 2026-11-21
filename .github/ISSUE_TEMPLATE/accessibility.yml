@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for reporting this. You never need to describe a disability or share personal information. [ACCESSIBILITY.md](https://github.com/marklauter/tsong/blob/main/ACCESSIBILITY.md) says how reports are handled.
+        Thank you for reporting this. You never need to describe a disability or share personal information. [ACCESSIBILITY.md](https://github.com/dzong-labs/tsong/blob/main/ACCESSIBILITY.md) says how reports are handled.
   - type: textarea
     id: task
     attributes:

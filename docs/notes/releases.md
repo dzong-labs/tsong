@@ -40,14 +40,14 @@ The `binary` job:
 The `image` job:
 
 1. Refuses the tag unless its commit is on `main`, and refuses an image tag that already exists in the registry.
-2. Builds the `Containerfile` and pushes `ghcr.io/marklauter/tsong:<tag>`.
+2. Builds the `Containerfile` and pushes `ghcr.io/dzong-labs/tsong:<tag>`.
 3. Signs the image's digest with a GitHub artifact attestation, stored beside the image in the registry.
 
 ## How signing works
 
 An artifact attestation is a Sigstore signature over a provenance statement: which repository, workflow, commit and run built the file. The workflow gets a short-lived certificate for its own identity from GitHub's Sigstore instance, signs with it, and discards it. No long-lived signing key exists, so there is none to store, rotate, leak or hand to a successor.
 
-A user checks a file with `gh attestation verify`, pinned to this repository and the release workflow, as SECURITY.md shows. The check fails unless the file was built and signed by `release.yml` in `marklauter/tsong`.
+A user checks a file with `gh attestation verify`, pinned to this repository and the release workflow, as SECURITY.md shows. The check fails unless the file was built and signed by `release.yml` in `dzong-labs/tsong`.
 
 The tag is signed separately, by the maintainer's own key, so `git tag -v` and GitHub's "Verified" badge show who cut the release. That key signs only the tag, never the artifacts.
 
