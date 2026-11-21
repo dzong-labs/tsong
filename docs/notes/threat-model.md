@@ -41,7 +41,7 @@ A downstream is reached over https only. Its response passes back to the caller,
 Whoever can change the published config file controls the config, so the pipeline that publishes it is part of Tsong's security. Tsong limits what such a change can do:
 
 - It can't add a secret: secret fields hold only references, `{ env = "NAME" }` or `{ file = "path" }`, and a value written into one is refused without being quoted.
-- It can't change the listeners, which only a restart reads.
+- It can't change the admin and health listeners, which the bootstrap file sets. It does set the gateway and issuer listen addresses.
 - A config that fails validation never replaces the one being served.
 
 What it can still do is point a reference at any environment variable or file the process can read. Today that only loads a signing key or a client secret Tsong doesn't send anywhere. Introspection, [roadmap](../../ROADMAP.md) item 3, will send `client_secret` to the trusted issuer's `introspection_url`, which the same config chooses. Before it ships, introspection must not let a config alone send a secret it names to a host it names.

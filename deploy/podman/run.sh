@@ -75,7 +75,7 @@ case "${1:-}" in
       check /etc/tsong/tsong.toml
     ;;
   *)
-    sed -n '2,/^set /{/^#/p}' "$0" >&2
+    sed -n '2,/^set /{/^#/p;}' "$0" >&2
     exit 2
     ;;
 esac

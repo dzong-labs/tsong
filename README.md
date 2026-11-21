@@ -90,7 +90,8 @@ Before 1.0, a minor release can change the config or the API; only the latest re
 
 1. Read the release notes for every release you skip.
 2. Run the new binary's `tsong check --deny-warnings` on your config. It refuses a config the new release can't load and names every problem.
-3. Fix what it reports, publish the config, then roll out the new image. A replica that can't load the config fails to start and never reports ready.
+3. Compare your bootstrap file with [examples/bootstrap.toml](examples/bootstrap.toml). `tsong check` doesn't read the bootstrap file, and a field the new release doesn't know stops it from starting.
+4. Fix what they show, publish the config, then roll out the new image. A replica that can't load the config fails to start and never reports ready.
 
 ## Crates
 

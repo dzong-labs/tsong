@@ -19,7 +19,7 @@ This is item 9 of the [roadmap](../../ROADMAP.md); config loads are audited as d
 
 ## Health
 
-`GET /health/live` answers 200 while the process runs. `GET /health/ready` answers 200 once the config is loaded and every listener is bound, and 503 from the moment shutdown begins, so a load balancer stops sending before the listeners close ([[shutdown-and-draining]]). A failed first load stops Tsong from starting. A failed reload doesn't make Tsong unready: the last good config keeps serving. The config is read only at start until roadmap item 32 adds a poll ([[config-source]]). A JWKS outage doesn't either, because the gateway answers 503 for the affected requests already.
+`GET /health/live` answers 200 while the process runs. `GET /health/ready` answers 200 once the config is loaded and every listener is bound, and 503 from the moment shutdown begins, so a load balancer stops sending before the listeners close ([[shutdown-and-draining]]). A failed first load stops Tsong from starting. A failed reload doesn't make Tsong unready: the last good config keeps serving. A JWKS outage doesn't either, because the gateway answers 503 for the affected requests already. The config is read only at start until roadmap item 32 adds a poll ([[config-source]]).
 
 The health checks have their own listener, for the load balancer in front of Tsong, set in the bootstrap file:
 

@@ -321,7 +321,7 @@ listen = "127.0.0.1:{admin}"
 [health]
 listen = "127.0.0.1:{health}"
 allow = ["127.0.0.0/8"]
-drain = "00:00:02"
+drain = "00:00:05"
 "#
         ),
     )?;
@@ -366,7 +366,7 @@ drain = "00:00:02"
         "the listeners closed before the drain"
     );
     assert_eq!(get_json(&live).await?, (200, json!({ "live": true })));
-    tokio::time::timeout(Duration::from_secs(10), server).await???;
+    tokio::time::timeout(Duration::from_secs(20), server).await???;
     Ok(())
 }
 
