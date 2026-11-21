@@ -64,18 +64,21 @@ pub struct Status {
     /// When it was loaded, in Unix seconds.
     pub loaded_at: u64,
     /// When the store was last read successfully, in Unix seconds, whether
-    /// or not it had a new revision. While the store can't be read, this
-    /// falls behind and the last good config keeps serving.
+    /// or not it had a new revision. The config is read only at start, so
+    /// this stays fixed after start until roadmap item 32 adds a poll.
     pub fetched_at: u64,
     /// Reloads that swapped in a new revision, the first load included.
     pub reloads: u64,
-    /// Reloads that kept the old state.
+    /// Reloads that kept the old state. It stays 0 until roadmap item 32
+    /// adds a poll.
     pub failed_reloads: u64,
     /// Why the last failed reload failed, in short: `fetch_failed`,
     /// `invalid_config` or `build_failed`. The audit log has the detail.
+    /// It stays unset until roadmap item 32 adds a poll.
     pub last_failure: Option<String>,
     /// Whether the newest config read was rejected as invalid or failed to
-    /// build, so an older one is still served.
+    /// build, so an older one is still served. It stays false until
+    /// roadmap item 32 adds a poll.
     pub tip_rejected: bool,
 }
 

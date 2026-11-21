@@ -29,3 +29,5 @@ rustc-ice-*.txt
 
 # Local podman signing keys
 /deploy/podman/keys/
+# Deploy keys left in older clones, from when the config came from Git
+/deploy/podman/ssh/
