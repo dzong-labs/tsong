@@ -9,10 +9,8 @@
 #   deploy/podman/run.sh check    run `tsong check` on the config in the image
 #
 # The container runs with a read-only root filesystem. The bootstrap file,
-# the config and the signing key are mounted read-only; the volume
-# tsong-state is mounted at /var/lib/tsong for a Git source's clone. The
-# ports are published on 127.0.0.1 only, because the stub's allow lists
-# are open.
+# the config and the signing key are mounted read-only. The ports are
+# published on 127.0.0.1 only, because the stub's allow lists are open.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -77,7 +75,7 @@ case "${1:-}" in
       check /etc/tsong/tsong.toml
     ;;
   *)
-    sed -n '2,15p' "$0" >&2
+    sed -n '2,13p' "$0" >&2
     exit 2
     ;;
 esac

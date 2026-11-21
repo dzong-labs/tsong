@@ -58,8 +58,8 @@ impl<W: Write + Send> Audit for Lines<W> {
 /// What `GET /status` reports.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Status {
-    /// The revision being served: the newest commit read whose config is
-    /// the one in use, even when that commit changed only other files.
+    /// The revision being served: the newest revision read whose config is
+    /// the one in use, even when that revision changed only other files.
     pub revision: String,
     /// When it was loaded, in Unix seconds.
     pub loaded_at: u64,

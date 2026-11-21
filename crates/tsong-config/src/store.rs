@@ -1,4 +1,4 @@
-//! Where a config comes from: a file, or a Git branch, behind one trait.
+//! Where a config comes from, behind one trait. Tsong has one store, a file.
 //! A store only fetches the config's text; parsing and validating it is
 //! the caller's, through [`Fetched::parse`].
 
