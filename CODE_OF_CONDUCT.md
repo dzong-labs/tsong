@@ -22,8 +22,8 @@ Tsong is a technical project. This code covers how people treat each other in it
 
 Report a problem to the maintainers through GitHub:
 
-- Privately, with the repository's [private report form](https://github.com/marklauter/tsong/security/advisories/new). Start the title with "Code of conduct" so it isn't mistaken for a vulnerability. Only the maintainers see it, and it's kept confidential.
-- In an [issue](https://github.com/marklauter/tsong/issues), if the matter needn't be private.
+- Privately, with the repository's [private report form](https://github.com/dzong-labs/tsong/security/advisories/new). Start the title with "Code of conduct" so it isn't mistaken for a vulnerability. Only the maintainers see it, and it's kept confidential.
+- In an [issue](https://github.com/dzong-labs/tsong/issues), if the matter needn't be private.
 
 You can also report a comment or an account to GitHub itself, with the "Report content" option on the comment or the profile.
 

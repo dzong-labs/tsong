@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report a vulnerability
-    url: https://github.com/marklauter/tsong/security/advisories/new
+    url: https://github.com/dzong-labs/tsong/security/advisories/new
     about: Report a security flaw privately, as SECURITY.md describes. Never open a public issue for one.
   - name: Ask a question or float an idea
-    url: https://github.com/marklauter/tsong/discussions
+    url: https://github.com/dzong-labs/tsong/discussions
     about: Questions about using Tsong, and ideas that aren't a concrete request yet, go to Discussions.

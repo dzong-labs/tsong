@@ -28,7 +28,7 @@ Tsong makes no claim of conformance to WCAG or another standard. These prioritie
 
 If something in Tsong, its output or its docs is hard or impossible for you to use, please tell us. An accessibility report is expertise, not a complaint.
 
-1. Open an issue with the [accessibility issue form](https://github.com/marklauter/tsong/issues/new?template=accessibility.yml).
+1. Open an issue with the [accessibility issue form](https://github.com/dzong-labs/tsong/issues/new?template=accessibility.yml).
 2. Include, when you can:
    - What you were trying to do, and what got in the way.
    - Where: the command, the error, the file or the doc page.

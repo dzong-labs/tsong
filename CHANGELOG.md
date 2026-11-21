@@ -29,8 +29,8 @@ The first release.
 - Tests that known JWT attacks are refused.
 - Property tests of client addresses, route policy and minting.
 - Fuzzing of the parsers that read hostile input.
-- An [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/marklauter/tsong) score for the repository.
+- An [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/dzong-labs/tsong) score for the repository.
 
 ## Later releases
 
-Release notes after 0.1.0 are published with each [GitHub release](https://github.com/marklauter/tsong/releases), not in this file.
+Release notes after 0.1.0 are published with each [GitHub release](https://github.com/dzong-labs/tsong/releases), not in this file.
