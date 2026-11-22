@@ -41,19 +41,26 @@ impl Validated {
     /// The `aud` claim's values. Validation has refused an `aud` that is
     /// not a string or an array of strings.
     pub fn audiences(&self) -> Vec<&str> {
-        self.claims.get("aud").and_then(strings).unwrap_or_default()
+        let aud = self.claims.get("aud");
+        debug_assert!(aud.is_none_or(|aud| strings(aud).is_some()));
+        aud.and_then(strings).unwrap_or_default()
     }
 
     /// The scopes the token grants: its `scope` claim, space-separated, and
     /// its `scp` claim, a string or an array, as Entra issues it.
-    /// Validation has refused a scope claim of any other shape, and an
-    /// `scp` item that is empty or holds whitespace, so nothing here is
-    /// dropped or split.
+    /// Validation has refused a scope claim of any other shape, a string
+    /// holding whitespace other than spaces, and an `scp` item that is not
+    /// one scope token, so a string splits on spaces alone and nothing
+    /// here is dropped.
     pub fn scopes(&self) -> BTreeSet<&str> {
         let mut scopes = BTreeSet::new();
         for name in ["scope", "scp"] {
-            match self.claims.get(name) {
-                Some(Value::String(text)) => scopes.extend(text.split_whitespace()),
+            let value = self.claims.get(name);
+            debug_assert!(value.is_none_or(|value| strings(value).is_some()));
+            match value {
+                Some(Value::String(text)) => {
+                    scopes.extend(text.split(' ').filter(|scope| !scope.is_empty()));
+                }
                 Some(value) => scopes.extend(strings(value).unwrap_or_default()),
                 None => {}
             }

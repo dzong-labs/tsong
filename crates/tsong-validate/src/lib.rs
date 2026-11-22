@@ -178,8 +178,8 @@ impl Validator {
             other => other?,
         }
         self.check_audience(&issuer.trusted, &payload)?;
-        check_scopes(&payload)?;
         self.check_times(&payload)?;
+        check_scopes(&payload)?;
         Ok(Validated::new(issuer.name.clone(), payload))
     }
 
@@ -433,22 +433,33 @@ fn time_claim(
     }
 }
 
-/// Refuses a malformed scope claim. `scope` is a space-separated string.
-/// `scp` is one too, or an array, as Entra issues it, whose every item is
-/// a single scope: not empty, and holding no whitespace. An empty or
-/// all-whitespace string is a token with no scopes.
+/// Refuses a malformed scope claim, by RFC 6749 section 3.3. `scope` is a
+/// string of scope tokens separated by spaces. `scp` is one too, or an
+/// array, as Entra issues it, whose every item is a single scope token. A
+/// scope token is one or more printable ASCII characters other than space,
+/// `"` and `\`. An empty or all-space string is a token with no scopes; any
+/// other whitespace is refused.
 fn check_scopes(payload: &Map<String, Value>) -> Result<(), ValidateError> {
-    if payload.get("scope").is_some_and(|scope| !scope.is_string()) {
-        return Err(ValidateError::InvalidClaim("scope"));
+    let spaced = |text: &str| text.chars().all(|c| c == ' ' || scope_char(c));
+    let token = |text: &&str| !text.is_empty() && text.chars().all(scope_char);
+    match payload.get("scope") {
+        None => {}
+        Some(Value::String(text)) if spaced(text) => {}
+        Some(_) => return Err(ValidateError::InvalidClaim("scope")),
     }
-    let single = |scope: &&str| !scope.is_empty() && !scope.contains(char::is_whitespace);
     match payload.get("scp") {
-        None | Some(Value::String(_)) => Ok(()),
+        None => Ok(()),
+        Some(Value::String(text)) if spaced(text) => Ok(()),
         Some(scp @ Value::Array(_))
-            if claims::strings(scp).is_some_and(|items| items.iter().all(single)) =>
+            if claims::strings(scp).is_some_and(|items| items.iter().all(token)) =>
         {
             Ok(())
         }
         Some(_) => Err(ValidateError::InvalidClaim("scp")),
     }
+}
+
+/// An RFC 6749 NQCHAR: printable ASCII other than space, `"` and `\`.
+fn scope_char(c: char) -> bool {
+    matches!(c, '\x21' | '\x23'..='\x5b' | '\x5d'..='\x7e')
 }

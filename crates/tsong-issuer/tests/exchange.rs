@@ -390,6 +390,22 @@ async fn an_scp_item_must_be_a_single_scope() -> TestResult {
 }
 
 #[tokio::test]
+async fn a_scope_string_splits_only_on_spaces() -> TestResult {
+    let h = harness()?;
+    // Split on any whitespace, a route that accepts any scope would mint
+    // "orders.read admin" from one scope with a no-break space.
+    let claims = subject(json!({ "scope": "orders.read\u{a0}admin" }));
+    assert_eq!(
+        refused(&h, request(&h, "open.test", claims)).await?,
+        (
+            "invalid_request",
+            "the token's scope claim is not valid".into()
+        )
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn the_subject_may_carry_no_audience_the_route_does_not_allow() -> TestResult {
     let h = harness()?;
     let claims = subject(json!({ "aud": ["api", "other"] }));

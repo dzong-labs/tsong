@@ -88,12 +88,21 @@ async fn a_malformed_scope_claim_is_an_invalid_token() -> TestResult {
     let (router, inbound) = gateway().await?;
 
     // Ignored, the claim would read as no scope, which the route admits.
-    let token = token_for(&inbound, json!(7))?;
-    let answer = send_to(&router, get("orders.test", "/", Some(&token))?).await?;
-    assert_eq!(answer.status, StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        answer.header("www-authenticate"),
-        Some(r#"Bearer error="invalid_token""#)
-    );
+    let scope = token_for(&inbound, json!(7))?;
+    let scp = inbound.sign(&json!({
+        "iss": "https://issuer.test",
+        "sub": "alice",
+        "aud": "tsong",
+        "exp": NOW + 3600,
+        "scp": ["orders.read admin"],
+    }))?;
+    for token in [scope, scp] {
+        let answer = send_to(&router, get("orders.test", "/", Some(&token))?).await?;
+        assert_eq!(answer.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            answer.header("www-authenticate"),
+            Some(r#"Bearer error="invalid_token""#)
+        );
+    }
     Ok(())
 }
