@@ -45,7 +45,18 @@ fn exchange_form(h: &Harness, audience: &str) -> TestResult<Request<Body>> {
 /// A token exchange form for the default subject token, with `extra`
 /// appended to its query.
 fn exchange_form_with(h: &Harness, audience: &str, extra: &str) -> TestResult<Request<Body>> {
-    let token = h.inbound.sign(&subject(json!({}))?)?;
+    subject_form(h, audience, &subject(json!({}))?, extra)
+}
+
+/// A token exchange form for a subject token with `claims`, with `extra`
+/// appended to its query.
+fn subject_form(
+    h: &Harness,
+    audience: &str,
+    claims: &Value,
+    extra: &str,
+) -> TestResult<Request<Body>> {
+    let token = h.inbound.sign(claims)?;
     form(&format!(
         "grant_type={}&subject_token={token}&subject_token_type={}&audience={audience}{extra}",
         TOKEN_EXCHANGE.replace(':', "%3A"),
@@ -110,6 +121,22 @@ async fn errors_are_oauth_json() -> TestResult {
         json!({
             "error": "invalid_target",
             "error_description": r#"no route has host "nowhere""#,
+        })
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_malformed_scope_claim_is_an_invalid_request() -> TestResult {
+    let h = harness()?;
+    let claims = subject(json!({ "scope": ["orders.read"] }))?;
+    let (status, _, body) = send(&h, subject_form(&h, "orders.test", &claims, "")?).await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body,
+        json!({
+            "error": "invalid_request",
+            "error_description": "the token's scope claim is not valid",
         })
     );
     Ok(())

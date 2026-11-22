@@ -23,8 +23,9 @@ fn payload(token: &str) -> TestResult<Value> {
     Ok(serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload)?)?)
 }
 
-#[tokio::test]
-async fn the_issuer_mints_the_token_the_downstream_receives() -> TestResult {
+/// The gateway, with the real issuer as its exchanger and every route
+/// pointing at an echoing downstream, and the inbound issuer's key.
+async fn gateway() -> TestResult<(axum::Router, TestKey)> {
     let address = downstream().await?;
     let config = Arc::new(config_to(&format!("http://{address}"))?);
     let inbound = TestKey::new("in-1", 1)?;
@@ -45,6 +46,12 @@ async fn the_issuer_mints_the_token_the_downstream_receives() -> TestResult {
     let metrics = Arc::new(tsong_gateway::GatewayMetrics::default());
     let gateway = Gateway::new(&config, Arc::new(issuer), clock, metrics)?;
     let router = tsong_gateway::router(Arc::new(gateway));
+    Ok((router, inbound))
+}
+
+#[tokio::test]
+async fn the_issuer_mints_the_token_the_downstream_receives() -> TestResult {
+    let (router, inbound) = gateway().await?;
 
     let token = inbound.sign(&json!({
         "iss": "https://issuer.test",
@@ -84,5 +91,31 @@ async fn the_issuer_mints_the_token_the_downstream_receives() -> TestResult {
         .oneshot(get("orders.test", "/", Some(&refused))?)
         .await?;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_malformed_scope_claim_is_an_invalid_token() -> TestResult {
+    let (router, inbound) = gateway().await?;
+
+    // Ignored, the claim would read as no scope, which the route admits.
+    let token = inbound.sign(&json!({
+        "iss": "https://issuer.test",
+        "sub": "alice",
+        "aud": "tsong",
+        "exp": NOW + 3600,
+        "scope": 7,
+    }))?;
+    let response = router
+        .oneshot(get("orders.test", "/", Some(&token))?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get("www-authenticate")
+            .map(|value| value.as_bytes()),
+        Some(&br#"Bearer error="invalid_token""#[..])
+    );
     Ok(())
 }

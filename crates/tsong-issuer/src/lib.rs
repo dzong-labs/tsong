@@ -7,7 +7,7 @@
 //! must carry every value the route requires, and may carry none it
 //! denies. A token carrying no scope passes unless the route requires
 //! one; validation has already refused a token with no audience its
-//! trusted issuer accepts. The minted token keeps the subject token's
+//! trusted issuer accepts, and one with a malformed `scope` or `scp`. The minted token keeps the subject token's
 //! audiences and scopes, narrowed to the requested scopes but always
 //! keeping the required ones, and adds the route's `append_audience`. Its `sub` is the trusted issuer's
 //! `sub_prefix`, a `:`, and the subject, and its RFC 9493 `sub_id` keeps the
@@ -439,17 +439,9 @@ fn granted_scopes(
     validated: &Validated,
     requested: Option<&str>,
 ) -> Result<Vec<String>, ExchangeError> {
+    // Validation refused an `scp` item that is empty or holds whitespace,
+    // which would turn into no scope or several in the minted `scope`.
     let held = scopes(validated.claims());
-    // An `scp` array item is one scope. Empty, or holding whitespace, it
-    // would turn into no scope or several in the minted `scope` string.
-    if let Some(malformed) = held
-        .iter()
-        .find(|scope| scope.is_empty() || scope.contains(char::is_whitespace))
-    {
-        return Err(ExchangeError::InvalidRequest(format!(
-            "the subject token's scope {malformed:?} is not a single scope"
-        )));
-    }
     if let Some(refusal) = policy.refusal(&held.iter().copied().collect::<Vec<_>>()) {
         return Err(refused(refusal, PolicyKind::Scopes, target));
     }

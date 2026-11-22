@@ -384,8 +384,9 @@ async fn an_scp_item_must_be_a_single_scope() -> TestResult {
             refused(&h, request(&h, "open.test", claims)).await?,
             (
                 "invalid_request",
-                format!("the subject token's scope {item:?} is not a single scope")
-            )
+                "the token's scp claim is not valid".into()
+            ),
+            "{item:?}"
         );
     }
     Ok(())

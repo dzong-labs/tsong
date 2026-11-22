@@ -589,15 +589,56 @@ async fn not_before_allows_the_clock_skew_and_no_more() -> TestResult {
     Ok(())
 }
 
+#[tokio::test]
+async fn the_scope_claims_must_be_well_formed() -> TestResult {
+    let h = harness()?;
+    for changes in [
+        json!({ "scope": null }),
+        json!({ "scope": "" }),
+        json!({ "scope": " " }),
+        json!({ "scp": "orders.read  orders.write" }),
+        json!({ "scp": [] }),
+        json!({ "scp": ["orders.read", "orders.write"] }),
+    ] {
+        let token = h.key.sign(&with(changes.clone())?)?;
+        let validated = h.validator.validate(&token).await;
+        assert!(validated.is_ok(), "{changes}: {validated:?}");
+    }
+    for (changes, claim) in [
+        (json!({ "scope": 7 }), "scope"),
+        (json!({ "scope": ["orders.read"] }), "scope"),
+        (json!({ "scope": { "orders.read": true } }), "scope"),
+        (json!({ "scp": 7 }), "scp"),
+        (json!({ "scp": { "orders.read": true } }), "scp"),
+        (json!({ "scp": ["orders.read", 7] }), "scp"),
+        (json!({ "scp": ["orders.read", ""] }), "scp"),
+        (json!({ "scp": ["orders.read billing.read"] }), "scp"),
+        (json!({ "scp": ["orders.read\tadmin"] }), "scp"),
+        (json!({ "scp": ["orders.read\u{a0}"] }), "scp"),
+    ] {
+        let token = h.key.sign(&with(changes.clone())?)?;
+        let error = refused(&h, &token).await?;
+        assert!(
+            matches!(error, ValidateError::InvalidClaim(name) if name == claim),
+            "{changes}: {error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            format!("the token's {claim} claim is not valid")
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn scopes_come_from_scope_and_scp() -> TestResult {
-    let claims = object(json!({ "scope": "a b", "scp": ["c", 7, "a"] }))?;
+    let claims = object(json!({ "scope": "a b", "scp": ["c", "a"] }))?;
     let found: Vec<_> = scopes(&claims).into_iter().collect();
     assert_eq!(found, ["a", "b", "c"]);
     let entra = object(json!({ "scp": "d  e" }))?;
     let found: Vec<_> = scopes(&entra).into_iter().collect();
     assert_eq!(found, ["d", "e"]);
-    let none = object(json!({ "scope": 7 }))?;
+    let none = object(json!({}))?;
     assert!(scopes(&none).is_empty());
     Ok(())
 }

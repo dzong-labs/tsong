@@ -3,8 +3,8 @@
 //! [`Validator::validate`] accepts a JWT only when every check passes: the
 //! issuer is trusted, the algorithm is one the issuer is allowed, the
 //! signature verifies against the issuer's JWKS, the audience is accepted,
-//! and the token is inside its `nbf`..`exp` window, give or take the clock
-//! skew. The config sets the values each check compares against; no check
+//! the `scope` and `scp` claims are well formed, and the token is inside
+//! its `nbf`..`exp` window, give or take the clock skew. The config sets the values each check compares against; no check
 //! can be turned off.
 //!
 //! Each issuer's keys expire `jwks_max_age` after they were fetched.
@@ -179,6 +179,7 @@ impl Validator {
             other => other?,
         }
         self.check_audience(&issuer.trusted, &payload)?;
+        check_scopes(&payload)?;
         self.check_times(&payload)?;
         Ok(Validated::new(issuer.name.clone(), payload))
     }
@@ -442,8 +443,38 @@ fn time_claim(
     }
 }
 
+/// Refuses a malformed scope claim. `scope` is a space-separated string.
+/// `scp` is one too, or an array, as Entra issues it, whose every item is
+/// a single scope: not empty, and holding no whitespace. An empty or
+/// all-whitespace string is a token with no scopes.
+fn check_scopes(payload: &Map<String, Value>) -> Result<(), ValidateError> {
+    match payload.get("scope") {
+        None | Some(Value::String(_)) => {}
+        Some(_) => return Err(ValidateError::InvalidClaim("scope")),
+    }
+    match payload.get("scp") {
+        None | Some(Value::String(_)) => Ok(()),
+        Some(Value::Array(items)) => {
+            let single = |item: &Value| {
+                item.as_str()
+                    .is_some_and(|scope| !scope.is_empty() && !scope.contains(char::is_whitespace))
+            };
+            if items.iter().all(single) {
+                Ok(())
+            } else {
+                Err(ValidateError::InvalidClaim("scp"))
+            }
+        }
+        Some(_) => Err(ValidateError::InvalidClaim("scp")),
+    }
+}
+
 /// The scopes a token grants: its `scope` claim, space-separated, and its
 /// `scp` claim, a string or an array, as Entra issues it.
+///
+/// Pass the claims of a [`Validated`] token: validation has already
+/// refused a scope claim of any other shape, and an `scp` item that is
+/// empty or holds whitespace, so nothing here is dropped or split.
 pub fn scopes(claims: &Map<String, Value>) -> BTreeSet<&str> {
     let mut scopes = BTreeSet::new();
     for name in ["scope", "scp"] {

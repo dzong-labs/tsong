@@ -14,6 +14,7 @@ A route decides which subject tokens it accepts and what the minted token carrie
 
 - A route's `[routes.audiences]`: the subject token may carry no audience outside `allow`, must carry every one in `require`, and may carry none in `deny`. This is pull request 1 below.
 - A route's `[routes.scopes]`: the same three checks on the subject token's scopes, from `scope` or `scp`. A token with no scopes passes unless `require` names one. This is pull request 2 below.
+- Validation refuses a token whose `scope` isn't a string, or whose `scp` isn't a string or an array of single scopes, each a non-empty string without whitespace. An empty `scope` string is a token with no scopes.
 - The minted token keeps the inbound audiences, plus `append_audience`, and the inbound scopes, narrowed by the request's `scope` parameter but always keeping every scope in `scopes.require`.
 - Claims are copied and renamed per trusted issuer, not per route. Nothing checks a claim's value.
 
