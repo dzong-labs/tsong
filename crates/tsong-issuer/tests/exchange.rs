@@ -234,6 +234,22 @@ async fn a_requested_scope_splits_only_on_spaces() -> TestResult {
 }
 
 #[tokio::test]
+async fn a_malformed_requested_scope_is_refused_before_the_route_lookup() -> TestResult {
+    let h = harness()?;
+    let malformed = changed(request(&h, "nowhere", subject(json!({}))), |r| {
+        r.scope = Some("orders.read	orders.write".into());
+    });
+    assert_eq!(
+        refused(&h, malformed).await?,
+        (
+            "invalid_request",
+            "the scope parameter holds a character other than a space and RFC 6749 scope token characters".into()
+        )
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_route_s_required_scopes_must_all_be_held() -> TestResult {
     let h = harness()?;
     let all = subject(json!({ "scope": "orders.read billing.read orders.write" }));

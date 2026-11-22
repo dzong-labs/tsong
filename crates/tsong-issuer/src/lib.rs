@@ -384,6 +384,17 @@ fn check_request(request: &TokenRequest) -> Result<(&str, &str), ExchangeError> 
     let Some(audience) = request.audience.as_deref() else {
         return invalid("audience is required");
     };
+    // The request's `scope` is scope tokens separated by spaces, by RFC 6749
+    // section 3.3.
+    if request
+        .scope
+        .as_deref()
+        .is_some_and(|text| !text.chars().all(|c| c == ' ' || is_scope_char(c)))
+    {
+        return invalid(
+            "the scope parameter holds a character other than a space and RFC 6749 scope token characters",
+        );
+    }
     Ok((subject_token, audience))
 }
 
@@ -413,21 +424,15 @@ fn refused(refusal: Refusal<'_>, kind: PolicyKind, target: &str) -> ExchangeErro
 
 /// The subject token's scopes, once the scope `policy` of the route for
 /// `target` accepts them, narrowed to the scopes requested when there is a
-/// request. The request's `scope` is scope tokens separated by spaces, by
-/// RFC 6749 section 3.3; any other character refuses the request.
+/// request. `check_request` has already refused a malformed request `scope`.
 fn granted_scopes(
     policy: &Policy,
     target: &str,
     validated: &Validated,
     requested: Option<&str>,
 ) -> Result<Vec<String>, ExchangeError> {
-    if requested.is_some_and(|text| !text.chars().all(|c| c == ' ' || is_scope_char(c))) {
-        return Err(ExchangeError::InvalidRequest(
-            "the scope parameter holds a character other than a space and RFC 6749 scope token characters".into(),
-        ));
-    }
-    // Validation refused an `scp` item that is empty or holds whitespace,
-    // which would turn into no scope or several in the minted `scope`.
+    // Validation refused every scope that isn't a single RFC 6749 scope
+    // token, and a non-string or null `scope` or `scp` claim.
     let held = validated.scopes();
     if let Some(refusal) = policy.refusal(&held.iter().copied().collect::<Vec<_>>()) {
         return Err(refused(refusal, PolicyKind::Scopes, target));
