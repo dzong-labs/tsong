@@ -7,7 +7,7 @@ use serde_json::{Map, Value, json};
 use tsong_clock::ManualClock;
 use tsong_config::Config;
 use tsong_validate::testkit::{FakeFetcher, TestKey};
-use tsong_validate::{ValidateError, Validator, scopes};
+use tsong_validate::{ValidateError, Validator};
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -630,16 +630,36 @@ async fn the_scope_claims_must_be_well_formed() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn scopes_come_from_scope_and_scp() -> TestResult {
-    let claims = object(json!({ "scope": "a b", "scp": ["c", "a"] }))?;
-    let found: Vec<_> = scopes(&claims).into_iter().collect();
-    assert_eq!(found, ["a", "b", "c"]);
-    let entra = object(json!({ "scp": "d  e" }))?;
-    let found: Vec<_> = scopes(&entra).into_iter().collect();
-    assert_eq!(found, ["d", "e"]);
-    let none = object(json!({}))?;
-    assert!(scopes(&none).is_empty());
+#[tokio::test]
+async fn scopes_come_from_scope_and_scp() -> TestResult {
+    let h = harness()?;
+    for (changes, expected) in [
+        (
+            json!({ "scope": "a b", "scp": ["c", "a"] }),
+            &["a", "b", "c"][..],
+        ),
+        (json!({ "scope": null, "scp": "d  e" }), &["d", "e"]),
+        (json!({ "scope": null }), &[]),
+    ] {
+        let token = h.key.sign(&with(changes.clone())?)?;
+        let validated = h.validator.validate(&token).await?;
+        let found: Vec<_> = validated.scopes().into_iter().collect();
+        assert_eq!(found, expected, "{changes}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn audiences_come_from_aud() -> TestResult {
+    let h = harness()?;
+    for (aud, expected) in [
+        (json!("tsong"), &["tsong"][..]),
+        (json!(["other", "tsong"]), &["other", "tsong"]),
+    ] {
+        let token = h.key.sign(&with(json!({ "aud": aud }))?)?;
+        let validated = h.validator.validate(&token).await?;
+        assert_eq!(validated.audiences(), expected, "{aud}");
+    }
     Ok(())
 }
 

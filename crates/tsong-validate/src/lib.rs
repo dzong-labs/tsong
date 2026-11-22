@@ -4,8 +4,8 @@
 //! issuer is trusted, the algorithm is one the issuer is allowed, the
 //! signature verifies against the issuer's JWKS, the audience is accepted,
 //! the `scope` and `scp` claims are well formed, and the token is inside
-//! its `nbf`..`exp` window, give or take the clock skew. The config sets the values each check compares against; no check
-//! can be turned off.
+//! its `nbf`..`exp` window, give or take the clock skew. The config sets
+//! the values each check compares against; no check can be turned off.
 //!
 //! Each issuer's keys expire `jwks_max_age` after they were fetched.
 //! [`Validator::refresh_due`] renews them before then; keys that expire
@@ -22,7 +22,6 @@ mod jwks;
 #[cfg(feature = "test-util")]
 pub mod testkit;
 
-use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -317,22 +316,13 @@ impl Validator {
         trusted: &TrustedIssuer,
         payload: &Map<String, Value>,
     ) -> Result<(), ValidateError> {
-        let accepted = |aud: &str| trusted.audiences.iter().any(|a| a == aud);
-        let matched = match payload.get("aud") {
-            None => return Err(ValidateError::MissingClaim("aud")),
-            Some(Value::String(aud)) => accepted(aud),
-            Some(Value::Array(auds)) => {
-                let mut any = false;
-                for aud in auds {
-                    let Value::String(aud) = aud else {
-                        return Err(ValidateError::InvalidClaim("aud"));
-                    };
-                    any |= accepted(aud);
-                }
-                any
-            }
-            Some(_) => return Err(ValidateError::InvalidClaim("aud")),
-        };
+        let aud = payload
+            .get("aud")
+            .ok_or(ValidateError::MissingClaim("aud"))?;
+        let auds = claims::strings(aud).ok_or(ValidateError::InvalidClaim("aud"))?;
+        let matched = auds
+            .iter()
+            .any(|aud| trusted.audiences.iter().any(|a| a == aud));
         if matched {
             Ok(())
         } else {
@@ -448,41 +438,17 @@ fn time_claim(
 /// a single scope: not empty, and holding no whitespace. An empty or
 /// all-whitespace string is a token with no scopes.
 fn check_scopes(payload: &Map<String, Value>) -> Result<(), ValidateError> {
-    match payload.get("scope") {
-        None | Some(Value::String(_)) => {}
-        Some(_) => return Err(ValidateError::InvalidClaim("scope")),
+    if payload.get("scope").is_some_and(|scope| !scope.is_string()) {
+        return Err(ValidateError::InvalidClaim("scope"));
     }
+    let single = |scope: &&str| !scope.is_empty() && !scope.contains(char::is_whitespace);
     match payload.get("scp") {
         None | Some(Value::String(_)) => Ok(()),
-        Some(Value::Array(items)) => {
-            let single = |item: &Value| {
-                item.as_str()
-                    .is_some_and(|scope| !scope.is_empty() && !scope.contains(char::is_whitespace))
-            };
-            if items.iter().all(single) {
-                Ok(())
-            } else {
-                Err(ValidateError::InvalidClaim("scp"))
-            }
+        Some(scp @ Value::Array(_))
+            if claims::strings(scp).is_some_and(|items| items.iter().all(single)) =>
+        {
+            Ok(())
         }
         Some(_) => Err(ValidateError::InvalidClaim("scp")),
     }
-}
-
-/// The scopes a token grants: its `scope` claim, space-separated, and its
-/// `scp` claim, a string or an array, as Entra issues it.
-///
-/// Pass the claims of a [`Validated`] token: validation has already
-/// refused a scope claim of any other shape, and an `scp` item that is
-/// empty or holds whitespace, so nothing here is dropped or split.
-pub fn scopes(claims: &Map<String, Value>) -> BTreeSet<&str> {
-    let mut scopes = BTreeSet::new();
-    for name in ["scope", "scp"] {
-        match claims.get(name) {
-            Some(Value::String(text)) => scopes.extend(text.split_whitespace()),
-            Some(Value::Array(items)) => scopes.extend(items.iter().filter_map(Value::as_str)),
-            _ => {}
-        }
-    }
-    scopes
 }

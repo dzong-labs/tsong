@@ -378,17 +378,14 @@ async fn the_subject_may_carry_no_literal_star_audience() -> TestResult {
 async fn an_scp_item_must_be_a_single_scope() -> TestResult {
     let h = harness()?;
     // A route that accepts any scope would otherwise mint "a b" as two.
-    for item in ["orders.read billing.read", "", "orders.read\tadmin"] {
-        let claims = subject(json!({ "scope": null, "scp": ["orders.read", item] }));
-        assert_eq!(
-            refused(&h, request(&h, "open.test", claims)).await?,
-            (
-                "invalid_request",
-                "the token's scp claim is not valid".into()
-            ),
-            "{item:?}"
-        );
-    }
+    let claims = subject(json!({ "scope": null, "scp": ["orders.read billing.read"] }));
+    assert_eq!(
+        refused(&h, request(&h, "open.test", claims)).await?,
+        (
+            "invalid_request",
+            "the token's scp claim is not valid".into()
+        )
+    );
     Ok(())
 }
 

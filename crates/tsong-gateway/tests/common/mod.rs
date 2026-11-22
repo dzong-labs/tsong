@@ -303,7 +303,12 @@ impl Answer {
 
 /// Sends `request` through the gateway.
 pub async fn send(h: &Harness, request: Request) -> TestResult<Answer> {
-    let response = h.router.clone().oneshot(request).await?;
+    send_to(&h.router, request).await
+}
+
+/// Sends `request` through the gateway `router`.
+pub async fn send_to(router: &Router, request: Request) -> TestResult<Answer> {
+    let response = router.clone().oneshot(request).await?;
     let status = response.status();
     let headers = response.headers().clone();
     let bytes = to_bytes(response.into_body(), usize::MAX).await?;
