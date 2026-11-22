@@ -5,8 +5,9 @@
 //! that route. The route filters the subject token's audiences, then its
 //! scopes: the token may carry no value outside those the route allows,
 //! must carry every value the route requires, and may carry none it
-//! denies. A token carrying no audience or no scope passes unless the
-//! route requires one. The minted token keeps the subject token's
+//! denies. A token carrying no scope passes unless the route requires
+//! one; validation has already refused a token with no audience its
+//! trusted issuer accepts. The minted token keeps the subject token's
 //! audiences and scopes, narrowed to the requested scopes but always
 //! keeping the required ones, and adds the route's `append_audience`. Its `sub` is the trusted issuer's
 //! `sub_prefix`, a `:`, and the subject, and its RFC 9493 `sub_id` keeps the

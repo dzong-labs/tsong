@@ -1389,7 +1389,7 @@ fn allowed_audiences_is_refused_naming_its_replacement() -> TestResult {
     refused_key(
         r#"allowed_audiences = ["api"]"#,
         21,
-        "allowed_audiences is replaced by [routes.audiences]; move its values to audiences.allow, which also refuses a token carrying any audience outside it",
+        "allowed_audiences is replaced by [routes.audiences]; move its values to audiences.allow, which also refuses a token carrying any audience outside it. An empty allowed_audiences refused every token; to keep that, remove the route",
     )
 }
 
@@ -1398,7 +1398,28 @@ fn allowed_scopes_is_refused_naming_its_replacement() -> TestResult {
     refused_key(
         r#"allowed_scopes = ["orders.read"]"#,
         18,
-        "allowed_scopes is replaced by [routes.scopes]; move its values to scopes.allow, which also refuses a token carrying any scope outside it",
+        "allowed_scopes is replaced by [routes.scopes]; move its values to scopes.allow, where an omitted allow means \"*\" and an empty one is refused. An empty allowed_scopes refused every token; to keep that, remove the route",
+    )
+}
+
+/// An empty `allowed_scopes` refused every token. Moving it to an empty
+/// `scopes.allow` is refused too, so the guidance says to remove the route
+/// instead.
+#[test]
+fn an_empty_allowed_scopes_is_told_to_remove_the_route() -> TestResult {
+    refused_key(
+        "allowed_scopes = []",
+        18,
+        "allowed_scopes is replaced by [routes.scopes]; move its values to scopes.allow, where an omitted allow means \"*\" and an empty one is refused. An empty allowed_scopes refused every token; to keep that, remove the route",
+    )
+}
+
+#[test]
+fn an_empty_allowed_audiences_is_told_to_remove_the_route() -> TestResult {
+    refused_key(
+        "allowed_audiences = []",
+        21,
+        "allowed_audiences is replaced by [routes.audiences]; move its values to audiences.allow, which also refuses a token carrying any audience outside it. An empty allowed_audiences refused every token; to keep that, remove the route",
     )
 }
 
@@ -1455,10 +1476,12 @@ fn an_omitted_allow_admits_any_value() -> TestResult {
 }
 
 #[test]
-fn an_empty_allow_is_refused_in_favour_of_omitting_it() -> TestResult {
+fn an_empty_allow_is_refused_naming_both_ways_out() -> TestResult {
     assert_problems(
         "{ allow = [] }",
-        &[r#"route "orders" audiences.allow is empty; omit allow to admit any audience"#],
+        &[
+            r#"route "orders" audiences.allow is empty; omit allow to admit any audience, or remove the route to refuse every token"#,
+        ],
     )
 }
 

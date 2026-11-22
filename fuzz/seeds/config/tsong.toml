@@ -82,7 +82,8 @@ oid = "sub"
 # One route per host. The request's path and query go to the downstream
 # unchanged. A policy's allow lists the values a token may carry, and
 # the token may carry none of them. An omitted allow means "*", which
-# accepts any value, and deny narrows it.
+# accepts any value, and deny narrows it. Validation has already refused
+# a token with no aud its trusted issuer accepts.
 [[routes]]
 name = "orders"
 host = "orders.example.com"
@@ -90,7 +91,7 @@ downstream = "https://orders-lb.internal.example.com"
 append_audience = "orders.example.com"      # added to the minted aud; "" adds nothing
 
 # The subject token's aud: none outside allow, every one in require and
-# none in deny. A token with no aud passes unless require names one.
+# none in deny.
 [routes.audiences]
 allow = ["api://default", "api://tsong"]
 require = []                                 # optional: the token must carry all of these

@@ -51,9 +51,9 @@ macro_rules! refuse_removed_keys {
 
 refuse_removed_keys! {
     refuse_allowed_audiences: "allowed_audiences" =>
-        "[routes.audiences]; move its values to audiences.allow, which also refuses a token carrying any audience outside it";
+        "[routes.audiences]; move its values to audiences.allow, which also refuses a token carrying any audience outside it. An empty allowed_audiences refused every token; to keep that, remove the route";
     refuse_allowed_scopes: "allowed_scopes" =>
-        "[routes.scopes]; move its values to scopes.allow, which also refuses a token carrying any scope outside it";
+        "[routes.scopes]; move its values to scopes.allow, where an omitted allow means \"*\" and an empty one is refused. An empty allowed_scopes refused every token; to keep that, remove the route";
     refuse_required_scopes: "required_scopes" =>
         "[routes.scopes]; move its values to scopes.require";
 }

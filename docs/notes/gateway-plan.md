@@ -53,7 +53,7 @@ require = ["read_api"]
 - `host` is the key. It is compared lowercased, without its port. Two routes with the same host are a config error.
 - `downstream` is an `https` origin with no path, query or fragment. It names the load balancer to forward to, by DNS name. IP addresses are not used, because load balancer addresses change.
 - `append_audience` is added to the minted token's `aud`. When it is empty, nothing is added.
-- `[routes.audiences]` holds the route's audience policy. Every audience the inbound token carries must be in `allow`, and it may carry none. Optional `require` lists audiences it must all carry, and optional `deny` audiences it may not carry. `allow` is optional, and omitted means `"*"`. `"*"` must stand alone in `allow`, and then only `deny` narrows it; `deny` may hold values only under `"*"`. An empty `allow` is refused. Each `require` value must be one `allow` admits and not one `deny` lists. No list may repeat a value, and no value may be empty or hold whitespace.
+- `[routes.audiences]` holds the route's audience policy. Every audience the inbound token carries must be in `allow`. Validation has already refused a token with no audience its trusted issuer accepts. Optional `require` lists audiences it must all carry, and optional `deny` audiences it may not carry. `allow` is optional, and omitted means `"*"`. `"*"` must stand alone in `allow`, and then only `deny` narrows it; `deny` may hold values only under `"*"`. An empty `allow` is refused. Each `require` value must be one `allow` admits and not one `deny` lists. No list may repeat a value, and no value may be empty or hold whitespace.
 - `[routes.scopes]` holds the route's scope policy, with the same keys and rules, checked against the inbound `scope` and `scp`. A token with no scopes passes unless `require` names one. A scope narrowed with the token endpoint's `scope` parameter must keep every scope in `require`.
 - `signing_algorithm`, optional, is the algorithm the route's minted tokens are signed with: RS256, RS384, RS512, PS256, PS384, PS512, ES256, ES384 or EdDSA, ES256 when unset. A key for it must be active in `issuer.signing.keys`.
 - `allow` is optional, and adds a second IP check to the gateway-wide `gateway.allow`. A client must be in both lists, so a route can only narrow access. A route without `allow` takes `gateway.allow` alone.
@@ -122,7 +122,7 @@ The gateway fails closed:
 - An audience policy that admits no audience a trusted issuer validating JWTs accepts warns that every token will be refused.
 - A `jwks_max_age` over a day warns that a withdrawn key stays trusted that long.
 
-An empty `audiences.allow` or `scopes.allow` is an error, not a warning; omit `allow` to admit any value. Each message names the route and the field, such as `warning: route "builds": allow is empty; every client will be denied`.
+An empty `audiences.allow` or `scopes.allow` is an error, not a warning; omit `allow` to admit any value, or remove the route to refuse every token. Each message names the route and the field, such as `warning: route "builds": allow is empty; every client will be denied`.
 
 ## Serve
 

@@ -365,7 +365,8 @@ impl From<RouteDef> for Route {
 /// A route's policy for one list of the subject token's values, its
 /// audiences or its scopes, checked once the token is validated. The token
 /// must pass every check; the first that fails refuses it. A token carrying
-/// no value passes unless `require` lists one. The minted token's audiences
+/// no value passes unless `require` lists one, though validation has
+/// already refused a token with no audience its trusted issuer accepts. The minted token's audiences
 /// are not affected; its scopes may be narrowed by the request, but always
 /// keep every one `require` lists.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -389,8 +390,8 @@ pub struct Policy {
 }
 
 impl Default for Policy {
-    /// The policy of an omitted table: `allow` is `"*"`, and nothing is
-    /// required or denied.
+    /// The policy of an empty table, `{}`: `allow` is `"*"`, as it is
+    /// whenever `allow` is omitted, and nothing is required or denied.
     fn default() -> Self {
         Self {
             allow: Self::any(),

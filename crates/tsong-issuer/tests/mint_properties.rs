@@ -16,7 +16,6 @@ use common::*;
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
 use serde_json::{Map, Value, json};
-use tsong_config::RESERVED_CLAIMS;
 use tsong_issuer::{ExchangeError, TokenResponse};
 
 const HELD: [&str; 4] = ["orders.read", "orders.write", "billing.read", "admin"];
@@ -132,11 +131,15 @@ const EXTRA: [&str; 10] = [
     "act", "cnf", "sub_id", "jti", "iat", "email", "groups", "uid", "user", "secret",
 ];
 
-/// The claims a token minted for the `orders` route may carry: the
-/// reserved ones Tsong sets, `sub`, the copied `email` and `groups`, and
-/// `uid` renamed to `user`.
+/// The claims a token minted for the `orders` route may carry: the ones
+/// Tsong sets, the copied `email` and `groups`, and `uid` renamed to
+/// `user`. Reserved claims Tsong doesn't set, such as `scp`, are left out,
+/// so a minted token carrying one fails.
 fn may_carry(name: &str) -> bool {
-    RESERVED_CLAIMS.contains(&name) || ["sub", "email", "groups", "user"].contains(&name)
+    [
+        "iss", "aud", "exp", "iat", "jti", "scope", "sub", "sub_id", "email", "groups", "user",
+    ]
+    .contains(&name)
 }
 
 /// The payload of a JWT, unverified: the signature is tested elsewhere.

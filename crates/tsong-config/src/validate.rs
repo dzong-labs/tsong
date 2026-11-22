@@ -260,7 +260,7 @@ fn check_policy(name: &str, kind: PolicyKind, policy: &Policy, problems: &mut Ve
     let any = policy.allows(ANY);
     if policy.allow.is_empty() {
         problems.push(format!(
-            "route {name:?} {list}.allow is empty; omit allow to admit any {noun}"
+            "route {name:?} {list}.allow is empty; omit allow to admit any {noun}, or remove the route to refuse every token"
         ));
     }
     for (field, values) in [
