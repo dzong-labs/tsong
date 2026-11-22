@@ -80,10 +80,11 @@ oid = "sub"
 
 # Routes
 # One route per host. The request's path and query go to the downstream
-# unchanged. A policy's allow lists the values a token may carry, and
-# the token may carry none of them. An omitted allow means "*", which
-# accepts any value, and deny narrows it. Validation has already refused
-# a token with no aud its trusted issuer accepts.
+# unchanged. A policy's allow lists the values a token may carry, and a
+# token carrying none of them still passes. An omitted allow means "*",
+# which accepts any value, and deny narrows it. A token carrying a literal
+# "*" is always refused. Validation has already refused a token with no
+# aud its trusted issuer accepts.
 [[routes]]
 name = "orders"
 host = "orders.example.com"

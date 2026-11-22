@@ -36,7 +36,7 @@ Each crate has one job, and dependencies point one way, from the command down to
 ## Design decisions
 
 - **Validation is mandatory.** Config sets the values a check uses, but no setting turns a check off.
-- **Fail closed.** An empty allow list or scope list denies everything, expired issuer keys refuse their tokens, and a config that fails keeps the last good one serving.
+- **Fail closed.** An empty IP allow list denies every client, an empty policy `allow` is a load error, expired issuer keys refuse their tokens, and a config that fails keeps the last good one serving.
 - **Secrets are references.** A secret field names an environment variable or a file, so a config holds no secrets and can live in Git.
 - **No panics.** Failures are values, `unsafe` code is forbidden, and lints deny `unwrap`, `expect`, `panic!` and indexing, tests included.
 - **Injected time.** Every expiry and age comes from an injected `Clock`, so tests control time.

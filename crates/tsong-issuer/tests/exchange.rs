@@ -339,6 +339,42 @@ async fn the_subject_may_carry_no_denied_scope() -> TestResult {
 }
 
 #[tokio::test]
+async fn the_subject_may_carry_no_literal_star_scope() -> TestResult {
+    let h = harness()?;
+    // A downstream may read "*" as every scope, and deny can't name it.
+    for claims in [
+        json!({ "scope": "orders.read *" }),
+        json!({ "scope": null, "scp": ["*"] }),
+    ] {
+        for host in ["open.test", "policy.test"] {
+            assert_eq!(
+                refused(&h, request(&h, host, subject(claims.clone()))).await?,
+                (
+                    "invalid_scope",
+                    format!(r#"the subject token carries scope "*", which {host:?} never accepts"#)
+                ),
+                "{claims}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_subject_may_carry_no_literal_star_audience() -> TestResult {
+    let h = harness()?;
+    let claims = subject(json!({ "aud": ["tsong", "*"] }));
+    assert_eq!(
+        refused(&h, request(&h, "policy.test", claims)).await?,
+        (
+            "invalid_target",
+            r#"the subject token carries audience "*", which "policy.test" never accepts"#.into()
+        )
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn an_scp_item_must_be_a_single_scope() -> TestResult {
     let h = harness()?;
     // A route that accepts any scope would otherwise mint "a b" as two.

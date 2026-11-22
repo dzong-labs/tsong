@@ -10,10 +10,15 @@ use crate::{ANY, Config, KeyProvider, KeyState, Policy, PolicyKind, Validation};
 
 /// Claims claim mapping may not write: those Tsong sets on every token it
 /// issues, and `scp`, which would carry the subject's scopes past
-/// narrowing and the route's scope policy.
+/// narrowing and the route's scope policy. For the same reason, a rename
+/// may not read `scope` or `scp` either.
 pub const RESERVED_CLAIMS: [&str; 11] = [
     "iss", "aud", "exp", "iat", "nbf", "jti", "scope", "scp", "act", "cnf", "sub_id",
 ];
+
+/// The subject token's scope claims, which reach the minted token only as
+/// its `scope`, after the route's scope policy and narrowing.
+const SCOPE_CLAIMS: [&str; 2] = ["scope", "scp"];
 
 /// Whether `text` is an https URL.
 fn is_https(text: &str) -> bool {
@@ -202,6 +207,14 @@ impl Config {
         }
         for (name, renames) in &self.claims.rename {
             let mut targets = BTreeSet::new();
+            for source in renames.keys() {
+                if SCOPE_CLAIMS.contains(&source.as_str()) {
+                    problems.push(format!(
+                        "claims.rename.{name} may not rename {source:?}: scopes reach the minted \
+                         token only through \"scope\", after the route's scope policy and narrowing"
+                    ));
+                }
+            }
             for target in renames.values() {
                 if RESERVED_CLAIMS.contains(&target.as_str()) {
                     problems.push(format!(

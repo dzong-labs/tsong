@@ -411,6 +411,9 @@ fn audiences(claims: &serde_json::Map<String, Value>) -> Result<Vec<&str>, Excha
 fn refused(refusal: Refusal<'_>, kind: PolicyKind, target: &str) -> ExchangeError {
     let (one, many) = (kind.noun(), kind.key());
     let reason = match refusal {
+        Refusal::Any => {
+            format!("the subject token carries {one} \"*\", which {target:?} never accepts")
+        }
         Refusal::Outside(value) => format!(
             "the subject token's {one} {value:?} is outside the {many} allowed for {target:?}"
         ),

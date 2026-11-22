@@ -672,6 +672,29 @@ z = \"scp\"
 }
 
 #[test]
+fn claim_mapping_may_not_rename_the_subject_s_scopes() -> TestResult {
+    let text = format!(
+        "{}{OKTA}[claims]
+copy = [\"scope\"]
+[claims.rename.okta]
+scp = \"roles\"
+scope = \"perms\"
+",
+        minimal()
+    );
+    let why = "scopes reach the minted token only through \"scope\", after the route's scope policy and narrowing";
+    assert_eq!(
+        problems(&text)?,
+        [
+            r#"claims.copy may not copy reserved claim "scope""#.to_owned(),
+            format!(r#"claims.rename.okta may not rename "scope": {why}"#),
+            format!(r#"claims.rename.okta may not rename "scp": {why}"#),
+        ]
+    );
+    Ok(())
+}
+
+#[test]
 fn a_rename_writes_each_claim_from_one_claim() -> TestResult {
     let text = format!(
         "{}{OKTA}[claims.rename.okta]
@@ -1956,5 +1979,17 @@ fn no_mistaken_secret_reaches_an_error() -> TestResult {
         assert!(!error.contains("1979"), "{mistake}\n{error}");
         assert!(!error.contains("1.5e300"), "{mistake}\n{error}");
     }
+    Ok(())
+}
+
+#[test]
+fn a_literal_star_in_a_token_is_never_admitted() -> TestResult {
+    let config = Config::from_toml(&route_with_policy("scopes", r#"{ deny = ["admin"] }"#)?)?;
+    let scopes = &route(&config, 0)?.scopes;
+    assert_eq!(scopes.refusal(&["orders.read", ANY]), Some(Refusal::Any));
+    let route = orders(&[ANY], &[ANY])?;
+    assert_eq!(route.audiences.refusal(&[ANY]), Some(Refusal::Any));
+    assert_eq!(route.scopes.refusal(&[ANY]), Some(Refusal::Any));
+    assert_eq!(Policy::default().refusal(&["a", ANY]), Some(Refusal::Any));
     Ok(())
 }

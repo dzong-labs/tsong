@@ -366,7 +366,9 @@ impl From<RouteDef> for Route {
 /// audiences or its scopes, checked once the token is validated. The token
 /// must pass every check; the first that fails refuses it. A token carrying
 /// no value passes unless `require` lists one, though validation has
-/// already refused a token with no audience its trusted issuer accepts. The minted token's audiences
+/// already refused a token with no audience its trusted issuer accepts. A
+/// token carrying a literal `"*"` is always refused, since a downstream may
+/// read it as every value. The minted token's audiences
 /// are not affected; its scopes may be narrowed by the request, but always
 /// keep every one `require` lists.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -435,9 +437,13 @@ impl Policy {
     }
 
     /// Why the policy refuses a token carrying these values, or `None` when
-    /// it accepts them. The token may carry no value outside `allow`, must
-    /// carry every one `require` lists, and may carry none `deny` lists.
+    /// it accepts them. The token may not carry `"*"`, may carry no value
+    /// outside `allow`, must carry every one `require` lists, and may carry
+    /// none `deny` lists.
     pub fn refusal<'a>(&'a self, values: &[&'a str]) -> Option<Refusal<'a>> {
+        if values.contains(&ANY) {
+            return Some(Refusal::Any);
+        }
         if let Some(outside) = values.iter().find(|value| !self.allows(value)) {
             return Some(Refusal::Outside(outside));
         }
@@ -455,6 +461,9 @@ impl Policy {
 /// checks that failed, in the order they run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refusal<'a> {
+    /// The token carries a literal `"*"`, which no policy admits: a
+    /// downstream may read it as every value.
+    Any,
     /// The token carries this value, which is outside `allow`.
     Outside(&'a str),
     /// The token lacks this value, which `require` lists.

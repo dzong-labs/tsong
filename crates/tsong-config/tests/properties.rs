@@ -203,8 +203,8 @@ fn route() -> Result<Route, url::ParseError> {
 }
 
 /// Checks `policy`'s answer for a token carrying `held` against a model of
-/// its three checks: the token is accepted exactly when it carries no value
-/// outside `allow`, every one `require` lists and none `deny` lists. A
+/// its checks: the token is accepted exactly when it carries no `"*"`, no
+/// value outside `allow`, every one `require` lists and none `deny` lists. A
 /// refusal names the first check that failed, and every check before it
 /// passed.
 fn matches_model(policy: &Policy, held: &[&str]) -> Result<(), TestCaseError> {
@@ -213,8 +213,9 @@ fn matches_model(policy: &Policy, held: &[&str]) -> Result<(), TestCaseError> {
         require,
         deny,
     } = policy;
+    let no_any = !held.contains(&ANY);
     let allowed = |value: &str| allow.iter().any(|a| a == ANY || a == value);
-    let none_outside = held.iter().all(|value| allowed(value));
+    let none_outside = no_any && held.iter().all(|value| allowed(value));
     let all_required = require.iter().all(|r| held.contains(&r.as_str()));
     let none_denied = !held.iter().any(|value| deny.iter().any(|d| d == value));
     let refusal = policy.refusal(held);
@@ -224,8 +225,9 @@ fn matches_model(policy: &Policy, held: &[&str]) -> Result<(), TestCaseError> {
     );
     match refusal {
         None => {}
+        Some(Refusal::Any) => prop_assert!(!no_any),
         Some(Refusal::Outside(value)) => {
-            prop_assert!(held.contains(&value) && !allowed(value));
+            prop_assert!(no_any && held.contains(&value) && !allowed(value));
         }
         Some(Refusal::Missing(value)) => {
             prop_assert!(none_outside);
@@ -249,7 +251,7 @@ proptest! {
         allow in names(&VALUES),
         require in names(&VALUES[..3]),
         deny in names(&VALUES[..4]),
-        values in names(&VALUES[..4]),
+        values in names(&VALUES),
     ) {
         let policy = Policy { allow, require, deny };
         let held: Vec<&str> = values.iter().map(String::as_str).collect();

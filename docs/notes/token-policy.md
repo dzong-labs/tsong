@@ -19,7 +19,7 @@ A route decides which subject tokens it accepts and what the minted token carrie
 
 ## The policy
 
-One rule for every allow list: every value the token carries must be in it, and the token may carry none. For audiences, validation has already refused a token with no audience its trusted issuer accepts. A value the token must carry goes in `require`. An omitted allow list means `"*"`, which allows any value, and then only the deny list narrows it. A deny list may hold values only under `"*"`; under a named allow list, a value is denied by leaving it out. Requiring one of several values needs a rule.
+One rule for every allow list: every value the token carries must be in it, and the token may carry none. For audiences, validation has already refused a token with no audience its trusted issuer accepts. A value the token must carry goes in `require`. An omitted allow list means `"*"`, which allows any value, and then only the deny list narrows it. A deny list may hold values only under `"*"`; under a named allow list, a value is denied by leaving it out. A token carrying a literal `"*"` is always refused, for audiences and scopes alike, since a downstream may read it as every value. Requiring one of several values needs a rule.
 
 ```toml
 [[routes]]
@@ -70,7 +70,7 @@ The config fails to load, and `tsong check` reports it, when, in `[routes.audien
 
 `tsong check` warns when the audience policy admits no audience a trusted issuer that validates JWTs accepts, which refuses every token.
 
-`allowed_audiences`, `allowed_scopes` and `required_scopes` are removed, not kept as aliases, and an old config is refused naming the key that replaces it. An empty `allowed_audiences` or `allowed_scopes` refused every token; to keep that, remove the route. `scp` is now a reserved claim, so a config whose `[claims]` copies `scp` or renames a claim to `scp` fails to load; remove that entry. The release notes say how to move a config across.
+`allowed_audiences`, `allowed_scopes` and `required_scopes` are removed, not kept as aliases, and an old config is refused naming the key that replaces it. An empty `allowed_audiences` or `allowed_scopes` refused every token; to keep that, remove the route. `scp` is now a reserved claim, and `scope` and `scp` may not be renamed, so a config whose `[claims]` copies `scp`, renames a claim to `scp`, or renames `scope` or `scp` to another claim fails to load; remove that entry. Scopes reach the minted token only through `scope`, after the route's scope policy and narrowing. The release notes say how to move a config across.
 
 ### Rules
 
