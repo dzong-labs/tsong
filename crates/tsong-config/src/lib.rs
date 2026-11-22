@@ -375,7 +375,7 @@ pub struct Policy {
     /// and none outside them. `require` names the values it must carry.
     /// `"*"`, alone, allows any value, and then only `deny` narrows it.
     /// Omitted, `"*"`. Empty is refused.
-    #[serde(default = "any")]
+    #[serde(default = "Policy::any")]
     pub allow: Vec<String>,
     /// The values the token must all carry. Each must be one `allow`
     /// admits. Empty or unset requires none.
@@ -388,7 +388,24 @@ pub struct Policy {
     pub deny: Vec<String>,
 }
 
+impl Default for Policy {
+    /// The policy of an omitted table: `allow` is `"*"`, and nothing is
+    /// required or denied.
+    fn default() -> Self {
+        Self {
+            allow: Self::any(),
+            require: Vec::new(),
+            deny: Vec::new(),
+        }
+    }
+}
+
 impl Policy {
+    /// The `allow` an omitted one stands for: `"*"`.
+    fn any() -> Vec<String> {
+        vec![ANY.to_owned()]
+    }
+
     /// Whether `allow` admits `value`.
     pub fn allows(&self, value: &str) -> bool {
         self.allow
@@ -407,9 +424,13 @@ impl Policy {
         self.allows(value) && !self.denies(value)
     }
 
-    /// Whether `allow` is `"*"`, admitting any value.
-    pub fn allows_any(&self) -> bool {
-        self.allow.iter().any(|allowed| allowed == ANY)
+    /// The first value `require` lists that `carries` says the token
+    /// lacks, or `None` when it carries them all.
+    pub fn missing(&self, carries: impl Fn(&str) -> bool) -> Option<&str> {
+        self.require
+            .iter()
+            .map(String::as_str)
+            .find(|required| !carries(required))
     }
 
     /// Why the policy refuses a token carrying these values, or `None` when
@@ -419,11 +440,7 @@ impl Policy {
         if let Some(outside) = values.iter().find(|value| !self.allows(value)) {
             return Some(Refusal::Outside(outside));
         }
-        if let Some(missing) = self
-            .require
-            .iter()
-            .find(|required| !values.contains(&required.as_str()))
-        {
+        if let Some(missing) = self.missing(|required| values.contains(&required)) {
             return Some(Refusal::Missing(missing));
         }
         values
@@ -472,14 +489,6 @@ impl PolicyKind {
             Self::Scopes => "scope",
         }
     }
-
-    /// One value with its indefinite article: `an audience` or `a scope`.
-    pub const fn a_noun(self) -> &'static str {
-        match self {
-            Self::Audiences => "an audience",
-            Self::Scopes => "a scope",
-        }
-    }
 }
 
 impl Route {
@@ -501,11 +510,6 @@ impl Route {
 
 /// The entry in an `allow` list that accepts any value.
 pub const ANY: &str = "*";
-
-/// The `allow` an omitted one stands for: `"*"`.
-fn any() -> Vec<String> {
-    vec![ANY.to_owned()]
-}
 
 /// The routes keyed by host, for lookup in constant time.
 #[derive(Debug, Clone, Default)]

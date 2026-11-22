@@ -18,6 +18,7 @@ mod error;
 mod http;
 mod mint;
 
+use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -434,8 +435,7 @@ fn granted_scopes(
     validated: &Validated,
     requested: Option<&str>,
 ) -> Result<Vec<String>, ExchangeError> {
-    // Sorted and without repeats, as `scopes` collects them into a set.
-    let held: Vec<&str> = scopes(validated.claims()).into_iter().collect();
+    let held = scopes(validated.claims());
     // An `scp` array item is one scope. Empty, or holding whitespace, it
     // would turn into no scope or several in the minted `scope` string.
     if let Some(malformed) = held
@@ -446,55 +446,43 @@ fn granted_scopes(
             "the subject token's scope {malformed:?} is not a single scope"
         )));
     }
-    if let Some(refusal) = policy.refusal(&held) {
+    if let Some(refusal) = policy.refusal(&held.iter().copied().collect::<Vec<_>>()) {
         return Err(refused(refusal, PolicyKind::Scopes, target));
     }
-    let granted: Vec<String> = match requested {
+    let granted: BTreeSet<&str> = match requested {
         // `refusal` proved the subject token holds every required scope,
         // and every one it holds is granted.
-        None => held.iter().map(|scope| (*scope).to_owned()).collect(),
+        None => held.clone(),
         Some(requested) => {
-            let mut narrowed: Vec<&str> = Vec::new();
+            let mut narrowed = BTreeSet::new();
             for scope in requested.split_whitespace() {
-                if held.binary_search(&scope).is_err() {
+                if !held.contains(scope) {
                     return Err(ExchangeError::InvalidScope(format!(
                         "the subject token lacks scope {scope:?}"
                     )));
                 }
-                if !narrowed.contains(&scope) {
-                    narrowed.push(scope);
-                }
+                narrowed.insert(scope);
             }
             // The minted token keeps every scope the route requires. The
             // subject token holds them all, so only the request can drop
             // one.
-            if let Some(dropped) = policy
-                .require
-                .iter()
-                .find(|required| !narrowed.contains(&required.as_str()))
-            {
+            if let Some(dropped) = policy.missing(|required| narrowed.contains(required)) {
                 return Err(ExchangeError::InvalidScope(format!(
                     "the requested scope drops {dropped:?}, which {target:?} requires"
                 )));
             }
-            narrowed.sort_unstable();
-            narrowed.into_iter().map(str::to_owned).collect()
+            narrowed
         }
     };
     // A minted token holds only scopes the subject token held and the
     // route accepts, and every scope the route requires.
-    debug_assert!(
-        granted
-            .iter()
-            .all(|scope| { held.binary_search(&scope.as_str()).is_ok() && policy.admits(scope) })
-    );
+    debug_assert!(granted.is_subset(&held) && granted.iter().all(|scope| policy.admits(scope)));
     debug_assert!(
         policy
-            .require
-            .iter()
-            .all(|required| granted.contains(required))
+            .missing(|required| granted.contains(required))
+            .is_none()
     );
-    Ok(granted)
+    Ok(granted.into_iter().map(str::to_owned).collect())
 }
 
 /// The subject token's audiences, then the route's `append_audience` when
@@ -507,13 +495,7 @@ fn minted_audiences<'a>(inbound: Vec<&'a str>, route: &'a Route) -> Vec<&'a str>
             minted.push(aud);
         }
     }
-    debug_assert!(
-        minted
-            .iter()
-            .collect::<std::collections::BTreeSet<_>>()
-            .len()
-            == minted.len()
-    );
+    debug_assert!(minted.iter().collect::<BTreeSet<_>>().len() == minted.len());
     minted
 }
 

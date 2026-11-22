@@ -17,7 +17,7 @@ use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
 use serde_json::{Map, Value, json};
 use tsong_config::RESERVED_CLAIMS;
-use tsong_issuer::ExchangeError;
+use tsong_issuer::{ExchangeError, TokenResponse};
 
 const HELD: [&str; 4] = ["orders.read", "orders.write", "billing.read", "admin"];
 const ALLOWED: [&str; 3] = ["orders.read", "orders.write", "billing.read"];
@@ -38,6 +38,23 @@ fn scopes_from(pool: &'static [&'static str]) -> impl Strategy<Value = Vec<&'sta
     prop::collection::vec(prop::sample::select(pool), 0..=pool.len())
 }
 
+/// Exchanges a subject token with `changes` made to its claims for a token
+/// for the route at `host`, requesting `scope`, and returns the response
+/// or the refusal.
+fn exchange(
+    host: &str,
+    changes: Value,
+    scope: Option<String>,
+) -> Result<Result<TokenResponse, ExchangeError>, TestCaseError> {
+    let fail =
+        |error: Box<dyn std::error::Error + Send + Sync>| TestCaseError::fail(error.to_string());
+    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+    let h = harness().map_err(fail)?;
+    let mut token = request(&h, host, subject(changes)).map_err(fail)?;
+    token.scope = scope;
+    Ok(runtime.block_on(h.issuer.exchange(token)))
+}
+
 /// Exchanges a subject token holding `held` for a token for the route at
 /// `host`, requesting `requested`, and returns the minted token's scopes
 /// or the refusal.
@@ -46,25 +63,22 @@ fn exchange_scopes(
     held: &[&str],
     requested: Option<&[&str]>,
 ) -> Result<Result<BTreeSet<String>, ExchangeError>, TestCaseError> {
-    let fail =
-        |error: Box<dyn std::error::Error + Send + Sync>| TestCaseError::fail(error.to_string());
-    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-    let h = harness().map_err(fail)?;
     let scope = if held.is_empty() {
         json!(null)
     } else {
         json!(held.join(" "))
     };
-    let mut token = request(&h, host, subject(json!({ "scope": scope }))).map_err(fail)?;
-    token.scope = requested.map(|requested| requested.join(" "));
-    Ok(runtime.block_on(h.issuer.exchange(token)).map(|response| {
-        response
-            .scope
-            .unwrap_or_default()
-            .split_whitespace()
-            .map(str::to_owned)
-            .collect()
-    }))
+    let requested = requested.map(|requested| requested.join(" "));
+    Ok(
+        exchange(host, json!({ "scope": scope }), requested)?.map(|response| {
+            response
+                .scope
+                .unwrap_or_default()
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect()
+        }),
+    )
 }
 
 /// The scopes the minted token must carry, or `None` when the exchange
@@ -148,8 +162,6 @@ proptest! {
     fn a_minted_token_carries_only_mapped_claims(
         extra in prop::collection::btree_map(prop::sample::select(&EXTRA[..]), "[a-z]{1,6}", 0..10),
     ) {
-        let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-        let h = harness().map_err(|error| TestCaseError::fail(error.to_string()))?;
         let mut changes = Map::new();
         for name in ["email", "groups", "uid", "secret"] {
             changes.insert(name.into(), Value::Null);
@@ -157,10 +169,7 @@ proptest! {
         for (name, value) in &extra {
             changes.insert((*name).into(), json!(format!("in-{value}")));
         }
-        let token = request(&h, "orders.test", subject(Value::Object(changes)))
-            .map_err(|error| TestCaseError::fail(error.to_string()))?;
-        let response = runtime
-            .block_on(h.issuer.exchange(token))
+        let response = exchange("orders.test", Value::Object(changes), None)?
             .map_err(|error| TestCaseError::fail(error.to_string()))?;
         let minted = payload(&response.access_token)?;
         for (name, value) in &minted {
@@ -194,11 +203,7 @@ proptest! {
     fn a_route_s_audience_policy_decides_the_exchange(
         held in prop::collection::vec(prop::sample::select(&AUDIENCES[..]), 1..5),
     ) {
-        let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-        let h = harness().map_err(|error| TestCaseError::fail(error.to_string()))?;
-        let token = request(&h, "policy.test", subject(json!({ "aud": held })))
-            .map_err(|error| TestCaseError::fail(error.to_string()))?;
-        let result = runtime.block_on(h.issuer.exchange(token));
+        let result = exchange("policy.test", json!({ "aud": held }), None)?;
         let accepted = held.contains(&"tsong") && !held.contains(&"admin");
         match result {
             Ok(response) => {

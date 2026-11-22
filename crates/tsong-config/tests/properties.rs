@@ -178,25 +178,13 @@ proptest! {
     }
 }
 
-/// Audiences a route may name or a token carry. Only `allow` holds `"*"`,
-/// and `require` never names `admin`.
-const AUDIENCES: [&str; 5] = ["tsong", "api", "other", "admin", ANY];
-
-/// Scopes a route may name or a token carry, held to the same rules.
-const SCOPES: [&str; 5] = ["orders.read", "orders.write", "billing.read", "admin", ANY];
+/// Audiences or scopes a policy may name or a token carry. Only `allow`
+/// holds `"*"`, and `require` never names `admin`.
+const VALUES: [&str; 5] = ["orders.read", "orders.write", "api", "admin", ANY];
 
 fn names(universe: &'static [&'static str]) -> impl Strategy<Value = Vec<String>> {
     prop::collection::vec(prop::sample::select(universe), 0..5)
         .prop_map(|names| names.into_iter().map(str::to_owned).collect())
-}
-
-/// A policy allowing any value.
-fn any_value() -> Policy {
-    Policy {
-        allow: vec![ANY.into()],
-        require: Vec::new(),
-        deny: Vec::new(),
-    }
 }
 
 /// A route allowing any audience and scope, and nothing else set.
@@ -206,8 +194,8 @@ fn route() -> Result<Route, url::ParseError> {
         host: "r.test".into(),
         downstream: Url::parse("https://r-lb.test")?,
         append_audience: String::new(),
-        audiences: any_value(),
-        scopes: any_value(),
+        audiences: Policy::default(),
+        scopes: Policy::default(),
         signing_algorithm: SigningAlgorithm::default(),
         allow: None,
         read_timeout: None,
@@ -254,38 +242,20 @@ fn matches_model(policy: &Policy, held: &[&str]) -> Result<(), TestCaseError> {
 proptest! {
     #![proptest_config(config())]
 
-    /// A route's audience policy matches the model.
+    /// A policy's audience or scope check matches the model, so a token
+    /// with no values is refused only by a policy that requires one.
     #[test]
-    fn a_route_accepts_only_audiences_its_policy_admits(
-        allow in names(&AUDIENCES),
-        require in names(&AUDIENCES[..3]),
-        deny in names(&AUDIENCES[..4]),
-        audiences in names(&AUDIENCES[..4]),
+    fn a_policy_accepts_only_values_it_admits(
+        allow in names(&VALUES),
+        require in names(&VALUES[..3]),
+        deny in names(&VALUES[..4]),
+        values in names(&VALUES[..4]),
     ) {
-        let mut route = route()?;
-        route.audiences = Policy { allow, require, deny };
-        let held: Vec<&str> = audiences.iter().map(String::as_str).collect();
-        matches_model(&route.audiences, &held)?;
-    }
-
-    /// A route's scope policy matches the same model, so a token with no
-    /// scopes is refused only by a route that requires one.
-    #[test]
-    fn a_route_accepts_only_scopes_its_policy_admits(
-        allow in names(&SCOPES),
-        require in names(&SCOPES[..3]),
-        deny in names(&SCOPES[..4]),
-        scopes in names(&SCOPES[..4]),
-    ) {
-        let mut route = route()?;
-        route.scopes = Policy { allow, require, deny };
-        let held: Vec<&str> = scopes.iter().map(String::as_str).collect();
-        matches_model(&route.scopes, &held)?;
+        let policy = Policy { allow, require, deny };
+        let held: Vec<&str> = values.iter().map(String::as_str).collect();
+        matches_model(&policy, &held)?;
         if held.is_empty() {
-            prop_assert_eq!(
-                route.scopes.refusal(&held).is_none(),
-                route.scopes.require.is_empty()
-            );
+            prop_assert_eq!(policy.refusal(&held).is_none(), policy.require.is_empty());
         }
     }
 

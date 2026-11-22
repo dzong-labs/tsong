@@ -256,8 +256,8 @@ impl Config {
 /// else, `deny` is set only under `"*"`, and every `require` value is one
 /// `allow` admits and not one `deny` lists.
 fn check_policy(name: &str, kind: PolicyKind, policy: &Policy, problems: &mut Vec<String>) {
-    let (list, noun, a_noun) = (kind.key(), kind.noun(), kind.a_noun());
-    let any = policy.allows_any();
+    let (list, noun) = (kind.key(), kind.noun());
+    let any = policy.allows(ANY);
     if policy.allow.is_empty() {
         problems.push(format!(
             "route {name:?} {list}.allow is empty; omit allow to admit any {noun}"
@@ -291,7 +291,7 @@ fn check_policy(name: &str, kind: PolicyKind, policy: &Policy, problems: &mut Ve
                 ));
             } else if value.contains(char::is_whitespace) {
                 problems.push(format!(
-                    "route {name:?} {list}.{field} has {value:?}; {a_noun} holds no whitespace"
+                    "route {name:?} {list}.{field} has {noun} {value:?}, which holds whitespace"
                 ));
             } else if field == "require" && any && policy.denies(value) {
                 problems.push(format!(
