@@ -38,26 +38,23 @@ impl Validated {
         exp.as_u64()
             .or_else(|| exp.as_f64().map(|seconds| seconds as u64))
     }
-    /// The `aud` claim's values. Validation has refused an `aud` that is
-    /// not a string or an array of strings.
+    /// The `aud` claim's values. A `Validated` exists only once validation
+    /// has refused an `aud` that is not a string or an array of strings,
+    /// so nothing here is dropped.
     pub fn audiences(&self) -> Vec<&str> {
-        let aud = self.claims.get("aud");
-        debug_assert!(aud.is_none_or(|aud| strings(aud).is_some()));
-        aud.and_then(strings).unwrap_or_default()
+        self.claims.get("aud").and_then(strings).unwrap_or_default()
     }
 
     /// The scopes the token grants: its `scope` claim, space-separated, and
     /// its `scp` claim, a string or an array, as Entra issues it.
-    /// Validation has refused a scope claim of any other shape, a string
-    /// holding whitespace other than spaces, and an `scp` item that is not
-    /// one scope token, so a string splits on spaces alone and nothing
-    /// here is dropped.
+    /// A `Validated` exists only once validation has refused a scope claim
+    /// of any other shape, a string holding whitespace other than spaces,
+    /// and an `scp` item that is not one scope token, so a string splits on
+    /// spaces alone and nothing here is dropped.
     pub fn scopes(&self) -> BTreeSet<&str> {
         let mut scopes = BTreeSet::new();
         for name in ["scope", "scp"] {
-            let value = self.claims.get(name);
-            debug_assert!(value.is_none_or(|value| strings(value).is_some()));
-            match value {
+            match self.claims.get(name) {
                 Some(Value::String(text)) => {
                     scopes.extend(text.split(' ').filter(|scope| !scope.is_empty()));
                 }

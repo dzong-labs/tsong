@@ -1287,23 +1287,66 @@ fn policy_lists_repeat_no_value() -> TestResult {
 }
 
 #[test]
-fn policy_values_hold_no_whitespace() -> TestResult {
-    assert_problems(
-        r#"{ allow = ["api", "a b"], require = ["api\t"] }"#,
-        &[
+fn audiences_hold_no_whitespace() -> TestResult {
+    let problems = |policy| policy_problems("audiences", policy);
+    assert_eq!(
+        problems(r#"{ allow = ["api", "a b"], require = ["api\t"] }"#)?,
+        [
             r#"route "orders" audiences.allow has audience "a b", which holds whitespace"#,
             r#"route "orders" audiences.require has audience "api\t", which holds whitespace"#,
-        ],
-    )?;
+        ]
+    );
     // Under "*" every value is allowed, so only the shape check stands
     // between a required "a b" and a route that refuses every token.
-    assert_problems(
-        r#"{ allow = ["*"], require = ["orders.read billing.read"], deny = ["\tadmin"] }"#,
-        &[
+    assert_eq!(
+        problems(
+            r#"{ allow = ["*"], require = ["orders.read billing.read"], deny = ["\tadmin"] }"#
+        )?,
+        [
             r#"route "orders" audiences.require has audience "orders.read billing.read", which holds whitespace"#,
             r#"route "orders" audiences.deny has audience "\tadmin", which holds whitespace"#,
-        ],
-    )
+        ]
+    );
+    // An audience is a URI or any other string, not a scope token.
+    Config::from_toml(&route_with_policy(
+        "audiences",
+        r#"{ allow = ["*"], require = ["commandes.écrire", "a\\b", "say\"hi\""] }"#,
+    )?)?;
+    Ok(())
+}
+
+#[test]
+fn scopes_are_rfc_6749_scope_tokens() -> TestResult {
+    let problems = |policy| policy_problems("scopes", policy);
+    let refused = |field: &str, scope: &str| {
+        format!(
+            r#"route "orders" scopes.{field} has scope {scope:?}, which is not an RFC 6749 scope token: printable ASCII except space, '"' and '\'"#
+        )
+    };
+    assert_eq!(
+        problems(r#"{ allow = ["api", "a b"], require = ["api\t"] }"#)?,
+        [refused("allow", "a b"), refused("require", "api\t")]
+    );
+    // Under "*" every value is allowed, so only the shape check stands
+    // between a required scope no token can carry and a route that
+    // refuses every token.
+    assert_eq!(
+        problems(
+            r#"{ allow = ["*"], require = ["commandes.écrire", "a\\b", "say\"hi\"", "x y"], deny = ["\tadmin"] }"#
+        )?,
+        [
+            refused("require", "commandes.\u{e9}crire"),
+            refused("require", r"a\b"),
+            refused("require", r#"say"hi""#),
+            refused("require", "x\u{a0}y"),
+            refused("deny", "\tadmin"),
+        ]
+    );
+    Config::from_toml(&route_with_policy(
+        "scopes",
+        r#"{ allow = ["*"], require = ["https://api.example/orders.read", "a!#[]~"] }"#,
+    )?)?;
+    Ok(())
 }
 
 #[test]

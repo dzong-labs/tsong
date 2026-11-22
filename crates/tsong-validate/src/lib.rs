@@ -33,7 +33,7 @@ use jsonwebtoken::{Algorithm, DecodingKey};
 use serde_json::{Map, Value};
 use tokio::sync::Mutex;
 use tsong_clock::Clock;
-use tsong_config::{Config, InboundAlgorithm, TrustedIssuer, Validation};
+use tsong_config::{Config, InboundAlgorithm, TrustedIssuer, Validation, is_scope_char};
 
 pub use claims::Validated;
 pub use jwks::{FetchError, FetchFuture, HttpFetcher, JwksFetcher};
@@ -440,8 +440,8 @@ fn time_claim(
 /// `"` and `\`. An empty or all-space string is a token with no scopes; any
 /// other whitespace is refused.
 fn check_scopes(payload: &Map<String, Value>) -> Result<(), ValidateError> {
-    let spaced = |text: &str| text.chars().all(|c| c == ' ' || scope_char(c));
-    let token = |text: &&str| !text.is_empty() && text.chars().all(scope_char);
+    let spaced = |text: &str| text.chars().all(|c| c == ' ' || is_scope_char(c));
+    let token = |text: &&str| !text.is_empty() && text.chars().all(is_scope_char);
     match payload.get("scope") {
         None => {}
         Some(Value::String(text)) if spaced(text) => {}
@@ -457,9 +457,4 @@ fn check_scopes(payload: &Map<String, Value>) -> Result<(), ValidateError> {
         }
         Some(_) => Err(ValidateError::InvalidClaim("scp")),
     }
-}
-
-/// An RFC 6749 NQCHAR: printable ASCII other than space, `"` and `\`.
-fn scope_char(c: char) -> bool {
-    matches!(c, '\x21' | '\x23'..='\x5b' | '\x5d'..='\x7e')
 }

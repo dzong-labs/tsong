@@ -61,6 +61,7 @@ The config fails to load, and `tsong check` reports it, when, in `[routes.audien
 
 - `allow` is empty. An omitted `allow` means `"*"`, which admits any value; to refuse every token, remove the route.
 - A value is empty, holds whitespace, or repeats within its list.
+- A scope value is not one RFC 6749 scope token: printable ASCII other than space, `"` and `\`. No token can carry such a scope.
 - `"*"` appears in `require` or `deny`, or alongside other values in `allow`.
 - `deny` holds values and `allow` is named, not `"*"` or omitted. Under a named `allow`, a denied value is one left out of `allow`.
 - A value is in both `require` and `deny`, or `require` names a value `allow` doesn't admit.
@@ -71,7 +72,7 @@ The config fails to load, and `tsong check` reports it, when, in `[routes.audien
 
 `tsong check` warns when the audience policy admits no audience a trusted issuer that validates JWTs accepts, which refuses every token.
 
-`allowed_audiences`, `allowed_scopes` and `required_scopes` are removed, not kept as aliases, and an old config is refused naming the key that replaces it. An empty `allowed_audiences` or `allowed_scopes` refused every token; to keep that, remove the route. `scp` is now a reserved claim, and `scope` and `scp` may not be renamed, so a config whose `[claims]` copies `scp`, renames a claim to `scp`, or renames `scope` or `scp` to another claim fails to load; remove that entry. Scopes reach the minted token only through `scope`, after the route's scope policy and narrowing. The release notes say how to move a config across.
+`allowed_audiences`, `allowed_scopes` and `required_scopes` are removed, not kept as aliases, and an old config is refused naming the key that replaces it. An empty `allowed_audiences` or `allowed_scopes` refused every token; to keep that, remove the route. `scp` is now a reserved claim, and `scope` and `scp` may not be renamed, so a config whose `[claims]` copies `scp`, renames a claim to `scp`, or renames `scope` or `scp` to another claim fails to load; remove that entry. Scopes reach the minted token only through `scope`, after the route's scope policy and narrowing. A route scope value outside RFC 6749 scope token characters, such as one with an accented letter, now fails to load, since no token can carry it. The release notes say how to move a config across.
 
 ### Rules
 

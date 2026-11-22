@@ -202,6 +202,38 @@ async fn requested_scopes_narrow_the_subjects() -> TestResult {
 }
 
 #[tokio::test]
+async fn a_requested_scope_splits_only_on_spaces() -> TestResult {
+    let h = harness()?;
+    let spaced = changed(request(&h, "orders.test", subject(json!({}))), |r| {
+        r.scope = Some(" orders.write  orders.read ".into());
+    });
+    let (response, _) = exchanged(&h, spaced).await?;
+    assert_eq!(response.scope.as_deref(), Some("orders.read orders.write"));
+
+    for scope in [
+        "orders.read\u{a0}orders.write",
+        "orders.read\torders.write",
+        "orders.read\norders.write",
+        r"orders\read",
+        "orders\"read",
+        "commandes.\u{e9}crire",
+    ] {
+        let malformed = changed(request(&h, "orders.test", subject(json!({}))), |r| {
+            r.scope = Some(scope.into());
+        });
+        assert_eq!(
+            refused(&h, malformed).await?,
+            (
+                "invalid_request",
+                "the scope parameter holds a character other than a space and RFC 6749 scope token characters".into()
+            ),
+            "{scope:?}"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_route_s_required_scopes_must_all_be_held() -> TestResult {
     let h = harness()?;
     let all = subject(json!({ "scope": "orders.read billing.read orders.write" }));

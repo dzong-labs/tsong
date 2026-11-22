@@ -501,6 +501,12 @@ impl PolicyKind {
     }
 }
 
+/// Whether `c` may appear in an OAuth scope token: an RFC 6749 NQCHAR,
+/// printable ASCII other than space, `"` and the backslash.
+pub fn is_scope_char(c: char) -> bool {
+    matches!(c, '!' | '#'..='[' | ']'..='~')
+}
+
 impl Route {
     /// The longest the gateway waits on this route's downstream between
     /// reads.

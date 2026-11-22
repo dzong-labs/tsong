@@ -31,6 +31,7 @@ use serde_json::{Value, json};
 use tsong_clock::Clock;
 use tsong_config::{
     Config, Policy, PolicyKind, RESERVED_CLAIMS, Refusal, Route, RouteTable, allowed, client_ip,
+    is_scope_char,
 };
 use tsong_keys::KeySet;
 use tsong_validate::{Validated, Validator};
@@ -412,13 +413,19 @@ fn refused(refusal: Refusal<'_>, kind: PolicyKind, target: &str) -> ExchangeErro
 
 /// The subject token's scopes, once the scope `policy` of the route for
 /// `target` accepts them, narrowed to the scopes requested when there is a
-/// request.
+/// request. The request's `scope` is scope tokens separated by spaces, by
+/// RFC 6749 section 3.3; any other character refuses the request.
 fn granted_scopes(
     policy: &Policy,
     target: &str,
     validated: &Validated,
     requested: Option<&str>,
 ) -> Result<Vec<String>, ExchangeError> {
+    if requested.is_some_and(|text| !text.chars().all(|c| c == ' ' || is_scope_char(c))) {
+        return Err(ExchangeError::InvalidRequest(
+            "the scope parameter holds a character other than a space and RFC 6749 scope token characters".into(),
+        ));
+    }
     // Validation refused an `scp` item that is empty or holds whitespace,
     // which would turn into no scope or several in the minted `scope`.
     let held = validated.scopes();
@@ -431,7 +438,7 @@ fn granted_scopes(
         None => held.clone(),
         Some(requested) => {
             let mut narrowed = BTreeSet::new();
-            for scope in requested.split_whitespace() {
+            for scope in requested.split(' ').filter(|scope| !scope.is_empty()) {
                 if !held.contains(scope) {
                     return Err(ExchangeError::InvalidScope(format!(
                         "the subject token lacks scope {scope:?}"
