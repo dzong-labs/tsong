@@ -83,7 +83,7 @@ fn exchange_scopes(
 /// The scopes the minted token must carry, or `None` when the exchange
 /// must be refused.
 fn expected(held: &BTreeSet<&str>, requested: Option<&[&str]>) -> Option<BTreeSet<String>> {
-    if held.is_empty() || !held.iter().all(|scope| ALLOWED.contains(scope)) {
+    if !held.iter().all(|scope| ALLOWED.contains(scope)) {
         return None;
     }
     let granted: BTreeSet<&str> = match requested {

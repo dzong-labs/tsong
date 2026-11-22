@@ -91,7 +91,7 @@ async fn the_token_endpoint_exchanges_a_form() -> TestResult {
 #[tokio::test]
 async fn a_token_narrowed_to_no_scope_omits_the_scope_field() -> TestResult {
     let h = harness()?;
-    // A subject token needs a scope, but an empty request keeps none.
+    // An empty scope request narrows the minted token to no scope.
     let form = exchange_form_with(&h, "orders.test", "&scope=")?;
     let (status, _, body) = send(&h, form).await?;
     assert_eq!(status, StatusCode::OK);

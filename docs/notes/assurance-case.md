@@ -28,7 +28,7 @@ The [threat model](threat-model.md) names the five sources of input, how far eac
 
 The design applies Saltzer and Schroeder's principles, and the requirements follow from them:
 
-- **Fail-safe defaults** (requirements 1, 5): empty allow and scope lists deny everything, expired issuer keys refuse their tokens, and a config that fails keeps the last good one serving.
+- **Fail-safe defaults** (requirements 1, 5): an empty IP allow list denies every client, an empty policy `allow` is a load error, expired issuer keys refuse their tokens, and a config that fails stops Tsong from starting.
 - **Complete mediation** (1, 3): every request passes the allow lists, full token validation and route policy. The token endpoint enforces the same policy as the gateway, so it offers no way around it.
 - **Separation of privilege** (1): a request needs an admitted address, a valid signature from a trusted issuer, and an accepted audience and scope. Defeating one isn't enough.
 - **Least privilege** (3): a minted token holds only what the route, the caller and the request all allow. The container runs as an unprivileged user on a read-only filesystem, and CI workflow tokens are read-only by default.
@@ -36,7 +36,7 @@ The design applies Saltzer and Schroeder's principles, and the requirements foll
 - **Economy of mechanism** (5): one config file, one immutable state per config swapped whole, one crate per job.
 - **Open design** (6): security rests on keys and secrets, never on secrecy of the code; secrets are references, never values.
 - **Limited attack surface**: the admin and health listeners are separate, configured only by the host, each with its own allow list.
-- **Allowlists for input** (7): algorithms, issuers, audiences, scopes, client ranges, hosts and secret schemes are all allowlists, and unknown config fields are errors.
+- **Allowlists for input** (7): algorithms, issuers, audiences, scopes, client ranges, hosts and secret schemes are all allowlists, and unknown config fields are errors. An omitted policy `allow` means `"*"`, and only that policy's `deny` narrows it.
 
 ## Common weaknesses and their countermeasures
 
