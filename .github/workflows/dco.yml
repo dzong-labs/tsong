@@ -2,10 +2,9 @@ name: DCO
 
 # Every commit in a pull request must be signed off by its author under
 # the Developer Certificate of Origin, as CONTRIBUTING.md requires. It runs
-# on every pull request, whatever it changes, except Dependabot's: a bot
-# can't certify the DCO, and GitHub sets the pull request's author, so no
-# one else can claim to be Dependabot. Commit authors are free text, so the
-# check never trusts them for this.
+# on every pull request, whatever it changes. A bot can't certify the DCO,
+# so on a pull request GitHub says Dependabot opened, Dependabot's own
+# commits are exempt; anyone else's commits on it are still checked.
 on:
   pull_request:
     branches: [ "main" ]
@@ -14,7 +13,6 @@ permissions: read-all
 
 jobs:
   dco:
-    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -25,4 +23,5 @@ jobs:
       env:
         BASE: ${{ github.base_ref }}
         HEAD: ${{ github.event.pull_request.head.sha }}
+        DEPENDABOT_PR: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
       run: scripts/dco.sh "origin/$BASE..$HEAD"

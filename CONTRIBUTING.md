@@ -30,7 +30,7 @@ CI's `passed` check must succeed. It runs these, and the hooks run most of them 
 - Dependency graph: `cargo deny --locked check bans licenses sources`, under the rules in `deny.toml`.
 - Fuzzing: every target under `fuzz/` for 20 seconds, with `scripts/fuzz.sh`.
 - CodeQL, for Rust and for the workflows.
-- Sign-off: every commit is signed off by its author, as [License](#license) describes. The `DCO` check verifies it on every pull request except Dependabot's.
+- Sign-off: every commit is signed off by its author, as [License](#license) describes. The `DCO` check verifies it on every pull request; only Dependabot's own commits, on pull requests it opened, are exempt.
 
 Enable the hooks once per clone:
 
