@@ -159,7 +159,7 @@ impl Issuer {
         request: &TokenRequest,
         seen: &mut Seen,
     ) -> Result<TokenResponse, ExchangeError> {
-        let (subject_token, audience) = check_request(request)?;
+        let (subject_token, audience, requested_scope) = check_request(request)?;
         let validated = self.validator.validate(subject_token).await?;
         seen.trusted_issuer = Some(validated.issuer().to_owned());
         let claim = |name: &str| {
@@ -178,12 +178,7 @@ impl Issuer {
         if let Some(refusal) = route.audiences.refusal(&inbound_audiences) {
             return Err(refused(refusal, PolicyKind::Audiences, audience));
         }
-        let granted = granted_scopes(
-            &route.scopes,
-            audience,
-            &validated,
-            request.scope.as_deref(),
-        )?;
+        let granted = granted_scopes(&route.scopes, audience, &validated, requested_scope)?;
         let original_sub = validated
             .subject()
             .filter(|sub| !sub.is_empty())
@@ -355,8 +350,9 @@ impl Issuer {
     }
 }
 
-/// Checks the request's shape, returning the subject token and audience.
-fn check_request(request: &TokenRequest) -> Result<(&str, &str), ExchangeError> {
+/// Checks the request's shape, returning the subject token, audience and
+/// requested scope.
+fn check_request(request: &TokenRequest) -> Result<(&str, &str, Option<&str>), ExchangeError> {
     if request.grant_type.as_deref() != Some(TOKEN_EXCHANGE) {
         return Err(ExchangeError::UnsupportedGrantType);
     }
@@ -384,18 +380,16 @@ fn check_request(request: &TokenRequest) -> Result<(&str, &str), ExchangeError> 
     let Some(audience) = request.audience.as_deref() else {
         return invalid("audience is required");
     };
+    // An empty `scope` counts as omitted, by RFC 6749 section 3.1.
+    let scope = request.scope.as_deref().filter(|text| !text.is_empty());
     // The request's `scope` is scope tokens separated by spaces, by RFC 6749
     // section 3.3.
-    if request
-        .scope
-        .as_deref()
-        .is_some_and(|text| !text.chars().all(|c| c == ' ' || is_scope_char(c)))
-    {
+    if scope.is_some_and(|text| !text.chars().all(|c| c == ' ' || is_scope_char(c))) {
         return invalid(
             "the scope parameter holds a character other than a space and RFC 6749 scope token characters",
         );
     }
-    Ok((subject_token, audience))
+    Ok((subject_token, audience, scope))
 }
 
 /// Why the route for `target` refused the subject token's audiences or

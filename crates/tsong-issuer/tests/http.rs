@@ -100,13 +100,16 @@ async fn the_token_endpoint_exchanges_a_form() -> TestResult {
 }
 
 #[tokio::test]
-async fn a_token_narrowed_to_no_scope_omits_the_scope_field() -> TestResult {
+async fn an_empty_scope_parameter_counts_as_omitted() -> TestResult {
     let h = harness()?;
-    // An empty scope request narrows the minted token to no scope.
-    let form = exchange_form_with(&h, "orders.test", "&scope=")?;
-    let (status, _, body) = send(&h, form).await?;
+    // RFC 6749 section 3.1: a parameter sent without a value is omitted.
+    let (status, _, omitted) = send(&h, exchange_form(&h, "orders.test")?).await?;
     assert_eq!(status, StatusCode::OK);
-    assert!(body.get("scope").is_none());
+    let form = exchange_form_with(&h, "orders.test", "&scope=")?;
+    let (status, _, empty) = send(&h, form).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(empty.get("scope"), Some(&json!("orders.read orders.write")));
+    assert_eq!(empty.get("scope"), omitted.get("scope"));
     Ok(())
 }
 
