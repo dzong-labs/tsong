@@ -26,7 +26,7 @@ CI's `passed` check must succeed. It runs these, and the hooks run most of them 
 - Tests: `cargo test --workspace`, in the dev and release profiles.
 - Coverage: line coverage stays at or above 95%, measured with `cargo llvm-cov`.
 - Mutation testing: no mutant of a line the pull request changes survives `cargo mutants`.
-- Dependency audit: `cargo audit --deny warnings`.
+- Dependency audit: `cargo audit --deny warnings`, and again with `--file fuzz/Cargo.lock`, since the fuzz crate keeps its own lockfile.
 - Dependency graph: `cargo deny --locked check bans licenses sources`, under the rules in `deny.toml`.
 - Fuzzing: every target under `fuzz/` for 20 seconds, with `scripts/fuzz.sh`.
 - CodeQL, for Rust and for the workflows.
