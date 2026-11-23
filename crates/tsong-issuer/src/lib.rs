@@ -7,12 +7,14 @@
 //! must carry every value the route requires, and may carry none it
 //! denies. A token carrying no scope passes unless the route requires
 //! one; validation has already refused a token with no audience its
-//! trusted issuer accepts. The minted token keeps the subject token's
-//! audiences and scopes, narrowed to the requested scopes but always
-//! keeping the required ones, and adds the route's `append_audience`. Its `sub` is the trusted issuer's
-//! `sub_prefix`, a `:`, and the subject, and its RFC 9493 `sub_id` keeps the
-//! subject token's own `iss` and `sub`. [`router`] serves the token
-//! endpoint, the JWKS and the discovery document over HTTP.
+//! trusted issuer accepts, and one with a malformed `scope` or `scp`.
+//! The minted token keeps the subject token's audiences and scopes,
+//! narrowed to the requested scopes but always keeping the required ones,
+//! and adds the route's `append_audience`. Its `sub` is the trusted
+//! issuer's `sub_prefix`, a `:`, and the subject, and its RFC 9493
+//! `sub_id` keeps the subject token's own `iss` and `sub`. [`router`]
+//! serves the token endpoint, the JWKS and the discovery document over
+//! HTTP.
 
 mod context;
 mod error;
@@ -29,9 +31,10 @@ use serde_json::{Value, json};
 use tsong_clock::Clock;
 use tsong_config::{
     Config, Policy, PolicyKind, RESERVED_CLAIMS, Refusal, Route, RouteTable, allowed, client_ip,
+    is_scope_token,
 };
 use tsong_keys::KeySet;
-use tsong_validate::{Validated, Validator, scopes};
+use tsong_validate::{Validated, Validator};
 
 pub use context::{
     ExchangeContext, ExchangeEvent, ExchangeObserver, REQUEST_ID, TRACEPARENT, request_id_is_valid,
@@ -59,6 +62,36 @@ pub struct TokenRequest {
     pub resource: Option<String>,
     pub actor_token: Option<String>,
     pub actor_token_type: Option<String>,
+}
+
+impl TokenRequest {
+    /// This request with every parameter sent without a value omitted, as
+    /// RFC 6749 section 3.1 requires.
+    pub(crate) fn without_empty_parameters(self) -> Self {
+        let given = |value: Option<String>| value.filter(|value| !value.is_empty());
+        let Self {
+            grant_type,
+            subject_token,
+            subject_token_type,
+            audience,
+            scope,
+            requested_token_type,
+            resource,
+            actor_token,
+            actor_token_type,
+        } = self;
+        Self {
+            grant_type: given(grant_type),
+            subject_token: given(subject_token),
+            subject_token_type: given(subject_token_type),
+            audience: given(audience),
+            scope: given(scope),
+            requested_token_type: given(requested_token_type),
+            resource: given(resource),
+            actor_token: given(actor_token),
+            actor_token_type: given(actor_token_type),
+        }
+    }
 }
 
 /// A successful exchange, as RFC 8693 section 2.2.1 defines it.
@@ -133,6 +166,7 @@ impl Issuer {
         context: &ExchangeContext,
     ) -> Result<TokenResponse, ExchangeError> {
         let started = Instant::now();
+        let request = request.without_empty_parameters();
         let mut seen = Seen::default();
         let result = self.run(&request, &mut seen).await;
         if let Some(observer) = &self.observer {
@@ -156,7 +190,7 @@ impl Issuer {
         request: &TokenRequest,
         seen: &mut Seen,
     ) -> Result<TokenResponse, ExchangeError> {
-        let (subject_token, audience) = check_request(request)?;
+        let (subject_token, audience, requested_scope) = check_request(request)?;
         let validated = self.validator.validate(subject_token).await?;
         seen.trusted_issuer = Some(validated.issuer().to_owned());
         let claim = |name: &str| {
@@ -171,16 +205,11 @@ impl Issuer {
         let route = self.routes.get(audience).ok_or_else(|| {
             ExchangeError::InvalidTarget(format!("no route has host {audience:?}"))
         })?;
-        let inbound_audiences = audiences(validated.claims())?;
+        let inbound_audiences = validated.audiences();
         if let Some(refusal) = route.audiences.refusal(&inbound_audiences) {
             return Err(refused(refusal, PolicyKind::Audiences, audience));
         }
-        let granted = granted_scopes(
-            &route.scopes,
-            audience,
-            &validated,
-            request.scope.as_deref(),
-        )?;
+        let granted = granted_scopes(&route.scopes, audience, &validated, requested_scope)?;
         let original_sub = validated
             .subject()
             .filter(|sub| !sub.is_empty())
@@ -352,8 +381,9 @@ impl Issuer {
     }
 }
 
-/// Checks the request's shape, returning the subject token and audience.
-fn check_request(request: &TokenRequest) -> Result<(&str, &str), ExchangeError> {
+/// Checks the request's shape, returning the subject token, audience and
+/// requested scope.
+fn check_request(request: &TokenRequest) -> Result<(&str, &str, Option<&str>), ExchangeError> {
     if request.grant_type.as_deref() != Some(TOKEN_EXCHANGE) {
         return Err(ExchangeError::UnsupportedGrantType);
     }
@@ -381,29 +411,16 @@ fn check_request(request: &TokenRequest) -> Result<(&str, &str), ExchangeError> 
     let Some(audience) = request.audience.as_deref() else {
         return invalid("audience is required");
     };
-    Ok((subject_token, audience))
-}
-
-/// The subject token's `aud`: a string or an array of strings. Any other
-/// `aud` refuses the exchange, so no audience escapes the route's checks.
-fn audiences(claims: &serde_json::Map<String, Value>) -> Result<Vec<&str>, ExchangeError> {
-    match claims.get("aud") {
-        None => Ok(Vec::new()),
-        Some(Value::String(aud)) => Ok(vec![aud.as_str()]),
-        Some(Value::Array(items)) => items
-            .iter()
-            .map(|item| {
-                item.as_str().ok_or_else(|| {
-                    ExchangeError::InvalidRequest(format!(
-                        "the subject token's audience {item} is not a string"
-                    ))
-                })
-            })
-            .collect(),
-        Some(aud) => Err(ExchangeError::InvalidRequest(format!(
-            "the subject token's aud {aud} is not a string or an array of strings"
-        ))),
+    let scope = request.scope.as_deref();
+    // The request's `scope` is scope tokens separated by single spaces, by
+    // RFC 6749 section 3.3, and a malformed one is `invalid_scope`, by
+    // section 5.2.
+    if scope.is_some_and(|text| !text.split(' ').all(is_scope_token)) {
+        return Err(ExchangeError::InvalidScope(
+            "the scope parameter is not RFC 6749 scope tokens separated by single spaces".into(),
+        ));
     }
+    Ok((subject_token, audience, scope))
 }
 
 /// Why the route for `target` refused the subject token's audiences or
@@ -432,24 +449,16 @@ fn refused(refusal: Refusal<'_>, kind: PolicyKind, target: &str) -> ExchangeErro
 
 /// The subject token's scopes, once the scope `policy` of the route for
 /// `target` accepts them, narrowed to the scopes requested when there is a
-/// request.
+/// request. `check_request` has already refused a malformed request `scope`.
 fn granted_scopes(
     policy: &Policy,
     target: &str,
     validated: &Validated,
     requested: Option<&str>,
 ) -> Result<Vec<String>, ExchangeError> {
-    let held = scopes(validated.claims());
-    // An `scp` array item is one scope. Empty, or holding whitespace, it
-    // would turn into no scope or several in the minted `scope` string.
-    if let Some(malformed) = held
-        .iter()
-        .find(|scope| scope.is_empty() || scope.contains(char::is_whitespace))
-    {
-        return Err(ExchangeError::InvalidRequest(format!(
-            "the subject token's scope {malformed:?} is not a single scope"
-        )));
-    }
+    // Validation refused every scope that isn't a single RFC 6749 scope
+    // token, and a non-string or null `scope` or `scp` claim.
+    let held = validated.scopes();
     if let Some(refusal) = policy.refusal(&held.iter().copied().collect::<Vec<_>>()) {
         return Err(refused(refusal, PolicyKind::Scopes, target));
     }
@@ -459,7 +468,7 @@ fn granted_scopes(
         None => held.clone(),
         Some(requested) => {
             let mut narrowed = BTreeSet::new();
-            for scope in requested.split_whitespace() {
+            for scope in requested.split(' ') {
                 if !held.contains(scope) {
                     return Err(ExchangeError::InvalidScope(format!(
                         "the subject token lacks scope {scope:?}"
@@ -501,56 +510,4 @@ fn minted_audiences<'a>(inbound: Vec<&'a str>, route: &'a Route) -> Vec<&'a str>
     }
     debug_assert!(minted.iter().collect::<BTreeSet<_>>().len() == minted.len());
     minted
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    type TestResult = Result<(), Box<dyn std::error::Error>>;
-
-    /// The error `audiences` reports for a token whose `aud` is `aud`, or
-    /// a test failure when it reports none.
-    fn refused(aud: Value) -> Result<String, Box<dyn std::error::Error>> {
-        let Value::Object(claims) = json!({ "aud": aud }) else {
-            return Err("claims are an object".into());
-        };
-        match audiences(&claims) {
-            Err(error @ ExchangeError::InvalidRequest(_)) => Ok(error.to_string()),
-            other => Err(format!("expected an invalid request, got {other:?}").into()),
-        }
-    }
-
-    // The validator refuses such tokens first; this holds wherever else
-    // the claims come from.
-    #[test]
-    fn an_aud_that_is_not_strings_refuses_the_exchange() -> TestResult {
-        assert_eq!(
-            refused(json!(["api", 1]))?,
-            "the subject token's audience 1 is not a string"
-        );
-        assert_eq!(
-            refused(json!(["api", null]))?,
-            "the subject token's audience null is not a string"
-        );
-        assert_eq!(
-            refused(json!({ "api": true }))?,
-            r#"the subject token's aud {"api":true} is not a string or an array of strings"#
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn an_aud_is_a_string_an_array_of_strings_or_absent() -> TestResult {
-        let Value::Object(claims) = json!({ "aud": ["api", "other"] }) else {
-            return Err("claims are an object".into());
-        };
-        assert_eq!(audiences(&claims)?, ["api", "other"]);
-        let Value::Object(claims) = json!({ "aud": "api" }) else {
-            return Err("claims are an object".into());
-        };
-        assert_eq!(audiences(&claims)?, ["api"]);
-        assert!(audiences(&serde_json::Map::new())?.is_empty());
-        Ok(())
-    }
 }

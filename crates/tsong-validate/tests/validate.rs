@@ -7,7 +7,7 @@ use serde_json::{Map, Value, json};
 use tsong_clock::ManualClock;
 use tsong_config::Config;
 use tsong_validate::testkit::{FakeFetcher, TestKey};
-use tsong_validate::{ValidateError, Validator, scopes};
+use tsong_validate::{ValidateError, Validator};
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -589,16 +589,124 @@ async fn not_before_allows_the_clock_skew_and_no_more() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn scopes_come_from_scope_and_scp() -> TestResult {
-    let claims = object(json!({ "scope": "a b", "scp": ["c", 7, "a"] }))?;
-    let found: Vec<_> = scopes(&claims).into_iter().collect();
-    assert_eq!(found, ["a", "b", "c"]);
-    let entra = object(json!({ "scp": "d  e" }))?;
-    let found: Vec<_> = scopes(&entra).into_iter().collect();
-    assert_eq!(found, ["d", "e"]);
-    let none = object(json!({ "scope": 7 }))?;
-    assert!(scopes(&none).is_empty());
+#[tokio::test]
+async fn the_scope_claims_must_be_well_formed() -> TestResult {
+    let h = harness()?;
+    // A null in `changes` removes the claim: a token with no `scope`.
+    let absent = h.key.sign(&with(json!({ "scope": null }))?)?;
+    h.validator.validate(&absent).await?;
+    for changes in [
+        json!({ "scope": "" }),
+        json!({ "scope": " " }),
+        json!({ "scp": "" }),
+        json!({ "scp": " " }),
+        json!({ "scp": "orders.read  orders.write" }),
+        json!({ "scp": [] }),
+        json!({ "scp": ["orders.read", "orders.write"] }),
+    ] {
+        let token = h.key.sign(&with(changes.clone())?)?;
+        let validated = h.validator.validate(&token).await;
+        assert!(validated.is_ok(), "{changes}: {validated:?}");
+    }
+    for (changes, claim) in [
+        (json!({ "scope": 7 }), "scope"),
+        (json!({ "scope": ["orders.read"] }), "scope"),
+        (json!({ "scope": { "orders.read": true } }), "scope"),
+        (json!({ "scp": 7 }), "scp"),
+        (json!({ "scp": { "orders.read": true } }), "scp"),
+        (json!({ "scp": ["orders.read", 7] }), "scp"),
+        (json!({ "scp": ["orders.read", ""] }), "scp"),
+        (json!({ "scp": ["orders.read billing.read"] }), "scp"),
+        (json!({ "scp": ["orders.read\tadmin"] }), "scp"),
+        (json!({ "scp": ["orders.read\u{a0}"] }), "scp"),
+        (json!({ "scp": ["orders.read\n"] }), "scp"),
+        (json!({ "scp": ["orders\"read"] }), "scp"),
+        (json!({ "scp": [r"orders\read"] }), "scp"),
+        (json!({ "scp": ["orders\rread"] }), "scp"),
+        (json!({ "scp": ["orders\u{1}read"] }), "scp"),
+        (json!({ "scp": ["commandes.\u{e9}crire"] }), "scp"),
+        (json!({ "scope": "orders.read\u{a0}admin" }), "scope"),
+        (json!({ "scope": "orders.read\tadmin" }), "scope"),
+        (json!({ "scope": "orders.read\nadmin" }), "scope"),
+        (json!({ "scope": "orders\"read" }), "scope"),
+        (json!({ "scope": r"orders\read" }), "scope"),
+        (json!({ "scp": "orders.read\u{a0}admin" }), "scp"),
+        (json!({ "scp": "orders.read\tadmin" }), "scp"),
+        (json!({ "scp": "orders.read\nadmin" }), "scp"),
+    ] {
+        let token = h.key.sign(&with(changes.clone())?)?;
+        let error = refused(&h, &token).await?;
+        assert!(
+            matches!(error, ValidateError::InvalidClaim(name) if name == claim),
+            "{changes}: {error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            format!("the token's {claim} claim is not valid")
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_null_scope_claim_is_refused() -> TestResult {
+    let h = harness()?;
+    for claim in ["scope", "scp"] {
+        let mut claims = object(claims())?;
+        claims.insert(claim.into(), Value::Null);
+        let token = h.key.sign(&Value::Object(claims))?;
+        let error = refused(&h, &token).await?;
+        assert!(
+            matches!(error, ValidateError::InvalidClaim(name) if name == claim),
+            "{claim}: {error:?}"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn scope_checks_follow_expiry() -> TestResult {
+    let h = harness()?;
+    let token = h
+        .key
+        .sign(&with(json!({ "exp": NOW - SKEW, "scope": 7 }))?)?;
+    assert!(matches!(refused(&h, &token).await?, ValidateError::Expired));
+    Ok(())
+}
+
+#[tokio::test]
+async fn scopes_come_from_scope_and_scp() -> TestResult {
+    let h = harness()?;
+    for (changes, expected) in [
+        (
+            json!({ "scope": "a b", "scp": ["c", "a"] }),
+            &["a", "b", "c"][..],
+        ),
+        (json!({ "scope": null, "scp": "d  e" }), &["d", "e"]),
+        (json!({ "scope": " a  b " }), &["a", "b"]),
+        (json!({ "scope": "", "scp": " " }), &[]),
+        // A null in `changes` removes the claim.
+        (json!({ "scope": null }), &[]),
+    ] {
+        let token = h.key.sign(&with(changes.clone())?)?;
+        let validated = h.validator.validate(&token).await?;
+        let found: Vec<_> = validated.scopes().into_iter().collect();
+        assert_eq!(found, expected, "{changes}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn audiences_come_from_aud() -> TestResult {
+    let h = harness()?;
+    for (aud, expected) in [
+        (json!("tsong"), &["tsong"][..]),
+        (json!(["other", "tsong"]), &["other", "tsong"]),
+    ] {
+        let token = h.key.sign(&with(json!({ "aud": aud }))?)?;
+        let validated = h.validator.validate(&token).await?;
+        assert_eq!(validated.audiences(), expected, "{aud}");
+    }
     Ok(())
 }
 

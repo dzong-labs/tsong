@@ -14,6 +14,7 @@ A route decides which subject tokens it accepts and what the minted token carrie
 
 - A route's `[routes.audiences]`: the subject token may carry no audience outside `allow`, must carry every one in `require`, and may carry none in `deny`. This is pull request 1 below.
 - A route's `[routes.scopes]`: the same three checks on the subject token's scopes, from `scope` or `scp`. A token with no scopes passes unless `require` names one. This is pull request 2 below.
+- Validation refuses a token whose `scope` isn't a string, or whose `scp` isn't a string or an array of single scopes; a null claim is refused too. A scope string holds scope tokens separated by spaces, and other whitespace is refused. A scope token is one or more printable ASCII characters other than space, `"` and `\`, as RFC 6749 section 3.3 defines it. An empty or space-only `scope` or `scp` string is a token with no scopes.
 - The minted token keeps the inbound audiences, plus `append_audience`, and the inbound scopes, narrowed by the request's `scope` parameter but always keeping every scope in `scopes.require`.
 - Claims are copied and renamed per trusted issuer, not per route. Nothing checks a claim's value.
 
@@ -60,6 +61,7 @@ The config fails to load, and `tsong check` reports it, when, in `[routes.audien
 
 - `allow` is empty. An omitted `allow` means `"*"`, which admits any value; to refuse every token, remove the route.
 - A value is empty, holds whitespace, or repeats within its list.
+- A scope value is not one RFC 6749 scope token: printable ASCII other than space, `"` and `\`. No token can carry such a scope.
 - `"*"` appears in `require` or `deny`, or alongside other values in `allow`.
 - `deny` holds values and `allow` is named, not `"*"` or omitted. Under a named `allow`, a denied value is one left out of `allow`.
 - A value is in both `require` and `deny`, or `require` names a value `allow` doesn't admit.
@@ -70,7 +72,7 @@ The config fails to load, and `tsong check` reports it, when, in `[routes.audien
 
 `tsong check` warns when the audience policy admits no audience a trusted issuer that validates JWTs accepts, which refuses every token.
 
-`allowed_audiences`, `allowed_scopes` and `required_scopes` are removed, not kept as aliases, and an old config is refused naming the key that replaces it. An empty `allowed_audiences` or `allowed_scopes` refused every token; to keep that, remove the route. `scp` is now a reserved claim, and `scope` and `scp` may not be renamed, so a config whose `[claims]` copies `scp`, renames a claim to `scp`, or renames `scope` or `scp` to another claim fails to load; remove that entry. Scopes reach the minted token only through `scope`, after the route's scope policy and narrowing. The release notes say how to move a config across.
+`allowed_audiences`, `allowed_scopes` and `required_scopes` are removed, not kept as aliases, and an old config is refused naming the key that replaces it. An empty `allowed_audiences` or `allowed_scopes` refused every token; to keep that, remove the route. `scp` is now a reserved claim, and `scope` and `scp` may not be renamed, so a config whose `[claims]` copies `scp`, renames a claim to `scp`, or renames `scope` or `scp` to another claim fails to load; remove that entry. Scopes reach the minted token only through `scope`, after the route's scope policy and narrowing. A token request parameter sent empty now counts as omitted, by RFC 6749 section 3.1. An empty `scope` keeps every scope the subject token holds instead of none; an empty `resource`, `actor_token`, `actor_token_type` or `requested_token_type` is no longer refused; and an empty `grant_type`, `subject_token`, `subject_token_type` or `audience` gets the same error as a missing one. The audit line's `audience` for an exchange sent with `audience=` is now null, not `""`. A `scope` request parameter must now be scope tokens separated by single spaces, by RFC 6749 section 3.3. One that is only spaces, has leading, trailing or doubled spaces, or holds a character outside NQCHAR is refused with `invalid_scope`; extra spaces were accepted before, and a bad character was `invalid_request`. A route scope value outside RFC 6749 scope token characters, such as one with an accented letter, now fails to load, since no token can carry it. Validation now refuses inbound tokens whose `scope` claim is a JSON array, whose `scope` or `scp` claim or `scp` item is null or not a string, or whose scope values hold characters outside NQCHAR or are separated by whitespace other than spaces; check what your IdP issues before upgrading. The release notes say how to move a config across.
 
 ### Rules
 

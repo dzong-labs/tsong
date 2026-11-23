@@ -9,7 +9,6 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use common::*;
 use serde_json::{Value, json};
-use tower::ServiceExt;
 use tsong_clock::ManualClock;
 use tsong_gateway::Gateway;
 use tsong_issuer::Issuer;
@@ -23,8 +22,9 @@ fn payload(token: &str) -> TestResult<Value> {
     Ok(serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload)?)?)
 }
 
-#[tokio::test]
-async fn the_issuer_mints_the_token_the_downstream_receives() -> TestResult {
+/// The gateway, with the real issuer as its exchanger and every route
+/// pointing at an echoing downstream, and the inbound issuer's key.
+async fn gateway() -> TestResult<(axum::Router, TestKey)> {
     let address = downstream().await?;
     let config = Arc::new(config_to(&format!("http://{address}"))?);
     let inbound = TestKey::new("in-1", 1)?;
@@ -45,25 +45,29 @@ async fn the_issuer_mints_the_token_the_downstream_receives() -> TestResult {
     let metrics = Arc::new(tsong_gateway::GatewayMetrics::default());
     let gateway = Gateway::new(&config, Arc::new(issuer), clock, metrics)?;
     let router = tsong_gateway::router(Arc::new(gateway));
+    Ok((router, inbound))
+}
 
-    let token = inbound.sign(&json!({
+/// A token from the inbound issuer for alice, with `scope` as its
+/// `scope` claim.
+fn token_for(inbound: &TestKey, scope: Value) -> TestResult<String> {
+    inbound.sign(&json!({
         "iss": "https://issuer.test",
         "sub": "alice",
         "aud": "tsong",
         "exp": NOW + 3600,
-        "scope": "orders.read",
-    }))?;
-    let response = router
-        .clone()
-        .oneshot(get("orders.test", "/", Some(&token))?)
-        .await?;
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
-    let echoed: Value = serde_json::from_slice(&body)?;
-    let authorization = echoed
-        .pointer("/headers/authorization/0")
-        .and_then(Value::as_str)
-        .ok_or("no authorization reached the downstream")?;
+        "scope": scope,
+    }))
+}
+
+#[tokio::test]
+async fn the_issuer_mints_the_token_the_downstream_receives() -> TestResult {
+    let (router, inbound) = gateway().await?;
+
+    let token = token_for(&inbound, json!("orders.read"))?;
+    let answer = send_to(&router, get("orders.test", "/", Some(&token))?).await?;
+    assert_eq!(answer.status, StatusCode::OK);
+    let authorization = answer.received_one("authorization")?;
     let minted = authorization
         .strip_prefix("Bearer ")
         .ok_or("not a bearer token")?;
@@ -73,16 +77,32 @@ async fn the_issuer_mints_the_token_the_downstream_receives() -> TestResult {
     assert_eq!(claims.get("aud"), Some(&json!(["tsong", "orders.test"])));
     assert_eq!(claims.get("scope"), Some(&json!("orders.read")));
 
-    let refused = inbound.sign(&json!({
+    let refused = token_for(&inbound, json!("orders.delete"))?;
+    let answer = send_to(&router, get("orders.test", "/", Some(&refused))?).await?;
+    assert_eq!(answer.status, StatusCode::FORBIDDEN);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_malformed_scope_claim_is_an_invalid_token() -> TestResult {
+    let (router, inbound) = gateway().await?;
+
+    // Ignored, the claim would read as no scope, which the route admits.
+    let scope = token_for(&inbound, json!(7))?;
+    let scp = inbound.sign(&json!({
         "iss": "https://issuer.test",
         "sub": "alice",
         "aud": "tsong",
         "exp": NOW + 3600,
-        "scope": "orders.delete",
+        "scp": ["orders.read admin"],
     }))?;
-    let response = router
-        .oneshot(get("orders.test", "/", Some(&refused))?)
-        .await?;
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    for token in [scope, scp] {
+        let answer = send_to(&router, get("orders.test", "/", Some(&token))?).await?;
+        assert_eq!(answer.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            answer.header("www-authenticate"),
+            Some(r#"Bearer error="invalid_token""#)
+        );
+    }
     Ok(())
 }

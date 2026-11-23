@@ -86,7 +86,8 @@ fn expected(held: &BTreeSet<&str>, requested: Option<&[&str]>) -> Option<BTreeSe
     if !held.iter().all(|scope| ALLOWED.contains(scope)) {
         return None;
     }
-    let granted: BTreeSet<&str> = match requested {
+    // An empty request scope counts as omitted.
+    let granted: BTreeSet<&str> = match requested.filter(|requested| !requested.is_empty()) {
         None => held.clone(),
         Some(requested) => {
             if !requested.iter().all(|scope| held.contains(scope)) {
@@ -240,8 +241,8 @@ proptest! {
     /// The `policy` route, which allows any scope and denies `admin`,
     /// accepts a subject token exactly when it doesn't carry `admin` and
     /// the request asks for no scope it doesn't hold. A token it accepts is
-    /// minted with the requested scopes, or else the subject token's; one
-    /// it refuses is `invalid_scope`.
+    /// minted with the requested scopes, or the subject token's when the
+    /// request names none; one it refuses is `invalid_scope`.
     #[test]
     fn a_route_s_scope_policy_decides_the_exchange(
         held in scopes_from(&POLICY_SCOPES),
@@ -251,6 +252,7 @@ proptest! {
         let held_set: BTreeSet<&str> = held.iter().copied().collect();
         let granted: BTreeSet<&str> = requested
             .as_ref()
+            .filter(|requested| !requested.is_empty())
             .map_or_else(|| held_set.clone(), |requested| requested.iter().copied().collect());
         let accepted = !held_set.contains("admin")
             && granted.is_subset(&held_set);

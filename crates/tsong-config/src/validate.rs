@@ -6,7 +6,7 @@ use std::fmt;
 
 use url::Url;
 
-use crate::{ANY, Config, KeyProvider, KeyState, Policy, PolicyKind, Validation};
+use crate::{ANY, Config, KeyProvider, KeyState, Policy, PolicyKind, Validation, is_scope_token};
 
 /// Claims claim mapping may not write: those Tsong sets on every token it
 /// issues, and `scp`, which would carry the subject's scopes past
@@ -301,6 +301,12 @@ fn check_policy(name: &str, kind: PolicyKind, policy: &Policy, problems: &mut Ve
             } else if value == ANY && values.iter().any(|value| value != ANY) {
                 problems.push(format!(
                     "route {name:?} {list}.allow has \"*\" with other values; \"*\" allows any {noun}, so it stands alone"
+                ));
+            } else if kind == PolicyKind::Scopes && !is_scope_token(value) {
+                // No token can carry such a scope, so the route would
+                // refuse every token.
+                problems.push(format!(
+                    "route {name:?} {list}.{field} has {noun} {value:?}, which is not an RFC 6749 scope token: printable ASCII except space, '\"' and '\\'"
                 ));
             } else if value.contains(char::is_whitespace) {
                 problems.push(format!(

@@ -3,9 +3,9 @@
 //! [`Validator::validate`] accepts a JWT only when every check passes: the
 //! issuer is trusted, the algorithm is one the issuer is allowed, the
 //! signature verifies against the issuer's JWKS, the audience is accepted,
-//! and the token is inside its `nbf`..`exp` window, give or take the clock
-//! skew. The config sets the values each check compares against; no check
-//! can be turned off.
+//! the `scope` and `scp` claims are well formed, and the token is inside
+//! its `nbf`..`exp` window, give or take the clock skew. The config sets
+//! the values each check compares against; no check can be turned off.
 //!
 //! Each issuer's keys expire `jwks_max_age` after they were fetched.
 //! [`Validator::refresh_due`] renews them before then; keys that expire
@@ -22,7 +22,6 @@ mod jwks;
 #[cfg(feature = "test-util")]
 pub mod testkit;
 
-use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -34,7 +33,9 @@ use jsonwebtoken::{Algorithm, DecodingKey};
 use serde_json::{Map, Value};
 use tokio::sync::Mutex;
 use tsong_clock::Clock;
-use tsong_config::{Config, InboundAlgorithm, TrustedIssuer, Validation};
+use tsong_config::{
+    Config, InboundAlgorithm, TrustedIssuer, Validation, is_scope_char, is_scope_token,
+};
 
 pub use claims::Validated;
 pub use jwks::{FetchError, FetchFuture, HttpFetcher, JwksFetcher};
@@ -180,6 +181,7 @@ impl Validator {
         }
         self.check_audience(&issuer.trusted, &payload)?;
         self.check_times(&payload)?;
+        check_scopes(&payload)?;
         Ok(Validated::new(issuer.name.clone(), payload))
     }
 
@@ -316,22 +318,13 @@ impl Validator {
         trusted: &TrustedIssuer,
         payload: &Map<String, Value>,
     ) -> Result<(), ValidateError> {
-        let accepted = |aud: &str| trusted.audiences.iter().any(|a| a == aud);
-        let matched = match payload.get("aud") {
-            None => return Err(ValidateError::MissingClaim("aud")),
-            Some(Value::String(aud)) => accepted(aud),
-            Some(Value::Array(auds)) => {
-                let mut any = false;
-                for aud in auds {
-                    let Value::String(aud) = aud else {
-                        return Err(ValidateError::InvalidClaim("aud"));
-                    };
-                    any |= accepted(aud);
-                }
-                any
-            }
-            Some(_) => return Err(ValidateError::InvalidClaim("aud")),
-        };
+        let aud = payload
+            .get("aud")
+            .ok_or(ValidateError::MissingClaim("aud"))?;
+        let auds = claims::strings(aud).ok_or(ValidateError::InvalidClaim("aud"))?;
+        let matched = auds
+            .iter()
+            .any(|aud| trusted.audiences.iter().any(|a| a == aud));
         if matched {
             Ok(())
         } else {
@@ -442,16 +435,28 @@ fn time_claim(
     }
 }
 
-/// The scopes a token grants: its `scope` claim, space-separated, and its
-/// `scp` claim, a string or an array, as Entra issues it.
-pub fn scopes(claims: &Map<String, Value>) -> BTreeSet<&str> {
-    let mut scopes = BTreeSet::new();
-    for name in ["scope", "scp"] {
-        match claims.get(name) {
-            Some(Value::String(text)) => scopes.extend(text.split_whitespace()),
-            Some(Value::Array(items)) => scopes.extend(items.iter().filter_map(Value::as_str)),
-            _ => {}
-        }
+/// Refuses a malformed scope claim, by RFC 6749 section 3.3. `scope` is a
+/// string of scope tokens separated by spaces. `scp` is one too, or an
+/// array, as Entra issues it, whose every item is a single scope token. A
+/// scope token is one or more printable ASCII characters other than space,
+/// `"` and `\`. An empty or all-space string is a token with no scopes; any
+/// other whitespace is refused.
+fn check_scopes(payload: &Map<String, Value>) -> Result<(), ValidateError> {
+    let spaced = |text: &str| text.chars().all(|c| c == ' ' || is_scope_char(c));
+    match payload.get("scope") {
+        None => {}
+        Some(Value::String(text)) if spaced(text) => {}
+        Some(_) => return Err(ValidateError::InvalidClaim("scope")),
     }
-    scopes
+    match payload.get("scp") {
+        None => Ok(()),
+        Some(Value::String(text)) if spaced(text) => Ok(()),
+        Some(scp @ Value::Array(_))
+            if claims::strings(scp)
+                .is_some_and(|items| items.iter().copied().all(is_scope_token)) =>
+        {
+            Ok(())
+        }
+        Some(_) => Err(ValidateError::InvalidClaim("scp")),
+    }
 }

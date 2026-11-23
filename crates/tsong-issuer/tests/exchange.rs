@@ -201,6 +201,53 @@ async fn requested_scopes_narrow_the_subjects() -> TestResult {
     Ok(())
 }
 
+/// The error for a request `scope` outside the RFC 6749 grammar.
+const MALFORMED_SCOPE: &str =
+    "the scope parameter is not RFC 6749 scope tokens separated by single spaces";
+
+#[tokio::test]
+async fn a_requested_scope_is_scope_tokens_separated_by_single_spaces() -> TestResult {
+    let h = harness()?;
+    let spaced = changed(request(&h, "orders.test", subject(json!({}))), |r| {
+        r.scope = Some("orders.write orders.read".into());
+    });
+    let (response, _) = exchanged(&h, spaced).await?;
+    assert_eq!(response.scope.as_deref(), Some("orders.read orders.write"));
+
+    for scope in [
+        " ",
+        "   ",
+        " orders.read",
+        "orders.read ",
+        "orders.read  orders.write",
+        "orders.read\u{a0}orders.write",
+        "orders.read\torders.write",
+        "orders.read\norders.write",
+        r"orders\read",
+        "orders\"read",
+        "commandes.\u{e9}crire",
+    ] {
+        let malformed = changed(request(&h, "orders.test", subject(json!({}))), |r| {
+            r.scope = Some(scope.into());
+        });
+        assert_eq!(
+            refused(&h, malformed).await?,
+            ("invalid_scope", MALFORMED_SCOPE.into()),
+            "{scope:?}"
+        );
+    }
+
+    // A malformed scope is refused before the route lookup.
+    let nowhere = changed(request(&h, "nowhere", subject(json!({}))), |r| {
+        r.scope = Some("orders.read\torders.write".into());
+    });
+    assert_eq!(
+        refused(&h, nowhere).await?,
+        ("invalid_scope", MALFORMED_SCOPE.into())
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn a_route_s_required_scopes_must_all_be_held() -> TestResult {
     let h = harness()?;
@@ -378,16 +425,30 @@ async fn the_subject_may_carry_no_literal_star_audience() -> TestResult {
 async fn an_scp_item_must_be_a_single_scope() -> TestResult {
     let h = harness()?;
     // A route that accepts any scope would otherwise mint "a b" as two.
-    for item in ["orders.read billing.read", "", "orders.read\tadmin"] {
-        let claims = subject(json!({ "scope": null, "scp": ["orders.read", item] }));
-        assert_eq!(
-            refused(&h, request(&h, "open.test", claims)).await?,
-            (
-                "invalid_request",
-                format!("the subject token's scope {item:?} is not a single scope")
-            )
-        );
-    }
+    let claims = subject(json!({ "scope": null, "scp": ["orders.read billing.read"] }));
+    assert_eq!(
+        refused(&h, request(&h, "open.test", claims)).await?,
+        (
+            "invalid_request",
+            "the token's scp claim is not valid".into()
+        )
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_scope_string_splits_only_on_spaces() -> TestResult {
+    let h = harness()?;
+    // Split on any whitespace, a route that accepts any scope would mint
+    // "orders.read admin" from one scope with a no-break space.
+    let claims = subject(json!({ "scope": "orders.read\u{a0}admin" }));
+    assert_eq!(
+        refused(&h, request(&h, "open.test", claims)).await?,
+        (
+            "invalid_request",
+            "the token's scope claim is not valid".into()
+        )
+    );
     Ok(())
 }
 
@@ -627,6 +688,56 @@ async fn malformed_requests_are_invalid() -> TestResult {
         assert_eq!(
             refused(&h, request).await?,
             ("invalid_request", expected.into())
+        );
+    }
+    Ok(())
+}
+
+/// What an exchange of `request` returns, without the parts of a minted
+/// token that differ on every exchange.
+async fn outcome(
+    h: &Harness,
+    request: TestResult<TokenRequest>,
+) -> TestResult<Result<(Option<String>, String, String), (&'static str, String)>> {
+    Ok(match h.issuer.exchange(request?).await {
+        Ok(response) => Ok((
+            response.scope,
+            response.issued_token_type,
+            response.token_type,
+        )),
+        Err(error) => Err((error.code(), error.to_string())),
+    })
+}
+
+/// A parameter of a token request.
+type Parameter = fn(&mut TokenRequest) -> &mut Option<String>;
+
+#[tokio::test]
+async fn an_empty_parameter_counts_as_omitted() -> TestResult {
+    let h = harness()?;
+    // RFC 6749 section 3.1: a parameter sent without a value is omitted.
+    let parameters: [(&str, Parameter); 9] = [
+        ("grant_type", |r| &mut r.grant_type),
+        ("subject_token", |r| &mut r.subject_token),
+        ("subject_token_type", |r| &mut r.subject_token_type),
+        ("audience", |r| &mut r.audience),
+        ("scope", |r| &mut r.scope),
+        ("requested_token_type", |r| &mut r.requested_token_type),
+        ("resource", |r| &mut r.resource),
+        ("actor_token", |r| &mut r.actor_token),
+        ("actor_token_type", |r| &mut r.actor_token_type),
+    ];
+    for (name, parameter) in parameters {
+        let omitted = changed(request(&h, "orders.test", subject(json!({}))), |r| {
+            *parameter(r) = None;
+        });
+        let empty = changed(request(&h, "orders.test", subject(json!({}))), |r| {
+            *parameter(r) = Some(String::new());
+        });
+        assert_eq!(
+            outcome(&h, empty).await?,
+            outcome(&h, omitted).await?,
+            "{name}"
         );
     }
     Ok(())

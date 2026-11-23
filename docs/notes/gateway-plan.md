@@ -65,13 +65,13 @@ An omitted `audiences.allow` or `scopes.allow` means `"*"`, which accepts any va
 
 ## Exchange
 
-The token endpoint stays reachable on its own, so the issuer enforces the route, not the gateway. Before an exchange it applies the same IP allow lists the gateway does, `gateway.allow` and the named route's `allow`, finding the client through the same trusted proxies, and refuses with `access_denied` (403). The gateway asks for an exchange with `audience` set to the request's host. The issuer then:
+The token endpoint stays reachable on its own, so the issuer enforces the route, not the gateway. Before an exchange it applies the same IP allow lists the gateway does, `gateway.allow` and the named route's `allow`, finding the client through the same trusted proxies, and refuses with `access_denied` (403). The gateway asks for an exchange with `audience` set to the request's host. A request parameter sent empty counts as omitted, by RFC 6749 section 3.1. The issuer then:
 
 1. Looks up the route by that host, and fails with `invalid_target` when there is none.
 2. Validates the subject token against the global trusted issuers. Every trusted issuer may exchange into every route.
 3. Checks the inbound `aud` against `[routes.audiences]`, and the inbound scopes against `[routes.scopes]`. A failure is `invalid_target` for the audience and `invalid_scope` for the scopes.
 4. Mints a token whose `aud` is the inbound `aud` followed by `append_audience`, without duplicates.
-5. Sets the minted `scope` to the inbound scopes. A `scope` parameter on the request narrows them. Asking for a scope the inbound token lacks, or narrowing away one the route requires, is `invalid_scope`.
+5. Sets the minted `scope` to the inbound scopes. A `scope` parameter on the request narrows them. It must be scope tokens separated by single spaces, by RFC 6749 section 3.3. A malformed one, asking for a scope the inbound token lacks, or narrowing away one the route requires, is `invalid_scope`.
 
 The gateway calls the issuer through an `Exchanger` trait. The MVP implementation calls the `Issuer` in-process. An HTTP implementation can come later.
 
