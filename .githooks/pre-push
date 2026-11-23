@@ -6,4 +6,6 @@
 set -e
 cargo llvm-cov --workspace --locked --fail-under-lines 95 --summary-only
 cargo audit --deny warnings
+# The fuzz crate keeps its own lockfile.
+cargo audit --deny warnings --file fuzz/Cargo.lock
 cargo deny --locked check bans licenses sources

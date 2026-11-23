@@ -134,6 +134,10 @@ jobs:
     - name: Audit dependencies against the RustSec advisory database
       run: cargo audit --deny warnings
 
+    # The fuzz crate keeps its own lockfile.
+    - name: Audit the fuzz dependencies
+      run: cargo audit --deny warnings --file fuzz/Cargo.lock
+
   deny:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
