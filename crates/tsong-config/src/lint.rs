@@ -1,7 +1,7 @@
-//! Warnings: settings that are valid but look like a mistake. An empty
+//! Warnings: settings that are valid but look like a mistake. An empty IP
 //! allow list denies everything, which looks like an omission; an entry
-//! that accepts anything looks like a decision worth confirming. A route
-//! whose audience policy admits no audience a trusted issuer accepts
+//! that allows every address looks like a decision worth confirming. A
+//! route whose audience policy admits no audience a trusted issuer accepts
 //! refuses every token.
 //! Keys trusted for more than a day leave a key an issuer has withdrawn in
 //! use for that long.
@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use ipnet::IpNet;
 
-use crate::{ANY, Config, Validation};
+use crate::{Config, Validation};
 
 /// The longest `jwks_max_age` that doesn't warn.
 const LONGEST_JWKS_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
@@ -53,41 +53,7 @@ impl Config {
         for route in &self.routes {
             let name = &route.name;
             let policy = &route.audiences;
-            // `deny` narrowing a "*" is a decision already; `require` isn't,
-            // as it doesn't limit what else a token may carry.
-            let accepted = if policy.require.is_empty() {
-                "any audience is accepted"
-            } else {
-                "any audience is accepted alongside the required ones"
-            };
-            for (field, values, star_warns, accepted) in [
-                (
-                    "audiences.allow",
-                    &policy.allow,
-                    policy.deny.is_empty(),
-                    accepted,
-                ),
-                (
-                    "allowed_scopes",
-                    &route.allowed_scopes,
-                    true,
-                    "any value is accepted",
-                ),
-            ] {
-                if values.is_empty() {
-                    warnings.push(format!(
-                        "route {name:?}: {field} is empty; every request will be denied"
-                    ));
-                } else if star_warns && values.iter().any(|value| value == ANY) {
-                    warnings.push(format!("route {name:?}: {field} has \"*\"; {accepted}"));
-                }
-            }
-            if !policy.allow.is_empty()
-                && !jwt_audiences.is_empty()
-                && !jwt_audiences.iter().any(|aud| {
-                    policy.allows(aud) && !policy.deny.iter().any(|denied| denied == aud)
-                })
-            {
+            if !jwt_audiences.is_empty() && !jwt_audiences.iter().any(|aud| policy.admits(aud)) {
                 warnings.push(format!(
                     "route {name:?}: audiences admits no audience a trusted issuer accepts; every token will be refused"
                 ));

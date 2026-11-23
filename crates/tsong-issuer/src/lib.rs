@@ -2,11 +2,14 @@
 //!
 //! [`Issuer::exchange`] takes a subject token from any trusted issuer and
 //! an audience naming a route's host, and returns a token Tsong signs for
-//! that route. The route filters the subject token: it must carry at least
-//! one audience the route allows, none outside them, every audience the
-//! route requires and none it denies, and only scopes the route allows. The minted
-//! token keeps the subject token's audiences and scopes, and adds the
-//! route's `append_audience`. Its `sub` is the trusted issuer's
+//! that route. The route filters the subject token's audiences, then its
+//! scopes: the token may carry no value outside those the route allows,
+//! must carry every value the route requires, and may carry none it
+//! denies. A token carrying no scope passes unless the route requires
+//! one; validation has already refused a token with no audience its
+//! trusted issuer accepts. The minted token keeps the subject token's
+//! audiences and scopes, narrowed to the requested scopes but always
+//! keeping the required ones, and adds the route's `append_audience`. Its `sub` is the trusted issuer's
 //! `sub_prefix`, a `:`, and the subject, and its RFC 9493 `sub_id` keeps the
 //! subject token's own `iss` and `sub`. [`router`] serves the token
 //! endpoint, the JWKS and the discovery document over HTTP.
@@ -16,6 +19,7 @@ mod error;
 mod http;
 mod mint;
 
+use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -24,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tsong_clock::Clock;
 use tsong_config::{
-    AudienceRefusal, Config, RESERVED_CLAIMS, Route, RouteTable, allowed, client_ip,
+    Config, Policy, PolicyKind, RESERVED_CLAIMS, Refusal, Route, RouteTable, allowed, client_ip,
 };
 use tsong_keys::KeySet;
 use tsong_validate::{Validated, Validator, scopes};
@@ -168,12 +172,15 @@ impl Issuer {
             ExchangeError::InvalidTarget(format!("no route has host {audience:?}"))
         })?;
         let inbound_audiences = audiences(validated.claims())?;
-        if let Some(refusal) = route.audience_refusal(&inbound_audiences) {
-            return Err(ExchangeError::InvalidTarget(refused_audience(
-                refusal, audience,
-            )));
+        if let Some(refusal) = route.audiences.refusal(&inbound_audiences) {
+            return Err(refused(refusal, PolicyKind::Audiences, audience));
         }
-        let granted = granted_scopes(route, &validated, request.scope.as_deref())?;
+        let granted = granted_scopes(
+            &route.scopes,
+            audience,
+            &validated,
+            request.scope.as_deref(),
+        )?;
         let original_sub = validated
             .subject()
             .filter(|sub| !sub.is_empty())
@@ -399,31 +406,36 @@ fn audiences(claims: &serde_json::Map<String, Value>) -> Result<Vec<&str>, Excha
     }
 }
 
-/// Why the route for `target` refused the subject token's audiences.
-fn refused_audience(refusal: AudienceRefusal<'_>, target: &str) -> String {
-    match refusal {
-        AudienceRefusal::NotAllowed => {
-            format!("none of the subject token's audiences is allowed for {target:?}")
+/// Why the route for `target` refused the subject token's audiences or
+/// scopes, as the OAuth error for that `kind` of policy.
+fn refused(refusal: Refusal<'_>, kind: PolicyKind, target: &str) -> ExchangeError {
+    let (one, many) = (kind.noun(), kind.key());
+    let reason = match refusal {
+        Refusal::Any => {
+            format!("the subject token carries {one} \"*\", which {target:?} never accepts")
         }
-        AudienceRefusal::NoAudience => {
-            format!("the subject token has no audience, and {target:?} requires one")
-        }
-        AudienceRefusal::Outside(aud) => format!(
-            "the subject token's audience {aud:?} is outside the audiences allowed for {target:?}"
+        Refusal::Outside(value) => format!(
+            "the subject token's {one} {value:?} is outside the {many} allowed for {target:?}"
         ),
-        AudienceRefusal::Missing(aud) => {
-            format!("the subject token lacks audience {aud:?}, which {target:?} requires")
+        Refusal::Missing(value) => {
+            format!("the subject token lacks {one} {value:?}, which {target:?} requires")
         }
-        AudienceRefusal::Denied(aud) => {
-            format!("the subject token's audience {aud:?} is denied for {target:?}")
+        Refusal::Denied(value) => {
+            format!("the subject token's {one} {value:?} is denied for {target:?}")
         }
+    };
+    match kind {
+        PolicyKind::Audiences => ExchangeError::InvalidTarget(reason),
+        PolicyKind::Scopes => ExchangeError::InvalidScope(reason),
     }
 }
 
-/// The subject token's scopes, once the route allows them all, narrowed to
-/// the scopes requested when there is a request.
+/// The subject token's scopes, once the scope `policy` of the route for
+/// `target` accepts them, narrowed to the scopes requested when there is a
+/// request.
 fn granted_scopes(
-    route: &Route,
+    policy: &Policy,
+    target: &str,
     validated: &Validated,
     requested: Option<&str>,
 ) -> Result<Vec<String>, ExchangeError> {
@@ -438,64 +450,43 @@ fn granted_scopes(
             "the subject token's scope {malformed:?} is not a single scope"
         )));
     }
-    match route.refused_scope(held.iter().copied()) {
-        Ok(()) => {}
-        Err(None) => {
-            return Err(ExchangeError::InvalidScope(format!(
-                "route {:?} allows no scopes",
-                route.name
-            )));
-        }
-        Err(Some(refused)) => {
-            return Err(ExchangeError::InvalidScope(format!(
-                "scope {refused:?} is not allowed for route {:?}",
-                route.name
-            )));
-        }
+    if let Some(refusal) = policy.refusal(&held.iter().copied().collect::<Vec<_>>()) {
+        return Err(refused(refusal, PolicyKind::Scopes, target));
     }
-    let granted = match requested {
-        None => held.iter().map(|scope| (*scope).to_owned()).collect(),
+    let granted: BTreeSet<&str> = match requested {
+        // `refusal` proved the subject token holds every required scope,
+        // and every one it holds is granted.
+        None => held.clone(),
         Some(requested) => {
-            let mut granted = Vec::new();
+            let mut narrowed = BTreeSet::new();
             for scope in requested.split_whitespace() {
                 if !held.contains(scope) {
                     return Err(ExchangeError::InvalidScope(format!(
                         "the subject token lacks scope {scope:?}"
                     )));
                 }
-                if !granted.iter().any(|kept| kept == scope) {
-                    granted.push(scope.to_owned());
-                }
+                narrowed.insert(scope);
             }
-            granted.sort();
-            granted
+            // The minted token keeps every scope the route requires. The
+            // subject token holds them all, so only the request can drop
+            // one.
+            if let Some(dropped) = policy.missing(|required| narrowed.contains(required)) {
+                return Err(ExchangeError::InvalidScope(format!(
+                    "the requested scope drops {dropped:?}, which {target:?} requires"
+                )));
+            }
+            narrowed
         }
     };
-    // The minted token keeps every scope the route requires: the subject
-    // token must hold them, and a requested scope may not drop them.
-    if let Some(missing) = route.missing_scope(|scope| granted.iter().any(|kept| kept == scope)) {
-        let reason = if requested.is_some() && held.contains(missing) {
-            format!(
-                "the requested scope drops {missing:?}, which route {:?} requires",
-                route.name
-            )
-        } else {
-            format!("route {:?} requires scope {missing:?}", route.name)
-        };
-        return Err(ExchangeError::InvalidScope(reason));
-    }
     // A minted token holds only scopes the subject token held and the
-    // route allows, and every scope the route requires.
-    debug_assert!(granted.iter().all(|scope| {
-        held.contains(scope.as_str())
-            && route.refused_scope(std::iter::once(scope.as_str())).is_ok()
-    }));
+    // route accepts, and every scope the route requires.
+    debug_assert!(granted.is_subset(&held) && granted.iter().all(|scope| policy.admits(scope)));
     debug_assert!(
-        route
-            .missing_scope(|scope| granted.iter().any(|kept| kept == scope))
+        policy
+            .missing(|required| granted.contains(required))
             .is_none()
     );
-    Ok(granted)
+    Ok(granted.into_iter().map(str::to_owned).collect())
 }
 
 /// The subject token's audiences, then the route's `append_audience` when
@@ -508,13 +499,7 @@ fn minted_audiences<'a>(inbound: Vec<&'a str>, route: &'a Route) -> Vec<&'a str>
             minted.push(aud);
         }
     }
-    debug_assert!(
-        minted
-            .iter()
-            .collect::<std::collections::BTreeSet<_>>()
-            .len()
-            == minted.len()
-    );
+    debug_assert!(minted.iter().collect::<BTreeSet<_>>().len() == minted.len());
     minted
 }
 

@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 use tsong_config::{
-    ANY, AudienceRefusal, Config, ConfigError, ConfigStore, FileStore, InboundAlgorithm,
-    KeyProvider, KeyState, Route, RouteTable, Scheme, SecretRef, SecretRefError, SigningAlgorithm,
+    ANY, Config, ConfigError, ConfigStore, FileStore, InboundAlgorithm, KeyProvider, KeyState,
+    Policy, Refusal, Route, RouteTable, Scheme, SecretRef, SecretRefError, SigningAlgorithm,
     TrustedIssuer, Validation, Warnings, hex,
 };
 
@@ -132,7 +132,9 @@ fn sample_loads() -> TestResult {
     assert_eq!(orders.host, "orders.example.com");
     assert_eq!(orders.append_audience, "orders.example.com");
     assert_eq!(orders.audiences.allow, ["api://default", "api://tsong"]);
-    assert_eq!(orders.allowed_scopes, ["orders.read", "orders.write"]);
+    assert_eq!(orders.scopes.allow, ["orders.read", "orders.write"]);
+    assert_eq!(orders.scopes.require, ["orders.read"]);
+    assert!(orders.scopes.deny.is_empty());
     assert!(orders.allow.is_none());
     assert_eq!(route(&config, 1)?.allow.as_ref().map(Vec::len), Some(1));
     assert_eq!(config.warnings(), Warnings::default());
@@ -331,10 +333,7 @@ fn a_route_signs_es256_unless_it_names_an_algorithm() -> TestResult {
         .replace("state", "algorithm = \"RS256\"\nstate");
     let text = format!(
         "{}{rsa}",
-        route_with(
-            "allowed_scopes",
-            "signing_algorithm = \"RS256\"\nallowed_scopes"
-        )
+        route_with("scopes = {", "signing_algorithm = \"RS256\"\nscopes = {")
     );
     let config = Config::from_toml(&text)?;
     assert_eq!(
@@ -346,10 +345,7 @@ fn a_route_signs_es256_unless_it_names_an_algorithm() -> TestResult {
 
 #[test]
 fn a_route_s_algorithm_needs_an_active_key() -> TestResult {
-    let text = route_with(
-        "allowed_scopes",
-        "signing_algorithm = \"EdDSA\"\nallowed_scopes",
-    );
+    let text = route_with("scopes = {", "signing_algorithm = \"EdDSA\"\nscopes = {");
     assert_eq!(
         problems(&text)?,
         [r#"route "orders" signs with EdDSA, which no active key in issuer.signing.keys does"#]
@@ -653,11 +649,12 @@ fn keys_trusted_for_more_than_a_day_warn() -> TestResult {
 fn claim_mapping_may_not_write_reserved_claims() -> TestResult {
     let text = format!(
         "{}{OKTA}[claims]
-copy = [\"email\", \"aud\"]
+copy = [\"email\", \"aud\", \"scp\"]
 [claims.rename.okta]
 uid = \"sub\"
 x = \"exp\"
 y = \"sub_id\"
+z = \"scp\"
 ",
         minimal()
     );
@@ -665,8 +662,33 @@ y = \"sub_id\"
         problems(&text)?,
         [
             r#"claims.copy may not copy reserved claim "aud""#,
+            r#"claims.copy may not copy reserved claim "scp""#,
             r#"claims.rename.okta may not write reserved claim "exp""#,
             r#"claims.rename.okta may not write reserved claim "sub_id""#,
+            r#"claims.rename.okta may not write reserved claim "scp""#,
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn claim_mapping_may_not_rename_the_subject_s_scopes() -> TestResult {
+    let text = format!(
+        "{}{OKTA}[claims]
+copy = [\"scope\"]
+[claims.rename.okta]
+scp = \"roles\"
+scope = \"perms\"
+",
+        minimal()
+    );
+    let why = "scopes reach the minted token only through \"scope\", after the route's scope policy and narrowing";
+    assert_eq!(
+        problems(&text)?,
+        [
+            r#"claims.copy may not copy reserved claim "scope""#.to_owned(),
+            format!(r#"claims.rename.okta may not rename "scope": {why}"#),
+            format!(r#"claims.rename.okta may not rename "scp": {why}"#),
         ]
     );
     Ok(())
@@ -796,7 +818,7 @@ host = "orders.example.com"
 downstream = "https://orders-lb.example.com"
 append_audience = "orders.example.com"
 audiences = { allow = ["api"] }
-allowed_scopes = ["orders.read"]
+scopes = { allow = ["orders.read"] }
 "#;
 
 fn with_route(route: &str) -> String {
@@ -876,7 +898,7 @@ fn route_fields_are_required() -> TestResult {
         "downstream",
         "append_audience",
         "audiences",
-        "allowed_scopes",
+        "scopes",
     ] {
         let line = ROUTE
             .lines()
@@ -1027,44 +1049,48 @@ fn orders(audiences: &[&str], scopes: &[&str]) -> TestResult<Route> {
     let config = Config::from_toml(&with_route(ROUTE))?;
     let mut route = route(&config, 0)?.clone();
     route.audiences.allow = names(audiences);
-    route.allowed_scopes = names(scopes);
+    route.scopes.allow = names(scopes);
     Ok(route)
 }
 
 #[test]
-fn a_route_needs_one_allowed_audience_and_none_outside() -> TestResult {
+fn a_route_s_audiences_must_all_be_allowed() -> TestResult {
     let route = orders(&["a", "b"], &[])?;
-    assert_eq!(route.audience_refusal(&["b"]), None);
-    assert_eq!(route.audience_refusal(&["a", "b"]), None);
+    assert_eq!(route.audiences.refusal(&["b"]), None);
+    assert_eq!(route.audiences.refusal(&["a", "b"]), None);
     assert_eq!(
-        route.audience_refusal(&["x", "y"]),
-        Some(AudienceRefusal::NotAllowed)
+        route.audiences.refusal(&["x", "y"]),
+        Some(Refusal::Outside("x"))
     );
     assert_eq!(
-        route.audience_refusal(&[]),
-        Some(AudienceRefusal::NoAudience)
+        route.audiences.refusal(&[]),
+        None,
+        "no audience is within any allow"
     );
     assert_eq!(
-        route.audience_refusal(&["b", "x", "y"]),
-        Some(AudienceRefusal::Outside("x"))
+        route.audiences.refusal(&["b", "x", "y"]),
+        Some(Refusal::Outside("x"))
     );
     Ok(())
 }
 
 #[test]
-fn an_empty_allow_accepts_nothing_and_a_star_accepts_any_audience() -> TestResult {
-    let empty = orders(&[], &[])?;
-    assert_eq!(
-        empty.audience_refusal(&["a"]),
-        Some(AudienceRefusal::NotAllowed)
-    );
-    let any = orders(&[ANY], &[])?;
-    assert_eq!(any.audience_refusal(&["a", "b"]), None);
-    assert_eq!(
-        any.audience_refusal(&[]),
-        Some(AudienceRefusal::NoAudience),
-        "a star still needs an audience"
-    );
+fn a_default_policy_accepts_any_value() {
+    let policy = Policy::default();
+    assert_eq!(policy.allow, [ANY]);
+    assert_eq!(policy.refusal(&["a", "b"]), None);
+    assert_eq!(policy.refusal(&[]), None);
+}
+
+#[test]
+fn only_a_require_refuses_a_token_with_no_audience() -> TestResult {
+    let mut route = orders(&[ANY], &[])?;
+    route.audiences.require = names(&["a"]);
+    assert_eq!(route.audiences.refusal(&[]), Some(Refusal::Missing("a")));
+    route.audiences.allow = names(&["a", "b"]);
+    assert_eq!(route.audiences.refusal(&[]), Some(Refusal::Missing("a")));
+    route.audiences.require.clear();
+    assert_eq!(route.audiences.refusal(&[]), None);
     Ok(())
 }
 
@@ -1072,15 +1098,12 @@ fn an_empty_allow_accepts_nothing_and_a_star_accepts_any_audience() -> TestResul
 fn a_route_needs_every_required_audience() -> TestResult {
     let mut route = orders(&["a", "b", "c"], &[])?;
     route.audiences.require = names(&["b", "c"]);
-    assert_eq!(route.audience_refusal(&["a", "b", "c"]), None);
+    assert_eq!(route.audiences.refusal(&["a", "b", "c"]), None);
     assert_eq!(
-        route.audience_refusal(&["a", "b"]),
-        Some(AudienceRefusal::Missing("c"))
+        route.audiences.refusal(&["a", "b"]),
+        Some(Refusal::Missing("c"))
     );
-    assert_eq!(
-        route.audience_refusal(&["a"]),
-        Some(AudienceRefusal::Missing("b"))
-    );
+    assert_eq!(route.audiences.refusal(&["a"]), Some(Refusal::Missing("b")));
     Ok(())
 }
 
@@ -1088,10 +1111,10 @@ fn a_route_needs_every_required_audience() -> TestResult {
 fn a_route_refuses_a_denied_audience() -> TestResult {
     let mut route = orders(&[ANY], &[])?;
     route.audiences.deny = names(&["admin", "root"]);
-    assert_eq!(route.audience_refusal(&["a", "b"]), None);
+    assert_eq!(route.audiences.refusal(&["a", "b"]), None);
     assert_eq!(
-        route.audience_refusal(&["a", "root", "admin"]),
-        Some(AudienceRefusal::Denied("root"))
+        route.audiences.refusal(&["a", "root", "admin"]),
+        Some(Refusal::Denied("root"))
     );
     Ok(())
 }
@@ -1103,16 +1126,16 @@ fn audience_checks_run_in_order() -> TestResult {
     route.audiences.deny = names(&["c"]);
     // Outside comes before missing, and missing before denied.
     assert_eq!(
-        route.audience_refusal(&["c", "x"]),
-        Some(AudienceRefusal::Outside("x"))
+        route.audiences.refusal(&["c", "x"]),
+        Some(Refusal::Outside("x"))
     );
     assert_eq!(
-        route.audience_refusal(&["a", "c"]),
-        Some(AudienceRefusal::Missing("b"))
+        route.audiences.refusal(&["a", "c"]),
+        Some(Refusal::Missing("b"))
     );
     assert_eq!(
-        route.audience_refusal(&["b", "c"]),
-        Some(AudienceRefusal::Denied("c"))
+        route.audiences.refusal(&["b", "c"]),
+        Some(Refusal::Denied("c"))
     );
     Ok(())
 }
@@ -1139,274 +1162,365 @@ fn an_audience_table_refuses_unknown_keys() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn allowed_audiences_is_refused_naming_its_replacement() -> TestResult {
-    let text = route_with(
-        r#"audiences = { allow = ["api"] }"#,
-        r#"allowed_audiences = ["api"]"#,
-    );
-    let error = parse_error(&text)?;
-    assert!(
-        error.ends_with(
-            "allowed_audiences is replaced by [routes.audiences]; move its values to audiences.allow, which also refuses a token carrying any audience outside it"
-        ),
-        "{error}"
-    );
-    assert!(error.starts_with("line "), "{error}");
-    let line = text
-        .lines()
-        .position(|line| line.starts_with("allowed_audiences"))
-        .ok_or("no allowed_audiences line")?
-        + 1;
-    assert_eq!(
-        error,
-        format!(
-            "line {line}, column 21: allowed_audiences is replaced by [routes.audiences]; move its values to audiences.allow, which also refuses a token carrying any audience outside it"
-        )
-    );
+/// The orders route with `policy` as its `list` policy, `audiences` or
+/// `scopes`.
+fn route_with_policy(list: &str, policy: &str) -> TestResult<String> {
+    let from = match list {
+        "audiences" => r#"audiences = { allow = ["api"] }"#,
+        "scopes" => r#"scopes = { allow = ["orders.read"] }"#,
+        _ => return Err(format!("the orders route has no {list:?} policy").into()),
+    };
+    Ok(route_with(from, &format!("{list} = {policy}")))
+}
+
+/// The problems the orders route has with `policy` as its `list` policy.
+fn policy_problems(list: &str, policy: &str) -> TestResult<Vec<String>> {
+    problems(&route_with_policy(list, policy)?)
+}
+
+/// The warnings the orders route raises with `policy` as its `list`
+/// policy.
+fn policy_warnings(list: &str, policy: &str) -> TestResult<Vec<String>> {
+    Ok(Config::from_toml(&route_with_policy(list, policy)?)?
+        .warnings()
+        .0)
+}
+
+/// The route keys of the two policies.
+const POLICIES: [&str; 2] = ["audiences", "scopes"];
+
+/// Checks that the orders route, with `policy` as each of its policies,
+/// has the `expected` problems, written for `audiences` and renamed for
+/// the other.
+fn assert_problems(policy: &str, expected: &[&str]) -> TestResult {
+    for list in POLICIES {
+        let noun = list.trim_end_matches('s');
+        let expected: Vec<String> = expected
+            .iter()
+            .map(|problem| problem.replace("audience", noun))
+            .collect();
+        assert_eq!(
+            policy_problems(list, policy)?,
+            expected,
+            "{list} = {policy}"
+        );
+    }
+    Ok(())
+}
+
+/// Checks that the orders route, with `policy` as each of its policies,
+/// loads.
+fn assert_loads(policy: &str) -> TestResult {
+    for list in POLICIES {
+        Config::from_toml(&route_with_policy(list, policy)?)?;
+    }
     Ok(())
 }
 
 #[test]
-fn a_route_shows_no_trace_of_allowed_audiences() -> TestResult {
-    let config = Config::from_toml(&with_route(ROUTE))?;
-    let shown = format!("{:?}", route(&config, 0)?);
-    assert!(!shown.contains("allowed_audiences"), "{shown}");
-    Ok(())
-}
-
-#[test]
-fn allowed_audiences_outside_a_route_is_an_unknown_field() -> TestResult {
-    let text = okta_with(r#"allowed_audiences = ["api"]"#);
-    let error = parse_error(&text)?;
-    assert!(
-        error.contains("unknown field `allowed_audiences`, expected"),
-        "{error}"
-    );
-    Ok(())
-}
-
-/// The problems the orders route has with this audience policy.
-fn audience_problems(policy: &str) -> TestResult<Vec<String>> {
-    problems(&route_with(
-        r#"audiences = { allow = ["api"] }"#,
-        &format!("audiences = {policy}"),
-    ))
-}
-
-#[test]
-fn audience_values_are_named() -> TestResult {
-    assert_eq!(
-        audience_problems(r#"{ allow = ["api", ""], require = [""] }"#)?,
-        [
+fn policy_values_are_named() -> TestResult {
+    assert_problems(
+        r#"{ allow = ["api", ""], require = [""] }"#,
+        &[
             r#"route "orders" audiences.allow has an empty value; name each audience"#,
             r#"route "orders" audiences.require has an empty value; name each audience"#,
-        ]
-    );
-    assert_eq!(
-        audience_problems(r#"{ allow = ["*"], deny = [""] }"#)?,
-        [r#"route "orders" audiences.deny has an empty value; name each audience"#]
-    );
-    Ok(())
+        ],
+    )?;
+    assert_problems(
+        r#"{ allow = ["*"], deny = [""] }"#,
+        &[r#"route "orders" audiences.deny has an empty value; name each audience"#],
+    )
 }
 
 #[test]
 fn a_star_stands_alone_in_allow_and_nowhere_else() -> TestResult {
-    assert_eq!(
-        audience_problems(r#"{ allow = ["api", "*"] }"#)?,
-        [
-            r#"route "orders" audiences.allow has "*" with other values; "*" allows any audience, so it stands alone"#
-        ]
-    );
-    assert_eq!(
-        audience_problems(r#"{ allow = ["*"], require = ["*"], deny = ["*"] }"#)?,
-        [
+    assert_problems(
+        r#"{ allow = ["api", "*"] }"#,
+        &[
+            r#"route "orders" audiences.allow has "*" with other values; "*" allows any audience, so it stands alone"#,
+        ],
+    )?;
+    assert_problems(
+        r#"{ allow = ["*"], require = ["*"], deny = ["*"] }"#,
+        &[
             r#"route "orders" audiences.require may not hold "*"; name each audience"#,
             r#"route "orders" audiences.deny may not hold "*"; name each audience"#,
-        ]
-    );
-    Ok(())
+        ],
+    )
 }
 
 #[test]
-fn an_audience_is_not_both_required_and_denied() -> TestResult {
-    assert_eq!(
-        audience_problems(r#"{ allow = ["*"], require = ["api"], deny = ["api"] }"#)?,
-        [r#"route "orders" both requires and denies audience "api""#]
-    );
-    assert_eq!(
-        audience_problems(r#"{ allow = ["*"], require = ["api", "api"], deny = ["api", "api"] }"#)?,
-        [
+fn a_value_is_not_both_required_and_denied() -> TestResult {
+    assert_problems(
+        r#"{ allow = ["*"], require = ["api"], deny = ["api"] }"#,
+        &[r#"route "orders" both requires and denies audience "api""#],
+    )?;
+    // Reported once, however often it repeats.
+    assert_problems(
+        r#"{ allow = ["*"], require = ["api", "api"], deny = ["api", "api"] }"#,
+        &[
             r#"route "orders" both requires and denies audience "api""#,
             r#"route "orders" audiences.require repeats audience "api""#,
             r#"route "orders" audiences.deny repeats audience "api""#,
         ],
-        "reported once, however often it repeats"
-    );
-    Ok(())
+    )
 }
 
 #[test]
-fn audience_lists_repeat_no_value() -> TestResult {
-    assert_eq!(
-        audience_problems(
-            r#"{ allow = ["api", "other", "api", "other", "api"], require = ["api", "api"] }"#
-        )?,
-        [
+fn policy_lists_repeat_no_value() -> TestResult {
+    assert_problems(
+        r#"{ allow = ["api", "other", "api", "other", "api"], require = ["api", "api"] }"#,
+        &[
             r#"route "orders" audiences.allow repeats audience "api""#,
             r#"route "orders" audiences.allow repeats audience "other""#,
             r#"route "orders" audiences.require repeats audience "api""#,
-        ]
-    );
-    assert_eq!(
-        audience_problems(r#"{ allow = ["*", "*"] }"#)?,
-        [r#"route "orders" audiences.allow repeats audience "*""#]
-    );
-    Ok(())
+        ],
+    )?;
+    assert_problems(
+        r#"{ allow = ["*", "*"] }"#,
+        &[r#"route "orders" audiences.allow repeats audience "*""#],
+    )?;
+    assert_problems(
+        r#"{ allow = ["*"], deny = ["admin", "admin"] }"#,
+        &[r#"route "orders" audiences.deny repeats audience "admin""#],
+    )
 }
 
 #[test]
-fn audience_values_hold_no_whitespace() -> TestResult {
-    assert_eq!(
-        audience_problems(r#"{ allow = ["api", "a b"], require = ["api\t"] }"#)?,
-        [
-            r#"route "orders" audiences.allow has "a b"; an audience holds no whitespace"#,
-            r#"route "orders" audiences.require has "api\t"; an audience holds no whitespace"#,
-        ]
-    );
-    assert_eq!(
-        audience_problems(r#"{ allow = ["*"], deny = [" admin"] }"#)?,
-        [r#"route "orders" audiences.deny has " admin"; an audience holds no whitespace"#]
-    );
-    Ok(())
+fn policy_values_hold_no_whitespace() -> TestResult {
+    assert_problems(
+        r#"{ allow = ["api", "a b"], require = ["api\t"] }"#,
+        &[
+            r#"route "orders" audiences.allow has audience "a b", which holds whitespace"#,
+            r#"route "orders" audiences.require has audience "api\t", which holds whitespace"#,
+        ],
+    )?;
+    // Under "*" every value is allowed, so only the shape check stands
+    // between a required "a b" and a route that refuses every token.
+    assert_problems(
+        r#"{ allow = ["*"], require = ["orders.read billing.read"], deny = ["\tadmin"] }"#,
+        &[
+            r#"route "orders" audiences.require has audience "orders.read billing.read", which holds whitespace"#,
+            r#"route "orders" audiences.deny has audience "\tadmin", which holds whitespace"#,
+        ],
+    )
 }
 
 #[test]
-fn required_audiences_must_be_allowed() -> TestResult {
-    assert_eq!(
-        audience_problems(r#"{ allow = ["api"], require = ["api", "other"] }"#)?,
-        [r#"route "orders" requires audience "other", which its audiences.allow doesn't admit"#]
-    );
-    Config::from_toml(&route_with(
-        r#"audiences = { allow = ["api"] }"#,
-        r#"audiences = { allow = ["*"], require = ["other"] }"#,
-    ))?;
-    Ok(())
+fn required_values_must_be_allowed() -> TestResult {
+    assert_problems(
+        r#"{ allow = ["api"], require = ["api", "other"] }"#,
+        &[r#"route "orders" requires audience "other", which its audiences.allow doesn't admit"#],
+    )?;
+    assert_loads(r#"{ allow = ["*"], require = ["other"], deny = ["root"] }"#)
 }
 
 #[test]
 fn deny_applies_only_when_allow_is_a_star() -> TestResult {
-    let refused = r#"route "orders" audiences.deny applies only when audiences.allow is "*"; remove the denied audiences from allow instead"#;
+    let refused = r#"route "orders" audiences.deny applies only when audiences.allow is "*" or omitted; remove the denied audiences from allow instead"#;
     for policy in [
         r#"{ allow = ["api", "other"], deny = ["other"] }"#,
         r#"{ allow = ["api"], deny = ["admin"] }"#,
-        r#"{ allow = [], deny = ["admin"] }"#,
+        r#"{ allow = ["api"], require = ["api"], deny = ["api"] }"#,
     ] {
-        assert_eq!(audience_problems(policy)?, [refused], "{policy}");
+        assert_problems(policy, &[refused])?;
     }
+    for policy in [
+        r#"{ allow = ["api"], deny = [] }"#,
+        r#"{ allow = ["*"], deny = ["admin"] }"#,
+        r#"{ deny = ["admin"] }"#,
+    ] {
+        assert_loads(policy)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn a_route_s_scopes_pass_the_same_checks_as_its_audiences() -> TestResult {
+    let mut route = orders(&[ANY], &["read", "write", "admin"])?;
+    route.scopes.require = names(&["read"]);
+    assert_eq!(route.scopes.refusal(&["read", "write"]), None);
+    assert_eq!(route.scopes.refusal(&[]), Some(Refusal::Missing("read")));
+    assert_eq!(route.scopes.refusal(&["x"]), Some(Refusal::Outside("x")));
     assert_eq!(
-        audience_problems(r#"{ allow = ["api"], require = ["api"], deny = ["api"] }"#)?,
-        [refused]
+        route.scopes.refusal(&["read", "x"]),
+        Some(Refusal::Outside("x"))
     );
-    Config::from_toml(&route_with(
-        r#"audiences = { allow = ["api"] }"#,
-        r#"audiences = { allow = ["api"], deny = [] }"#,
-    ))?;
-    Config::from_toml(&route_with(
-        r#"audiences = { allow = ["api"] }"#,
-        r#"audiences = { allow = ["*"], deny = ["admin"] }"#,
-    ))?;
-    Ok(())
-}
-
-#[test]
-fn a_route_refuses_the_first_scope_it_does_not_allow() -> TestResult {
-    let route = orders(&[], &["read", "write"])?;
-    assert_eq!(route.refused_scope(["read", "write"].into_iter()), Ok(()));
-    assert_eq!(route.refused_scope(std::iter::empty()), Ok(()));
     assert_eq!(
-        route.refused_scope(["read", "admin", "root"].into_iter()),
-        Err(Some("admin"))
+        route.scopes.refusal(&["write"]),
+        Some(Refusal::Missing("read"))
+    );
+    route.scopes.allow = names(&[ANY]);
+    route.scopes.deny = names(&["admin"]);
+    assert_eq!(
+        route.scopes.refusal(&["read", "admin"]),
+        Some(Refusal::Denied("admin"))
     );
     Ok(())
 }
 
 #[test]
-fn a_route_reports_the_first_required_scope_missing() -> TestResult {
-    let mut route = orders(&[], &["read", "write"])?;
-    assert_eq!(route.missing_scope(|_| false), None, "none required");
-    route.required_scopes = vec!["read".into(), "write".into()];
-    assert_eq!(route.missing_scope(|_| true), None);
-    assert_eq!(route.missing_scope(|scope| scope == "read"), Some("write"));
-    assert_eq!(route.missing_scope(|_| false), Some("read"));
-    Ok(())
-}
-
-#[test]
-fn required_scopes_default_to_none_and_load() -> TestResult {
+fn a_scope_table_loads_with_require_and_deny() -> TestResult {
+    let table = ROUTE.replace("scopes = { allow = [\"orders.read\"] }\n", "")
+        + "\n[routes.scopes]\nallow = [\"*\"]\nrequire = [\"orders.read\"]\ndeny = [\"admin\"]\n";
+    let config = Config::from_toml(&with_route(&table))?;
+    let scopes = &route(&config, 0)?.scopes;
+    assert_eq!(scopes.allow, [ANY]);
+    assert_eq!(scopes.require, ["orders.read"]);
+    assert_eq!(scopes.deny, ["admin"]);
     let config = Config::from_toml(&with_route(ROUTE))?;
-    assert!(route(&config, 0)?.required_scopes.is_empty());
-    let required = ROUTE.replace(
-        "allowed_scopes",
-        "required_scopes = [\"orders.read\"]\nallowed_scopes",
-    );
-    let config = Config::from_toml(&with_route(&required))?;
-    assert_eq!(route(&config, 0)?.required_scopes, ["orders.read"]);
+    let scopes = &route(&config, 0)?.scopes;
+    assert!(scopes.require.is_empty(), "require defaults to none");
+    assert!(scopes.deny.is_empty(), "deny defaults to none");
     Ok(())
 }
 
 #[test]
-fn required_scopes_must_be_allowed_and_named() -> TestResult {
-    let refused = ROUTE.replace(
-        "allowed_scopes",
-        "required_scopes = [\"orders.read\", \"admin\", \"*\"]\nallowed_scopes",
+fn a_scope_table_refuses_unknown_keys() -> TestResult {
+    let text = route_with(
+        r#"scopes = { allow = ["orders.read"] }"#,
+        r#"scopes = { allow = ["orders.read"], required = ["orders.read"] }"#,
     );
+    assert!(parse_error(&text)?.contains("unknown field `required`"));
+    Ok(())
+}
+
+/// The route keys a policy table replaced.
+const REMOVED_KEYS: [&str; 3] = ["allowed_audiences", "allowed_scopes", "required_scopes"];
+
+/// Checks that the orders route with `line` added is refused at `column`
+/// of that line with `message`.
+fn refused_key(line: &str, column: usize, message: &str) -> TestResult {
+    let text = route_with(
+        r#"scopes = { allow = ["orders.read"] }"#,
+        &format!("scopes = {{ allow = [\"orders.read\"] }}\n{line}"),
+    );
+    let number = text
+        .lines()
+        .position(|text| text == line)
+        .ok_or("no refused line")?
+        + 1;
     assert_eq!(
-        problems(&with_route(&refused))?,
-        [
-            r#"route "orders" requires scope "admin", which its allowed_scopes refuses"#,
-            r#"route "orders" required_scopes may not hold "*"; name each scope"#,
-        ]
+        parse_error(&text)?,
+        format!("line {number}, column {column}: {message}")
     );
-    let open = refused.replace(", \"*\"]", "]").replace(
+    Ok(())
+}
+
+#[test]
+fn allowed_audiences_is_refused_naming_its_replacement() -> TestResult {
+    refused_key(
+        r#"allowed_audiences = ["api"]"#,
+        21,
+        "allowed_audiences is replaced by [routes.audiences]; move its values to audiences.allow, which also refuses a token carrying any audience outside it. An empty allowed_audiences refused every token; to keep that, remove the route",
+    )
+}
+
+#[test]
+fn allowed_scopes_is_refused_naming_its_replacement() -> TestResult {
+    refused_key(
         r#"allowed_scopes = ["orders.read"]"#,
-        r#"allowed_scopes = ["*"]"#,
-    );
-    Config::from_toml(&with_route(&open))?;
+        18,
+        "allowed_scopes is replaced by [routes.scopes]; move its values to scopes.allow, where an omitted allow means \"*\" and an empty one is refused. An empty allowed_scopes refused every token; to keep that, remove the route",
+    )
+}
+
+/// An empty `allowed_scopes` refused every token. Moving it to an empty
+/// `scopes.allow` is refused too, so the guidance says to remove the route
+/// instead.
+#[test]
+fn an_empty_allowed_scopes_is_told_to_remove_the_route() -> TestResult {
+    refused_key(
+        "allowed_scopes = []",
+        18,
+        "allowed_scopes is replaced by [routes.scopes]; move its values to scopes.allow, where an omitted allow means \"*\" and an empty one is refused. An empty allowed_scopes refused every token; to keep that, remove the route",
+    )
+}
+
+#[test]
+fn an_empty_allowed_audiences_is_told_to_remove_the_route() -> TestResult {
+    refused_key(
+        "allowed_audiences = []",
+        21,
+        "allowed_audiences is replaced by [routes.audiences]; move its values to audiences.allow, which also refuses a token carrying any audience outside it. An empty allowed_audiences refused every token; to keep that, remove the route",
+    )
+}
+
+#[test]
+fn required_scopes_is_refused_naming_its_replacement() -> TestResult {
+    refused_key(
+        r#"required_scopes = ["orders.read"]"#,
+        19,
+        "required_scopes is replaced by [routes.scopes]; move its values to scopes.require",
+    )
+}
+
+#[test]
+fn a_route_shows_no_trace_of_the_removed_keys() -> TestResult {
+    let config = Config::from_toml(&with_route(ROUTE))?;
+    let shown = format!("{:?}", route(&config, 0)?);
+    for key in REMOVED_KEYS {
+        assert!(!shown.contains(key), "{key}: {shown}");
+    }
     Ok(())
 }
 
 #[test]
-fn required_scopes_are_single_scopes_named_once() -> TestResult {
-    // Under "*" every scope is allowed, so only the shape check stands
-    // between these and a route that refuses every token.
-    let malformed = ROUTE
-        .replace(
-            "allowed_scopes",
-            "required_scopes = [\"\", \"orders.read billing.read\", \"a\", \"a\"]\nallowed_scopes",
-        )
-        .replace(
-            r#"allowed_scopes = ["orders.read"]"#,
-            r#"allowed_scopes = ["*"]"#,
+fn removed_keys_outside_a_route_are_unknown_fields() -> TestResult {
+    for key in REMOVED_KEYS {
+        let error = parse_error(&okta_with(&format!("{key} = [\"api\"]")))?;
+        assert!(
+            error.contains(&format!("unknown field `{key}`, expected")),
+            "{error}"
         );
-    assert_eq!(
-        problems(&with_route(&malformed))?,
-        [
-            r#"route "orders" required scope "" must be one scope, without spaces"#,
-            r#"route "orders" required scope "orders.read billing.read" must be one scope, without spaces"#,
-            r#"route "orders" repeats required scope "a""#,
-        ]
-    );
+    }
     Ok(())
 }
 
 #[test]
-fn an_empty_scope_list_refuses_everything_and_a_star_accepts_anything() -> TestResult {
-    let empty = orders(&[], &[])?;
-    assert_eq!(empty.refused_scope(std::iter::empty()), Err(None));
-    assert_eq!(empty.refused_scope(["read"].into_iter()), Err(None));
-    let any = orders(&[], &["read", ANY])?;
-    assert_eq!(any.refused_scope(["admin"].into_iter()), Ok(()));
+fn an_omitted_allow_admits_any_value() -> TestResult {
+    for list in POLICIES {
+        for policy in ["{}", r#"{ require = ["api"] }"#, r#"{ deny = ["admin"] }"#] {
+            let config = Config::from_toml(&route_with_policy(list, policy)?)?;
+            for (kind, policy_of) in route(&config, 0)?.policies() {
+                if kind.key() == list {
+                    assert_eq!(policy_of.allow, [ANY], "{list} = {policy}");
+                }
+            }
+            assert!(config.warnings().0.is_empty(), "{list} = {policy}");
+        }
+    }
+    let config = Config::from_toml(&route_with_policy("scopes", r#"{ deny = ["admin"] }"#)?)?;
+    let scopes = &route(&config, 0)?.scopes;
+    assert_eq!(scopes.refusal(&["read"]), None);
+    assert_eq!(scopes.refusal(&[]), None);
+    assert_eq!(scopes.refusal(&["admin"]), Some(Refusal::Denied("admin")));
+    Ok(())
+}
+
+#[test]
+fn an_empty_allow_is_refused_naming_both_ways_out() -> TestResult {
+    assert_problems(
+        "{ allow = [] }",
+        &[
+            r#"route "orders" audiences.allow is empty; omit allow to admit any audience, or remove the route to refuse every token"#,
+        ],
+    )
+}
+
+#[test]
+fn a_star_allow_raises_no_warning() -> TestResult {
+    for list in ["audiences", "scopes"] {
+        for policy in [
+            r#"{ allow = ["*"] }"#,
+            r#"{ allow = ["*"], require = ["api"] }"#,
+        ] {
+            assert!(
+                policy_warnings(list, policy)?.is_empty(),
+                "{list} = {policy}"
+            );
+        }
+    }
     Ok(())
 }
 
@@ -1420,23 +1534,16 @@ fn a_clean_config_has_no_warnings() -> TestResult {
 
 #[test]
 fn empty_lists_warn_as_omissions() -> TestResult {
-    let route = ROUTE
-        .replace(
-            r#"audiences = { allow = ["api"] }"#,
-            "audiences = { allow = [] }",
-        )
-        .replace(
-            r#"allowed_scopes = ["orders.read"]"#,
-            "allowed_scopes = []\nallow = []",
-        );
+    let route = ROUTE.replace(
+        r#"scopes = { allow = ["orders.read"] }"#,
+        "scopes = { allow = [\"orders.read\"] }\nallow = []",
+    );
     let text = with_route(&route).replace(r#"allow = ["10.0.0.0/8"]"#, "allow = []");
     let warnings = Config::from_toml(&text)?.warnings();
     assert_eq!(
         warnings.0,
         [
             "gateway.allow is empty; every client will be denied",
-            r#"route "orders": audiences.allow is empty; every request will be denied"#,
-            r#"route "orders": allowed_scopes is empty; every request will be denied"#,
             r#"route "orders": allow is empty; every client will be denied"#,
         ]
     );
@@ -1449,15 +1556,11 @@ fn empty_lists_warn_as_omissions() -> TestResult {
 
 #[test]
 fn accept_anything_entries_warn_as_decisions() -> TestResult {
-    let route = ROUTE
-        .replace(
-            r#"audiences = { allow = ["api"] }"#,
-            r#"audiences = { allow = ["*"] }"#,
-        )
-        .replace(
-            r#"allowed_scopes = ["orders.read"]"#,
-            "allowed_scopes = [\"*\"]\nallow = [\"::/0\"]",
-        );
+    let route = ROUTE.replace(
+        r#"scopes = { allow = ["orders.read"] }"#,
+        "scopes = { allow = [\"orders.read\"] }
+allow = [\"::/0\"]",
+    );
     let text = with_route(&route).replace(
         r#"allow = ["10.0.0.0/8"]"#,
         r#"allow = ["0.0.0.0/0", "10.0.0.0/8", "::/0"]"#,
@@ -1468,45 +1571,9 @@ fn accept_anything_entries_warn_as_decisions() -> TestResult {
         [
             "gateway.allow has 0.0.0.0/0; every address is allowed",
             "gateway.allow has ::/0; every address is allowed",
-            r#"route "orders": audiences.allow has "*"; any audience is accepted"#,
-            r#"route "orders": allowed_scopes has "*"; any value is accepted"#,
             r#"route "orders": allow has ::/0; every address is allowed"#,
         ]
     );
-    Ok(())
-}
-
-#[test]
-fn a_star_audience_with_only_require_warns() -> TestResult {
-    let text = route_with(
-        r#"audiences = { allow = ["api"] }"#,
-        r#"audiences = { allow = ["*"], require = ["api"] }"#,
-    );
-    assert_eq!(
-        Config::from_toml(&text)?.warnings().0,
-        [
-            r#"route "orders": audiences.allow has "*"; any audience is accepted alongside the required ones"#
-        ]
-    );
-    Ok(())
-}
-
-#[test]
-fn a_star_audience_narrowed_by_deny_does_not_warn() -> TestResult {
-    for policy in [
-        r#"{ allow = ["*"], deny = ["admin"] }"#,
-        r#"{ allow = ["*"], require = ["api"], deny = ["admin"] }"#,
-    ] {
-        let text = route_with(
-            r#"audiences = { allow = ["api"] }"#,
-            &format!("audiences = {policy}"),
-        );
-        assert_eq!(
-            Config::from_toml(&text)?.warnings(),
-            Warnings::default(),
-            "{policy}"
-        );
-    }
     Ok(())
 }
 
@@ -1623,8 +1690,8 @@ fn the_read_timeout_defaults_to_a_minute_and_a_route_may_override_it() -> TestRe
             r#"host = "slow.example.com""#,
         )
         .replace(
-            r#"allowed_scopes = ["orders.read"]"#,
-            "allowed_scopes = [\"orders.read\"]\nread_timeout = \"00:05:00\"",
+            r#"scopes = { allow = ["orders.read"] }"#,
+            "scopes = { allow = [\"orders.read\"] }\nread_timeout = \"00:05:00\"",
         );
     let config = Config::from_toml(&with_route(&format!("{ROUTE}{second}")))?;
     assert_eq!(config.gateway.read_timeout, Duration::from_secs(60));
@@ -1651,8 +1718,8 @@ fn the_read_timeout_defaults_to_a_minute_and_a_route_may_override_it() -> TestRe
 #[test]
 fn read_timeouts_are_above_zero() -> TestResult {
     let text = route_with(
-        r#"allowed_scopes = ["orders.read"]"#,
-        "allowed_scopes = [\"orders.read\"]\nread_timeout = \"00:00:00\"",
+        r#"scopes = { allow = ["orders.read"] }"#,
+        "scopes = { allow = [\"orders.read\"] }\nread_timeout = \"00:00:00\"",
     )
     .replace(
         "[gateway.cache]",
@@ -1666,8 +1733,8 @@ fn read_timeouts_are_above_zero() -> TestResult {
         ]
     );
     let bad = route_with(
-        r#"allowed_scopes = ["orders.read"]"#,
-        "allowed_scopes = [\"orders.read\"]\nread_timeout = \"soon\"",
+        r#"scopes = { allow = ["orders.read"] }"#,
+        "scopes = { allow = [\"orders.read\"] }\nread_timeout = \"soon\"",
     );
     parse_error(&bad)?;
     Ok(())
@@ -1912,5 +1979,17 @@ fn no_mistaken_secret_reaches_an_error() -> TestResult {
         assert!(!error.contains("1979"), "{mistake}\n{error}");
         assert!(!error.contains("1.5e300"), "{mistake}\n{error}");
     }
+    Ok(())
+}
+
+#[test]
+fn a_literal_star_in_a_token_is_never_admitted() -> TestResult {
+    let config = Config::from_toml(&route_with_policy("scopes", r#"{ deny = ["admin"] }"#)?)?;
+    let scopes = &route(&config, 0)?.scopes;
+    assert_eq!(scopes.refusal(&["orders.read", ANY]), Some(Refusal::Any));
+    let route = orders(&[ANY], &[ANY])?;
+    assert_eq!(route.audiences.refusal(&[ANY]), Some(Refusal::Any));
+    assert_eq!(route.scopes.refusal(&[ANY]), Some(Refusal::Any));
+    assert_eq!(Policy::default().refusal(&["a", ANY]), Some(Refusal::Any));
     Ok(())
 }

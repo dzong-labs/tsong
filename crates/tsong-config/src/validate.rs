@@ -6,13 +6,19 @@ use std::fmt;
 
 use url::Url;
 
-use crate::{ANY, Config, KeyProvider, KeyState, Route, Validation};
+use crate::{ANY, Config, KeyProvider, KeyState, Policy, PolicyKind, Validation};
 
-/// Claims Tsong sets on every token it issues, which claim mapping may not
-/// write.
-pub const RESERVED_CLAIMS: [&str; 10] = [
-    "iss", "aud", "exp", "iat", "nbf", "jti", "scope", "act", "cnf", "sub_id",
+/// Claims claim mapping may not write: those Tsong sets on every token it
+/// issues, and `scp`, which would carry the subject's scopes past
+/// narrowing and the route's scope policy. For the same reason, a rename
+/// may not read `scope` or `scp` either.
+pub const RESERVED_CLAIMS: [&str; 11] = [
+    "iss", "aud", "exp", "iat", "nbf", "jti", "scope", "scp", "act", "cnf", "sub_id",
 ];
+
+/// The subject token's scope claims, which reach the minted token only as
+/// its `scope`, after the route's scope policy and narrowing.
+const SCOPE_CLAIMS: [&str; 2] = ["scope", "scp"];
 
 /// Whether `text` is an https URL.
 fn is_https(text: &str) -> bool {
@@ -201,6 +207,14 @@ impl Config {
         }
         for (name, renames) in &self.claims.rename {
             let mut targets = BTreeSet::new();
+            for source in renames.keys() {
+                if SCOPE_CLAIMS.contains(&source.as_str()) {
+                    problems.push(format!(
+                        "claims.rename.{name} may not rename {source:?}: scopes reach the minted \
+                         token only through \"scope\", after the route's scope policy and narrowing"
+                    ));
+                }
+            }
             for target in renames.values() {
                 if RESERVED_CLAIMS.contains(&target.as_str()) {
                     problems.push(format!(
@@ -235,27 +249,8 @@ impl Config {
             } else if !hosts.insert(route.host.to_ascii_lowercase()) {
                 problems.push(format!("routes repeats host {:?}", route.host));
             }
-            check_audiences(route, problems);
-            let mut required = BTreeSet::new();
-            for scope in &route.required_scopes {
-                if !required.insert(scope.as_str()) {
-                    problems.push(format!("route {name:?} repeats required scope {scope:?}"));
-                } else if scope == ANY {
-                    problems.push(format!(
-                        "route {name:?} required_scopes may not hold \"*\"; name each scope"
-                    ));
-                } else if scope.is_empty() || scope.contains(char::is_whitespace) {
-                    problems.push(format!(
-                        "route {name:?} required scope {scope:?} must be one scope, without spaces"
-                    ));
-                } else if route
-                    .refused_scope(std::iter::once(scope.as_str()))
-                    .is_err()
-                {
-                    problems.push(format!(
-                        "route {name:?} requires scope {scope:?}, which its allowed_scopes refuses"
-                    ));
-                }
+            for (kind, policy) in route.policies() {
+                check_policy(name, kind, policy, problems);
             }
             if route.read_timeout.is_some_and(|timeout| timeout.is_zero()) {
                 problems.push(format!("route {name:?} read_timeout must be above zero"));
@@ -269,14 +264,18 @@ impl Config {
     }
 }
 
-/// Checks a route's audience policy: every value names one audience once,
-/// `"*"` stands alone in `allow` and nowhere else, `deny` is set only
-/// under `"*"`, and every `require` value is one `allow` admits and not
-/// one `deny` lists.
-fn check_audiences(route: &Route, problems: &mut Vec<String>) {
-    let name = &route.name;
-    let policy = &route.audiences;
-    let any = policy.allow.iter().any(|value| value == ANY);
+/// Checks a route's audience or scope policy: `allow` is not empty, every
+/// value names one value once, `"*"` stands alone in `allow` and nowhere
+/// else, `deny` is set only under `"*"`, and every `require` value is one
+/// `allow` admits and not one `deny` lists.
+fn check_policy(name: &str, kind: PolicyKind, policy: &Policy, problems: &mut Vec<String>) {
+    let (list, noun) = (kind.key(), kind.noun());
+    let any = policy.allows(ANY);
+    if policy.allow.is_empty() {
+        problems.push(format!(
+            "route {name:?} {list}.allow is empty; omit allow to admit any {noun}, or remove the route to refuse every token"
+        ));
+    }
     for (field, values) in [
         ("allow", &policy.allow),
         ("require", &policy.require),
@@ -288,39 +287,39 @@ fn check_audiences(route: &Route, problems: &mut Vec<String>) {
             if !seen.insert(value.as_str()) {
                 if repeated.insert(value.as_str()) {
                     problems.push(format!(
-                        "route {name:?} audiences.{field} repeats audience {value:?}"
+                        "route {name:?} {list}.{field} repeats {noun} {value:?}"
                     ));
                 }
             } else if value.is_empty() {
                 problems.push(format!(
-                    "route {name:?} audiences.{field} has an empty value; name each audience"
+                    "route {name:?} {list}.{field} has an empty value; name each {noun}"
                 ));
             } else if value == ANY && field != "allow" {
                 problems.push(format!(
-                    "route {name:?} audiences.{field} may not hold \"*\"; name each audience"
+                    "route {name:?} {list}.{field} may not hold \"*\"; name each {noun}"
                 ));
             } else if value == ANY && values.iter().any(|value| value != ANY) {
                 problems.push(format!(
-                    "route {name:?} audiences.allow has \"*\" with other values; \"*\" allows any audience, so it stands alone"
+                    "route {name:?} {list}.allow has \"*\" with other values; \"*\" allows any {noun}, so it stands alone"
                 ));
             } else if value.contains(char::is_whitespace) {
                 problems.push(format!(
-                    "route {name:?} audiences.{field} has {value:?}; an audience holds no whitespace"
+                    "route {name:?} {list}.{field} has {noun} {value:?}, which holds whitespace"
                 ));
-            } else if field == "require" && any && policy.deny.contains(value) {
+            } else if field == "require" && any && policy.denies(value) {
                 problems.push(format!(
-                    "route {name:?} both requires and denies audience {value:?}"
+                    "route {name:?} both requires and denies {noun} {value:?}"
                 ));
             } else if field == "require" && !policy.allows(value) {
                 problems.push(format!(
-                    "route {name:?} requires audience {value:?}, which its audiences.allow doesn't admit"
+                    "route {name:?} requires {noun} {value:?}, which its {list}.allow doesn't admit"
                 ));
             }
         }
     }
     if !any && !policy.deny.is_empty() {
         problems.push(format!(
-            "route {name:?} audiences.deny applies only when audiences.allow is \"*\"; remove the denied audiences from allow instead"
+            "route {name:?} {list}.deny applies only when {list}.allow is \"*\" or omitted; remove the denied {list} from allow instead"
         ));
     }
 }

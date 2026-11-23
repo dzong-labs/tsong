@@ -1,8 +1,8 @@
 //! What a minted token carries, over generated subject tokens and
 //! requests: its scopes against the `billing` route, which allows
 //! orders.read, orders.write and billing.read and requires orders.read and
-//! billing.read; its audiences against the `policy` route's audience
-//! policy; and its claims against the config's claim mapping. Each
+//! billing.read; its audiences and scopes against the `policy` route's
+//! policies; and its claims against the config's claim mapping. Each
 //! run tries `PROPTEST_CASES` cases, 256 unless set; the weekly workflow
 //! sets more.
 
@@ -16,7 +16,7 @@ use common::*;
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
 use serde_json::{Map, Value, json};
-use tsong_config::RESERVED_CLAIMS;
+use tsong_issuer::{ExchangeError, TokenResponse};
 
 const HELD: [&str; 4] = ["orders.read", "orders.write", "billing.read", "admin"];
 const ALLOWED: [&str; 3] = ["orders.read", "orders.write", "billing.read"];
@@ -31,8 +31,53 @@ fn config() -> ProptestConfig {
     }
 }
 
-fn scopes() -> impl Strategy<Value = Vec<&'static str>> {
-    prop::collection::vec(prop::sample::select(&HELD[..]), 0..5)
+/// Lists of scopes drawn from `pool`, with repeats, from none up to as
+/// many as `pool` holds.
+fn scopes_from(pool: &'static [&'static str]) -> impl Strategy<Value = Vec<&'static str>> {
+    prop::collection::vec(prop::sample::select(pool), 0..=pool.len())
+}
+
+/// Exchanges a subject token with `changes` made to its claims for a token
+/// for the route at `host`, requesting `scope`, and returns the response
+/// or the refusal.
+fn exchange(
+    host: &str,
+    changes: Value,
+    scope: Option<String>,
+) -> Result<Result<TokenResponse, ExchangeError>, TestCaseError> {
+    let fail =
+        |error: Box<dyn std::error::Error + Send + Sync>| TestCaseError::fail(error.to_string());
+    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+    let h = harness().map_err(fail)?;
+    let mut token = request(&h, host, subject(changes)).map_err(fail)?;
+    token.scope = scope;
+    Ok(runtime.block_on(h.issuer.exchange(token)))
+}
+
+/// Exchanges a subject token holding `held` for a token for the route at
+/// `host`, requesting `requested`, and returns the minted token's scopes
+/// or the refusal.
+fn exchange_scopes(
+    host: &str,
+    held: &[&str],
+    requested: Option<&[&str]>,
+) -> Result<Result<BTreeSet<String>, ExchangeError>, TestCaseError> {
+    let scope = if held.is_empty() {
+        json!(null)
+    } else {
+        json!(held.join(" "))
+    };
+    let requested = requested.map(|requested| requested.join(" "));
+    Ok(
+        exchange(host, json!({ "scope": scope }), requested)?.map(|response| {
+            response
+                .scope
+                .unwrap_or_default()
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect()
+        }),
+    )
 }
 
 /// The scopes the minted token must carry, or `None` when the exchange
@@ -64,28 +109,14 @@ proptest! {
     /// the route requires; any other exchange is refused.
     #[test]
     fn a_minted_token_holds_only_scopes_it_may(
-        held in scopes(),
-        requested in prop::option::of(scopes()),
+        held in scopes_from(&HELD),
+        requested in prop::option::of(scopes_from(&HELD)),
     ) {
-        let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-        let h = harness().map_err(|error| TestCaseError::fail(error.to_string()))?;
         let held_set: BTreeSet<&str> = held.iter().copied().collect();
-        let scope = if held.is_empty() { json!(null) } else { json!(held.join(" ")) };
-        let mut token = request(&h, "billing.test", subject(json!({ "scope": scope })))
-            .map_err(|error| TestCaseError::fail(error.to_string()))?;
-        token.scope = requested.as_ref().map(|requested| requested.join(" "));
-        let result = runtime.block_on(h.issuer.exchange(token));
+        let result = exchange_scopes("billing.test", &held, requested.as_deref())?;
         match (expected(&held_set, requested.as_deref()), result) {
-            (Some(expected), Ok(response)) => {
-                let minted: BTreeSet<String> = response
-                    .scope
-                    .unwrap_or_default()
-                    .split_whitespace()
-                    .map(str::to_owned)
-                    .collect();
-                prop_assert_eq!(minted, expected);
-            }
-            (None, Err(_)) => {}
+            (Some(expected), Ok(minted)) => prop_assert_eq!(minted, expected),
+            (None, Err(error)) => prop_assert_eq!(error.code(), "invalid_scope"),
             (expected, result) => {
                 prop_assert!(false, "expected {expected:?}, got {result:?}");
             }
@@ -100,11 +131,15 @@ const EXTRA: [&str; 10] = [
     "act", "cnf", "sub_id", "jti", "iat", "email", "groups", "uid", "user", "secret",
 ];
 
-/// The claims a token minted for the `orders` route may carry: the
-/// reserved ones Tsong sets, `sub`, the copied `email` and `groups`, and
-/// `uid` renamed to `user`.
+/// The claims a token minted for the `orders` route may carry: the ones
+/// Tsong sets, the copied `email` and `groups`, and `uid` renamed to
+/// `user`. Reserved claims Tsong doesn't set, such as `scp`, are left out,
+/// so a minted token carrying one fails.
 fn may_carry(name: &str) -> bool {
-    RESERVED_CLAIMS.contains(&name) || ["sub", "email", "groups", "user"].contains(&name)
+    [
+        "iss", "aud", "exp", "iat", "jti", "scope", "sub", "sub_id", "email", "groups", "user",
+    ]
+    .contains(&name)
 }
 
 /// The payload of a JWT, unverified: the signature is tested elsewhere.
@@ -130,8 +165,6 @@ proptest! {
     fn a_minted_token_carries_only_mapped_claims(
         extra in prop::collection::btree_map(prop::sample::select(&EXTRA[..]), "[a-z]{1,6}", 0..10),
     ) {
-        let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-        let h = harness().map_err(|error| TestCaseError::fail(error.to_string()))?;
         let mut changes = Map::new();
         for name in ["email", "groups", "uid", "secret"] {
             changes.insert(name.into(), Value::Null);
@@ -139,10 +172,7 @@ proptest! {
         for (name, value) in &extra {
             changes.insert((*name).into(), json!(format!("in-{value}")));
         }
-        let token = request(&h, "orders.test", subject(Value::Object(changes)))
-            .map_err(|error| TestCaseError::fail(error.to_string()))?;
-        let response = runtime
-            .block_on(h.issuer.exchange(token))
+        let response = exchange("orders.test", Value::Object(changes), None)?
             .map_err(|error| TestCaseError::fail(error.to_string()))?;
         let minted = payload(&response.access_token)?;
         for (name, value) in &minted {
@@ -176,11 +206,7 @@ proptest! {
     fn a_route_s_audience_policy_decides_the_exchange(
         held in prop::collection::vec(prop::sample::select(&AUDIENCES[..]), 1..5),
     ) {
-        let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-        let h = harness().map_err(|error| TestCaseError::fail(error.to_string()))?;
-        let token = request(&h, "policy.test", subject(json!({ "aud": held })))
-            .map_err(|error| TestCaseError::fail(error.to_string()))?;
-        let result = runtime.block_on(h.issuer.exchange(token));
+        let result = exchange("policy.test", json!({ "aud": held }), None)?;
         let accepted = held.contains(&"tsong") && !held.contains(&"admin");
         match result {
             Ok(response) => {
@@ -199,6 +225,44 @@ proptest! {
                 let validated = held.iter().any(|aud| ["tsong", "api"].contains(aud));
                 let code = if validated { "invalid_target" } else { "invalid_request" };
                 prop_assert_eq!(error.code(), code);
+            }
+        }
+    }
+}
+
+/// Scopes a subject token might carry: the `policy` route allows any scope
+/// and denies `admin`.
+const POLICY_SCOPES: [&str; 3] = ["orders.read", "root", "admin"];
+
+proptest! {
+    #![proptest_config(config())]
+
+    /// The `policy` route, which allows any scope and denies `admin`,
+    /// accepts a subject token exactly when it doesn't carry `admin` and
+    /// the request asks for no scope it doesn't hold. A token it accepts is
+    /// minted with the requested scopes, or else the subject token's; one
+    /// it refuses is `invalid_scope`.
+    #[test]
+    fn a_route_s_scope_policy_decides_the_exchange(
+        held in scopes_from(&POLICY_SCOPES),
+        requested in prop::option::of(scopes_from(&POLICY_SCOPES)),
+    ) {
+        let result = exchange_scopes("policy.test", &held, requested.as_deref())?;
+        let held_set: BTreeSet<&str> = held.iter().copied().collect();
+        let granted: BTreeSet<&str> = requested
+            .as_ref()
+            .map_or_else(|| held_set.clone(), |requested| requested.iter().copied().collect());
+        let accepted = !held_set.contains("admin")
+            && granted.is_subset(&held_set);
+        match result {
+            Ok(minted) => {
+                prop_assert!(accepted, "accepted {held:?} for {requested:?}");
+                let granted: BTreeSet<String> = granted.into_iter().map(str::to_owned).collect();
+                prop_assert_eq!(minted, granted);
+            }
+            Err(error) => {
+                prop_assert!(!accepted, "refused {held:?} for {requested:?}: {error}");
+                prop_assert_eq!(error.code(), "invalid_scope");
             }
         }
     }

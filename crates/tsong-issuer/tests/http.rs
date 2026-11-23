@@ -39,14 +39,15 @@ fn form(body: &str) -> TestResult<Request<Body>> {
 }
 
 fn exchange_form(h: &Harness, audience: &str) -> TestResult<Request<Body>> {
-    exchange_form_with(h, audience, json!({}))
+    exchange_form_with(h, audience, "")
 }
 
-/// A token exchange form for a subject token with `changes`.
-fn exchange_form_with(h: &Harness, audience: &str, changes: Value) -> TestResult<Request<Body>> {
-    let token = h.inbound.sign(&subject(changes)?)?;
+/// A token exchange form for the default subject token, with `extra`
+/// appended to its query.
+fn exchange_form_with(h: &Harness, audience: &str, extra: &str) -> TestResult<Request<Body>> {
+    let token = h.inbound.sign(&subject(json!({}))?)?;
     form(&format!(
-        "grant_type={}&subject_token={token}&subject_token_type={}&audience={audience}",
+        "grant_type={}&subject_token={token}&subject_token_type={}&audience={audience}{extra}",
         TOKEN_EXCHANGE.replace(':', "%3A"),
         ACCESS_TOKEN.replace(':', "%3A"),
     ))
@@ -88,9 +89,10 @@ async fn the_token_endpoint_exchanges_a_form() -> TestResult {
 }
 
 #[tokio::test]
-async fn a_token_without_scopes_omits_the_scope_field() -> TestResult {
+async fn a_token_narrowed_to_no_scope_omits_the_scope_field() -> TestResult {
     let h = harness()?;
-    let form = exchange_form_with(&h, "orders.test", json!({ "scope": null }))?;
+    // An empty scope request narrows the minted token to no scope.
+    let form = exchange_form_with(&h, "orders.test", "&scope=")?;
     let (status, _, body) = send(&h, form).await?;
     assert_eq!(status, StatusCode::OK);
     assert!(body.get("scope").is_none());

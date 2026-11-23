@@ -28,37 +28,40 @@ name = "orders"
 host = "orders.example.com"
 downstream = "https://orders-lb.internal.example.com"
 append_audience = "orders.example.com"
-allowed_scopes = ["orders.read", "orders.write"]
 allow = ["10.20.0.0/16"]
 
 [routes.audiences]
 allow = ["api://orders", "orders.example.com"]
+
+[routes.scopes]
+allow = ["orders.read", "orders.write"]
+require = ["orders.read"]
 
 [[routes]]
 name = "builds"
 host = "builds.example.com"
 downstream = "https://builds-lb.internal.example.com"
 append_audience = ""
-allowed_scopes = []
 
 [routes.audiences]
-allow = ["*"]
 deny = ["api://admin"]
+
+[routes.scopes]
+require = ["read_api"]
 ```
 
 - `host` is the key. It is compared lowercased, without its port. Two routes with the same host are a config error.
 - `downstream` is an `https` origin with no path, query or fragment. It names the load balancer to forward to, by DNS name. IP addresses are not used, because load balancer addresses change.
 - `append_audience` is added to the minted token's `aud`. When it is empty, nothing is added.
-- `[routes.audiences]` holds the route's audience policy. The inbound token must carry at least one audience in `allow` and none outside it. Optional `require` lists audiences it must all carry, and optional `deny` audiences it may not carry. `"*"` must stand alone in `allow`, and then only `deny` narrows it; `deny` may hold values only under `"*"`. Each `require` value must be one `allow` admits and not one `deny` lists. No list may repeat a value, and no value may be empty or hold whitespace.
-- `allowed_scopes` lists the inbound scopes the route accepts. Every scope the inbound token carries must be in it.
-- `required_scopes`, optional, lists scopes the inbound token must all carry. Each must be one `allowed_scopes` accepts, and a scope narrowed with the token endpoint's `scope` parameter must keep them all.
+- `[routes.audiences]` holds the route's audience policy. Every audience the inbound token carries must be in `allow`. Validation has already refused a token with no audience its trusted issuer accepts. Optional `require` lists audiences it must all carry, and optional `deny` audiences it may not carry. `allow` is optional, and omitted means `"*"`. `"*"` must stand alone in `allow`, and then only `deny` narrows it; `deny` may hold values only under `"*"`. An empty `allow` is refused. Each `require` value must be one `allow` admits and not one `deny` lists. No list may repeat a value, and no value may be empty or hold whitespace.
+- `[routes.scopes]` holds the route's scope policy, with the same keys and rules, checked against the inbound `scope` and `scp`. A token with no scopes passes unless `require` names one. A scope narrowed with the token endpoint's `scope` parameter must keep every scope in `require`.
 - `signing_algorithm`, optional, is the algorithm the route's minted tokens are signed with: RS256, RS384, RS512, PS256, PS384, PS512, ES256, ES384 or EdDSA, ES256 when unset. A key for it must be active in `issuer.signing.keys`.
 - `allow` is optional, and adds a second IP check to the gateway-wide `gateway.allow`. A client must be in both lists, so a route can only narrow access. A route without `allow` takes `gateway.allow` alone.
 - `read_timeout` is optional, and overrides `gateway.read_timeout`, the longest the gateway waits on a downstream between reads. That defaults to 60 seconds.
 
-An empty `audiences.allow` or `allowed_scopes` denies every request. `"*"` accepts any value, and in `audiences.allow` only `audiences.deny` narrows it. IP lists follow the same rule: an empty `gateway.allow`, or an empty route `allow`, denies every client, and `["0.0.0.0/0", "::/0"]` allows every client. Validation stays mandatory: the config sets values, and no value switches a check off.
+An omitted `audiences.allow` or `scopes.allow` means `"*"`, which accepts any value, and then only the same table's `deny` narrows it. An empty one is refused at load. An empty IP list, `gateway.allow` or a route's `allow`, denies every client, and `["0.0.0.0/0", "::/0"]` allows every client. Validation stays mandatory: the config sets values, and no value switches a check off.
 
-`[[routes]]` deserializes as `Vec<Route>`. `RouteTable` in `crates/tsong-config/src/lib.rs` indexes it as a `HashMap<String, Route>` keyed by lowercased host, and the issuer and the gateway each hold one. The allowed audience and scope lists stay `Vec<String>`: they hold a few entries, and scanning a few entries costs less than hashing. A config reload, which roadmap item 32 adds, builds a new table and swaps it in.
+`[[routes]]` deserializes as `Vec<Route>`. `RouteTable` in `crates/tsong-config/src/lib.rs` indexes it as a `HashMap<String, Route>` keyed by lowercased host, and the issuer and the gateway each hold one. The audience and scope lists stay `Vec<String>`: they hold a few entries, and scanning a few entries costs less than hashing. A config reload, which roadmap item 32 adds, builds a new table and swaps it in.
 
 ## Exchange
 
@@ -66,7 +69,7 @@ The token endpoint stays reachable on its own, so the issuer enforces the route,
 
 1. Looks up the route by that host, and fails with `invalid_target` when there is none.
 2. Validates the subject token against the global trusted issuers. Every trusted issuer may exchange into every route.
-3. Checks the inbound `aud` against `[routes.audiences]`, and the inbound scopes against `allowed_scopes` and `required_scopes`. A failure is `invalid_target` for the audience and `invalid_scope` for the scopes.
+3. Checks the inbound `aud` against `[routes.audiences]`, and the inbound scopes against `[routes.scopes]`. A failure is `invalid_target` for the audience and `invalid_scope` for the scopes.
 4. Mints a token whose `aud` is the inbound `aud` followed by `append_audience`, without duplicates.
 5. Sets the minted `scope` to the inbound scopes. A `scope` parameter on the request narrows them. Asking for a scope the inbound token lacks, or narrowing away one the route requires, is `invalid_scope`.
 
@@ -114,10 +117,12 @@ The gateway fails closed:
 
 - Errors exit 1. They are everything validation rejects, such as a repeated host or a `downstream` that is not an `https` origin.
 - Warnings print and exit 0, unless `--deny-warnings` is set, which makes them exit 1.
-- An empty `allowed_*` or IP `allow` list warns that every request will be denied, which looks like an omission.
-- A `"*"` entry (in `audiences.allow`, only when `deny` is empty), or `0.0.0.0/0` or `::/0` in an IP `allow` list, warns that anything is accepted, which needs confirming.
+- An empty IP `allow` list warns that every client will be denied, which looks like an omission.
+- `0.0.0.0/0` or `::/0` in an IP `allow` list warns that every address is allowed, which needs confirming.
+- An audience policy that admits no audience a trusted issuer validating JWTs accepts warns that every token will be refused.
+- A `jwks_max_age` over a day warns that a withdrawn key stays trusted that long.
 
-Each message names the route and the field, such as `warning: route "builds": allowed_scopes is empty; every request will be denied`.
+An empty `audiences.allow` or `scopes.allow` is an error, not a warning; omit `allow` to admit any value, or remove the route to refuse every token. Each message names the route and the field, such as `warning: route "builds": allow is empty; every client will be denied`.
 
 ## Serve
 

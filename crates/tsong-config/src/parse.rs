@@ -35,14 +35,27 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-/// Refuses a route's `allowed_audiences`, at its value's line and column,
-/// naming what took its place.
-pub(crate) fn refuse_allowed_audiences<'de, D: Deserializer<'de>>(
-    _: D,
-) -> Result<Option<IgnoredAny>, D::Error> {
-    Err(D::Error::custom(
-        "allowed_audiences is replaced by [routes.audiences]; move its values to audiences.allow, which also refuses a token carrying any audience outside it",
-    ))
+/// Defines, for each removed route key, a `deserialize_with` function that
+/// refuses the key at its value's line and column, naming what took its
+/// place.
+macro_rules! refuse_removed_keys {
+    ($($function:ident: $key:literal => $message:literal;)+) => {$(
+        #[doc = concat!("Refuses a route's `", $key, "`, at its value's line and column, naming what took its place.")]
+        pub(crate) fn $function<'de, D: Deserializer<'de>>(
+            _: D,
+        ) -> Result<Option<IgnoredAny>, D::Error> {
+            Err(D::Error::custom(concat!($key, " is replaced by ", $message)))
+        }
+    )+};
+}
+
+refuse_removed_keys! {
+    refuse_allowed_audiences: "allowed_audiences" =>
+        "[routes.audiences]; move its values to audiences.allow, which also refuses a token carrying any audience outside it. An empty allowed_audiences refused every token; to keep that, remove the route";
+    refuse_allowed_scopes: "allowed_scopes" =>
+        "[routes.scopes]; move its values to scopes.allow, where an omitted allow means \"*\" and an empty one is refused. An empty allowed_scopes refused every token; to keep that, remove the route";
+    refuse_required_scopes: "required_scopes" =>
+        "[routes.scopes]; move its values to scopes.require";
 }
 
 /// Parses `text` as `T`, with any error as a [`ParseError`].

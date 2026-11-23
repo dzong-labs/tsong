@@ -212,16 +212,17 @@ async fn a_route_s_required_scopes_must_all_be_held() -> TestResult {
     );
 
     for (scope, missing) in [
-        (json!("orders.read"), "billing.read"),
-        (json!("billing.read orders.write"), "orders.read"),
-        (Value::Null, "orders.read"),
+        ("orders.read", "billing.read"),
+        ("billing.read orders.write", "orders.read"),
     ] {
         let claims = subject(json!({ "scope": scope }));
         assert_eq!(
             refused(&h, request(&h, "billing.test", claims)).await?,
             (
                 "invalid_scope",
-                format!(r#"route "billing" requires scope "{missing}""#)
+                format!(
+                    r#"the subject token lacks scope "{missing}", which "billing.test" requires"#
+                )
             )
         );
     }
@@ -245,7 +246,7 @@ async fn a_requested_scope_keeps_the_required_scopes() -> TestResult {
         refused(&h, dropped).await?,
         (
             "invalid_scope",
-            r#"the requested scope drops "billing.read", which route "billing" requires"#.into()
+            r#"the requested scope drops "billing.read", which "billing.test" requires"#.into()
         )
     );
 
@@ -262,36 +263,114 @@ async fn a_requested_scope_keeps_the_required_scopes() -> TestResult {
         refused(&h, lacking).await?,
         (
             "invalid_scope",
-            r#"route "billing" requires scope "orders.read""#.into()
+            r#"the subject token lacks scope "orders.read", which "billing.test" requires"#.into()
         )
     );
     Ok(())
 }
 
 #[tokio::test]
-async fn a_subject_without_scopes_gets_none() -> TestResult {
+async fn a_subject_without_scopes_is_refused_only_by_a_require() -> TestResult {
     let h = harness()?;
-    let claims = subject(json!({ "scope": null }));
-    let (response, claims) = exchanged(&h, request(&h, "orders.test", claims)).await?;
-    assert_eq!(response.scope, None);
-    assert!(!claims.contains_key("scope"));
+    let no_scopes = || {
+        [
+            json!({ "scope": null }),
+            json!({ "scope": "" }),
+            json!({ "scope": " ", "scp": [] }),
+        ]
+    };
+    // An omitted allow, a "*" and a named allow all admit no scope.
+    for host in ["open.test", "policy.test", "orders.test"] {
+        for scopes in no_scopes() {
+            let (response, _) = exchanged(&h, request(&h, host, subject(scopes))).await?;
+            assert_eq!(response.scope, None, "{host}");
+        }
+    }
+    for scopes in no_scopes() {
+        assert_eq!(
+            refused(&h, request(&h, "billing.test", subject(scopes))).await?,
+            (
+                "invalid_scope",
+                r#"the subject token lacks scope "orders.read", which "billing.test" requires"#
+                    .into()
+            )
+        );
+    }
     Ok(())
 }
 
 #[tokio::test]
-async fn the_route_refuses_scopes_it_does_not_allow() -> TestResult {
+async fn the_route_refuses_scopes_outside_the_allowed_ones() -> TestResult {
     let h = harness()?;
-    let claims = subject(json!({ "scope": "orders.read admin" }));
-    assert_eq!(
-        refused(&h, request(&h, "orders.test", claims)).await?,
-        (
-            "invalid_scope",
-            r#"scope "admin" is not allowed for route "orders""#.into()
-        )
-    );
+    // Refused whether or not the token also carries an allowed scope.
+    for scope in ["orders.read admin", "admin root"] {
+        let claims = subject(json!({ "scope": scope }));
+        assert_eq!(
+            refused(&h, request(&h, "orders.test", claims)).await?,
+            (
+                "invalid_scope",
+                r#"the subject token's scope "admin" is outside the scopes allowed for "orders.test""#
+                    .into()
+            ),
+            "{scope}"
+        );
+    }
     let entra = subject(json!({ "scope": null, "scp": ["orders.read"] }));
     let (response, _) = exchanged(&h, request(&h, "orders.test", entra)).await?;
     assert_eq!(response.scope.as_deref(), Some("orders.read"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_subject_may_carry_no_denied_scope() -> TestResult {
+    let h = harness()?;
+    let claims = subject(json!({ "scope": "orders.read admin" }));
+    assert_eq!(
+        refused(&h, request(&h, "policy.test", claims)).await?,
+        (
+            "invalid_scope",
+            r#"the subject token's scope "admin" is denied for "policy.test""#.into()
+        )
+    );
+    let claims = subject(json!({ "scope": "orders.read root" }));
+    let (response, _) = exchanged(&h, request(&h, "policy.test", claims)).await?;
+    assert_eq!(response.scope.as_deref(), Some("orders.read root"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_subject_may_carry_no_literal_star_scope() -> TestResult {
+    let h = harness()?;
+    // A downstream may read "*" as every scope, and deny can't name it.
+    for claims in [
+        json!({ "scope": "orders.read *" }),
+        json!({ "scope": null, "scp": ["*"] }),
+    ] {
+        for host in ["open.test", "policy.test"] {
+            assert_eq!(
+                refused(&h, request(&h, host, subject(claims.clone()))).await?,
+                (
+                    "invalid_scope",
+                    format!(r#"the subject token carries scope "*", which {host:?} never accepts"#)
+                ),
+                "{claims}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_subject_may_carry_no_literal_star_audience() -> TestResult {
+    let h = harness()?;
+    let claims = subject(json!({ "aud": ["tsong", "*"] }));
+    assert_eq!(
+        refused(&h, request(&h, "policy.test", claims)).await?,
+        (
+            "invalid_target",
+            r#"the subject token carries audience "*", which "policy.test" never accepts"#.into()
+        )
+    );
     Ok(())
 }
 
@@ -313,27 +392,15 @@ async fn an_scp_item_must_be_a_single_scope() -> TestResult {
 }
 
 #[tokio::test]
-async fn a_route_with_no_allowed_scopes_refuses_every_subject() -> TestResult {
-    let h = harness()?;
-    for scope in [json!("orders.read"), json!(null)] {
-        let claims = subject(json!({ "scope": scope }));
-        assert_eq!(
-            refused(&h, request(&h, "closed.test", claims)).await?,
-            ("invalid_scope", r#"route "closed" allows no scopes"#.into())
-        );
-    }
-    Ok(())
-}
-
-#[tokio::test]
-async fn the_subject_must_carry_an_audience_the_route_allows() -> TestResult {
+async fn the_subject_may_carry_no_audience_the_route_does_not_allow() -> TestResult {
     let h = harness()?;
     let claims = subject(json!({ "aud": ["api", "other"] }));
     assert_eq!(
         refused(&h, request(&h, "orders.test", claims)).await?,
         (
             "invalid_target",
-            r#"none of the subject token's audiences is allowed for "orders.test""#.into()
+            r#"the subject token's audience "api" is outside the audiences allowed for "orders.test""#
+                .into()
         )
     );
     let claims = subject(json!({ "aud": ["tsong"] }));
@@ -705,7 +772,7 @@ host = "ledger.test"
 downstream = "https://ledger-lb.test"
 append_audience = "ledger.test"
 audiences = { allow = ["tsong"] }
-allowed_scopes = ["*"]
+scopes = { allow = ["*"] }
 signing_algorithm = "RS256"
 
 [[issuer.signing.keys]]

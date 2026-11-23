@@ -42,7 +42,9 @@ max_entries = 10_000
 # host = "orders.localhost"
 # downstream = "https://orders.example.com:8443"
 # append_audience = ""
-# allowed_scopes = ["orders.read"]
 #
 # [routes.audiences]
 # allow = ["tsong"]
+#
+# [routes.scopes]
+# allow = ["orders.read"]

@@ -291,14 +291,11 @@ pub struct Route {
     /// nothing.
     pub append_audience: String,
     /// Which inbound `aud` values the route accepts, requires and denies.
-    pub audiences: AudiencePolicy,
-    /// The inbound scopes the route accepts: every scope the inbound token
-    /// carries must be one. Empty denies every token; `"*"` accepts any.
-    pub allowed_scopes: Vec<String>,
-    /// The scopes the inbound token must all carry, which a token minted
-    /// for the route always keeps. Each must be one `allowed_scopes`
-    /// accepts. Empty or unset requires none.
-    pub required_scopes: Vec<String>,
+    pub audiences: Policy,
+    /// Which inbound scopes, from `scope` or `scp`, the route accepts,
+    /// requires and denies. A token minted for the route always keeps
+    /// every scope `require` lists.
+    pub scopes: Policy,
     /// The algorithm tokens minted for the route are signed with. A key
     /// for it must be active. Unset, ES256.
     pub signing_algorithm: SigningAlgorithm,
@@ -319,10 +316,8 @@ struct RouteDef {
     host: String,
     downstream: Url,
     append_audience: String,
-    audiences: AudiencePolicy,
-    allowed_scopes: Vec<String>,
-    #[serde(default)]
-    required_scopes: Vec<String>,
+    audiences: Policy,
+    scopes: Policy,
     #[serde(default)]
     signing_algorithm: SigningAlgorithm,
     allow: Option<Vec<IpNet>>,
@@ -335,6 +330,20 @@ struct RouteDef {
         deserialize_with = "parse::refuse_allowed_audiences"
     )]
     _allowed_audiences: Option<IgnoredAny>,
+    /// Refused, naming `scopes.allow` as its replacement.
+    #[serde(
+        default,
+        rename = "allowed_scopes",
+        deserialize_with = "parse::refuse_allowed_scopes"
+    )]
+    _allowed_scopes: Option<IgnoredAny>,
+    /// Refused, naming `scopes.require` as its replacement.
+    #[serde(
+        default,
+        rename = "required_scopes",
+        deserialize_with = "parse::refuse_required_scopes"
+    )]
+    _required_scopes: Option<IgnoredAny>,
 }
 
 impl From<RouteDef> for Route {
@@ -345,8 +354,7 @@ impl From<RouteDef> for Route {
             downstream: def.downstream,
             append_audience: def.append_audience,
             audiences: def.audiences,
-            allowed_scopes: def.allowed_scopes,
-            required_scopes: def.required_scopes,
+            scopes: def.scopes,
             signing_algorithm: def.signing_algorithm,
             allow: def.allow,
             read_timeout: def.read_timeout,
@@ -354,51 +362,143 @@ impl From<RouteDef> for Route {
     }
 }
 
-/// A route's audience policy, checked against the subject token's `aud`
-/// values once the token is validated. The token must pass every check; the
-/// first that fails refuses it. The minted token's audiences are not
-/// affected.
+/// A route's policy for one list of the subject token's values, its
+/// audiences or its scopes, checked once the token is validated. The token
+/// must pass every check; the first that fails refuses it. A token carrying
+/// no value passes unless `require` lists one, though validation has
+/// already refused a token with no audience its trusted issuer accepts. A
+/// token carrying a literal `"*"` is always refused, since a downstream may
+/// read it as every value. The minted token's audiences
+/// are not affected; its scopes may be narrowed by the request, but always
+/// keep every one `require` lists.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AudiencePolicy {
-    /// The audiences the token may carry: at least one of them, and none
-    /// outside them. Empty denies every token; `"*"`, alone, allows any
-    /// audience, and then only `deny` narrows it.
+pub struct Policy {
+    /// The values the token may carry: any number of them, none included,
+    /// and none outside them. `require` names the values it must carry.
+    /// `"*"`, alone, allows any value, and then only `deny` narrows it.
+    /// Omitted, `"*"`. Empty is refused.
+    #[serde(default = "Policy::any")]
     pub allow: Vec<String>,
-    /// The audiences the token must all carry. Each must be one `allow`
+    /// The values the token must all carry. Each must be one `allow`
     /// admits. Empty or unset requires none.
     #[serde(default)]
     pub require: Vec<String>,
-    /// The audiences the token may not carry. Holds values only when
-    /// `allow` is `"*"`; under a named `allow`, leave the audience out of
-    /// `allow` instead. Empty or unset denies none.
+    /// The values the token may not carry. Holds values only when `allow`
+    /// is `"*"`; under a named `allow`, leave the value out of `allow`
+    /// instead. Empty or unset denies none.
     #[serde(default)]
     pub deny: Vec<String>,
 }
 
-impl AudiencePolicy {
-    /// Whether `allow` admits `audience`.
-    pub fn allows(&self, audience: &str) -> bool {
-        self.allow
-            .iter()
-            .any(|value| value == ANY || value == audience)
+impl Default for Policy {
+    /// The policy of an empty table, `{}`: `allow` is `"*"`, as it is
+    /// whenever `allow` is omitted, and nothing is required or denied.
+    fn default() -> Self {
+        Self {
+            allow: Self::any(),
+            require: Vec::new(),
+            deny: Vec::new(),
+        }
     }
 }
 
-/// Why a route refuses a subject token's audiences: the first of its
+impl Policy {
+    /// The `allow` an omitted one stands for: `"*"`.
+    fn any() -> Vec<String> {
+        vec![ANY.to_owned()]
+    }
+
+    /// Whether `allow` admits `value`.
+    pub fn allows(&self, value: &str) -> bool {
+        self.allow
+            .iter()
+            .any(|allowed| allowed == ANY || allowed == value)
+    }
+
+    /// Whether `deny` lists `value`.
+    pub fn denies(&self, value: &str) -> bool {
+        self.deny.iter().any(|denied| denied == value)
+    }
+
+    /// Whether the policy admits `value` on its own: `allow` admits it and
+    /// `deny` doesn't list it.
+    pub fn admits(&self, value: &str) -> bool {
+        self.allows(value) && !self.denies(value)
+    }
+
+    /// The first value `require` lists that `carries` says the token
+    /// lacks, or `None` when it carries them all.
+    pub fn missing(&self, carries: impl Fn(&str) -> bool) -> Option<&str> {
+        self.require
+            .iter()
+            .map(String::as_str)
+            .find(|required| !carries(required))
+    }
+
+    /// Why the policy refuses a token carrying these values, or `None` when
+    /// it accepts them. The token may not carry `"*"`, may carry no value
+    /// outside `allow`, must carry every one `require` lists, and may carry
+    /// none `deny` lists.
+    pub fn refusal<'a>(&'a self, values: &[&'a str]) -> Option<Refusal<'a>> {
+        if values.contains(&ANY) {
+            return Some(Refusal::Any);
+        }
+        if let Some(outside) = values.iter().find(|value| !self.allows(value)) {
+            return Some(Refusal::Outside(outside));
+        }
+        if let Some(missing) = self.missing(|required| values.contains(&required)) {
+            return Some(Refusal::Missing(missing));
+        }
+        values
+            .iter()
+            .find(|value| self.denies(value))
+            .map(|denied| Refusal::Denied(denied))
+    }
+}
+
+/// Why a [`Policy`] refuses a subject token's values: the first of its
 /// checks that failed, in the order they run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AudienceRefusal<'a> {
-    /// The token carries no audience.
-    NoAudience,
-    /// The token carries audiences, but none `allow` admits.
-    NotAllowed,
-    /// The token carries this audience, which is outside `allow`.
+pub enum Refusal<'a> {
+    /// The token carries a literal `"*"`, which no policy admits: a
+    /// downstream may read it as every value.
+    Any,
+    /// The token carries this value, which is outside `allow`.
     Outside(&'a str),
-    /// The token lacks this audience, which `require` lists.
+    /// The token lacks this value, which `require` lists.
     Missing(&'a str),
-    /// The token carries this audience, which `deny` lists.
+    /// The token carries this value, which `deny` lists.
     Denied(&'a str),
+}
+
+/// Which of a route's policies a [`Policy`] is, and how messages name it
+/// and the values it holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyKind {
+    /// `[routes.audiences]`, over the token's `aud` values.
+    Audiences,
+    /// `[routes.scopes]`, over the token's `scope` or `scp` values.
+    Scopes,
+}
+
+impl PolicyKind {
+    /// The route key the policy is under, which also names several of its
+    /// values: `audiences` or `scopes`.
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Audiences => "audiences",
+            Self::Scopes => "scopes",
+        }
+    }
+
+    /// One value: `audience` or `scope`.
+    pub const fn noun(self) -> &'static str {
+        match self {
+            Self::Audiences => "audience",
+            Self::Scopes => "scope",
+        }
+    }
 }
 
 impl Route {
@@ -407,79 +507,19 @@ impl Route {
     pub fn read_timeout(&self, gateway: &Gateway) -> Duration {
         self.read_timeout.unwrap_or(gateway.read_timeout)
     }
+
+    /// The route's policies, each with its kind, for checks that treat
+    /// them alike.
+    pub fn policies(&self) -> [(PolicyKind, &Policy); 2] {
+        [
+            (PolicyKind::Audiences, &self.audiences),
+            (PolicyKind::Scopes, &self.scopes),
+        ]
+    }
 }
 
-/// The entry in `audiences.allow` or `allowed_scopes` that accepts any
-/// value.
+/// The entry in an `allow` list that accepts any value.
 pub const ANY: &str = "*";
-
-impl Route {
-    /// Why the route refuses a token with these audiences, or `None` when
-    /// it accepts them. The token must carry at least one audience `allow`
-    /// admits, none outside it, every one `require` lists and none `deny`
-    /// lists.
-    pub fn audience_refusal<'a>(&'a self, audiences: &[&'a str]) -> Option<AudienceRefusal<'a>> {
-        let policy = &self.audiences;
-        if audiences.is_empty() {
-            return Some(AudienceRefusal::NoAudience);
-        }
-        let mut admitted = false;
-        let mut outside = None;
-        for aud in audiences {
-            if policy.allows(aud) {
-                admitted = true;
-            } else if outside.is_none() {
-                outside = Some(*aud);
-            }
-        }
-        if !admitted {
-            return Some(AudienceRefusal::NotAllowed);
-        }
-        if let Some(outside) = outside {
-            return Some(AudienceRefusal::Outside(outside));
-        }
-        if let Some(missing) = policy
-            .require
-            .iter()
-            .find(|required| !audiences.contains(&required.as_str()))
-        {
-            return Some(AudienceRefusal::Missing(missing));
-        }
-        audiences
-            .iter()
-            .find(|aud| policy.deny.iter().any(|denied| denied == *aud))
-            .map(|denied| AudienceRefusal::Denied(denied))
-    }
-
-    /// The first of the route's required scopes that `holds` says is
-    /// missing.
-    pub fn missing_scope(&self, holds: impl Fn(&str) -> bool) -> Option<&str> {
-        self.required_scopes
-            .iter()
-            .map(String::as_str)
-            .find(|scope| !holds(scope))
-    }
-
-    /// The first of these scopes the route doesn't accept. An empty
-    /// `allowed_scopes` accepts nothing, so even a token without scopes is
-    /// refused, reported as `None` in `Err`.
-    pub fn refused_scope<'a>(
-        &self,
-        mut scopes: impl Iterator<Item = &'a str>,
-    ) -> Result<(), Option<&'a str>> {
-        let allowed = &self.allowed_scopes;
-        if allowed.is_empty() {
-            return Err(None);
-        }
-        if allowed.iter().any(|value| value == ANY) {
-            return Ok(());
-        }
-        match scopes.find(|scope| !allowed.iter().any(|value| value == scope)) {
-            Some(refused) => Err(Some(refused)),
-            None => Ok(()),
-        }
-    }
-}
 
 /// The routes keyed by host, for lookup in constant time.
 #[derive(Debug, Clone, Default)]
