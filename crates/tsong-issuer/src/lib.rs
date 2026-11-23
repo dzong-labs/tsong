@@ -31,7 +31,7 @@ use serde_json::{Value, json};
 use tsong_clock::Clock;
 use tsong_config::{
     Config, Policy, PolicyKind, RESERVED_CLAIMS, Refusal, Route, RouteTable, allowed, client_ip,
-    is_scope_char,
+    is_scope_token,
 };
 use tsong_keys::KeySet;
 use tsong_validate::{Validated, Validator};
@@ -67,7 +67,7 @@ pub struct TokenRequest {
 impl TokenRequest {
     /// This request with every parameter sent without a value omitted, as
     /// RFC 6749 section 3.1 requires.
-    fn without_empty_parameters(self) -> Self {
+    pub(crate) fn without_empty_parameters(self) -> Self {
         let given = |value: Option<String>| value.filter(|value| !value.is_empty());
         let Self {
             grant_type,
@@ -415,11 +415,7 @@ fn check_request(request: &TokenRequest) -> Result<(&str, &str, Option<&str>), E
     // The request's `scope` is scope tokens separated by single spaces, by
     // RFC 6749 section 3.3, and a malformed one is `invalid_scope`, by
     // section 5.2.
-    if scope.is_some_and(|text| {
-        !text
-            .split(' ')
-            .all(|token| !token.is_empty() && token.chars().all(is_scope_char))
-    }) {
+    if scope.is_some_and(|text| !text.split(' ').all(is_scope_token)) {
         return Err(ExchangeError::InvalidScope(
             "the scope parameter is not RFC 6749 scope tokens separated by single spaces".into(),
         ));

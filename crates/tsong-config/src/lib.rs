@@ -507,6 +507,11 @@ pub fn is_scope_char(c: char) -> bool {
     matches!(c, '!' | '#'..='[' | ']'..='~')
 }
 
+/// Whether `text` is one OAuth scope token: one or more RFC 6749 NQCHARs.
+pub fn is_scope_token(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(is_scope_char)
+}
+
 impl Route {
     /// The longest the gateway waits on this route's downstream between
     /// reads.

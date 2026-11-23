@@ -34,6 +34,7 @@ async fn token(
     let forwarded_for = headers.get_all("x-forwarded-for");
     let result = match form {
         Ok(Form(request)) => {
+            let request = request.without_empty_parameters();
             match issuer.admits(
                 peer.ip(),
                 forwarded_for.iter().map(HeaderValue::as_bytes),

@@ -236,17 +236,13 @@ async fn a_requested_scope_is_scope_tokens_separated_by_single_spaces() -> TestR
             "{scope:?}"
         );
     }
-    Ok(())
-}
 
-#[tokio::test]
-async fn a_malformed_requested_scope_is_refused_before_the_route_lookup() -> TestResult {
-    let h = harness()?;
-    let malformed = changed(request(&h, "nowhere", subject(json!({}))), |r| {
+    // A malformed scope is refused before the route lookup.
+    let nowhere = changed(request(&h, "nowhere", subject(json!({}))), |r| {
         r.scope = Some("orders.read\torders.write".into());
     });
     assert_eq!(
-        refused(&h, malformed).await?,
+        refused(&h, nowhere).await?,
         ("invalid_scope", MALFORMED_SCOPE.into())
     );
     Ok(())

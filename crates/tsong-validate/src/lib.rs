@@ -33,7 +33,9 @@ use jsonwebtoken::{Algorithm, DecodingKey};
 use serde_json::{Map, Value};
 use tokio::sync::Mutex;
 use tsong_clock::Clock;
-use tsong_config::{Config, InboundAlgorithm, TrustedIssuer, Validation, is_scope_char};
+use tsong_config::{
+    Config, InboundAlgorithm, TrustedIssuer, Validation, is_scope_char, is_scope_token,
+};
 
 pub use claims::Validated;
 pub use jwks::{FetchError, FetchFuture, HttpFetcher, JwksFetcher};
@@ -441,7 +443,6 @@ fn time_claim(
 /// other whitespace is refused.
 fn check_scopes(payload: &Map<String, Value>) -> Result<(), ValidateError> {
     let spaced = |text: &str| text.chars().all(|c| c == ' ' || is_scope_char(c));
-    let token = |text: &&str| !text.is_empty() && text.chars().all(is_scope_char);
     match payload.get("scope") {
         None => {}
         Some(Value::String(text)) if spaced(text) => {}
@@ -451,7 +452,8 @@ fn check_scopes(payload: &Map<String, Value>) -> Result<(), ValidateError> {
         None => Ok(()),
         Some(Value::String(text)) if spaced(text) => Ok(()),
         Some(scp @ Value::Array(_))
-            if claims::strings(scp).is_some_and(|items| items.iter().all(token)) =>
+            if claims::strings(scp)
+                .is_some_and(|items| items.iter().copied().all(is_scope_token)) =>
         {
             Ok(())
         }

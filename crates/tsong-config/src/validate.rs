@@ -6,7 +6,7 @@ use std::fmt;
 
 use url::Url;
 
-use crate::{ANY, Config, KeyProvider, KeyState, Policy, PolicyKind, Validation, is_scope_char};
+use crate::{ANY, Config, KeyProvider, KeyState, Policy, PolicyKind, Validation, is_scope_token};
 
 /// Claims claim mapping may not write: those Tsong sets on every token it
 /// issues, and `scp`, which would carry the subject's scopes past
@@ -302,7 +302,7 @@ fn check_policy(name: &str, kind: PolicyKind, policy: &Policy, problems: &mut Ve
                 problems.push(format!(
                     "route {name:?} {list}.allow has \"*\" with other values; \"*\" allows any {noun}, so it stands alone"
                 ));
-            } else if kind == PolicyKind::Scopes && !value.chars().all(is_scope_char) {
+            } else if kind == PolicyKind::Scopes && !is_scope_token(value) {
                 // No token can carry such a scope, so the route would
                 // refuse every token.
                 problems.push(format!(
