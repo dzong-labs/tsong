@@ -13,6 +13,7 @@ mod network;
 mod parse;
 mod secret;
 mod store;
+mod token_type;
 mod validate;
 
 use std::collections::{BTreeMap, HashMap};
@@ -31,6 +32,7 @@ pub use network::{allowed, client_ip};
 pub use parse::ParseError;
 pub use secret::{Scheme, SecretRef, SecretRefError};
 pub use store::{ConfigStore, Fetched, FileStore, LoadFuture, Snapshot, hex};
+pub use token_type::TokenType;
 pub use validate::{Problems, RESERVED_CLAIMS};
 
 /// A whole Tsong configuration.
@@ -192,6 +194,18 @@ pub struct TrustedIssuer {
     /// The algorithms its JWTs may be signed with.
     #[serde(default)]
     pub algorithms: Vec<InboundAlgorithm>,
+    /// The `typ` header values its JWTs may carry. Compared as media
+    /// types: without regard to case, with `application/` optional. Unset,
+    /// `["at+jwt"]` (RFC 9068). A token without `typ` is refused unless
+    /// `require_token_type` is false.
+    #[serde(default = "token_type::default_token_types")]
+    pub token_types: Vec<TokenType>,
+    /// Whether a token must carry `typ`. Unset, true. False is for an
+    /// issuer whose access tokens carry none, and gives up explicit typing
+    /// (RFC 8725 section 3.11) for it: a token without `typ` passes, but a
+    /// `typ` that is present must still be one of `token_types`.
+    #[serde(default = "default_require_token_type")]
+    pub require_token_type: bool,
     /// Where its OIDC discovery document is. Unset, it is
     /// `<issuer>/.well-known/openid-configuration`. The document must name
     /// this issuer exactly.
@@ -218,6 +232,10 @@ pub struct TrustedIssuer {
     pub client_id: Option<String>,
     /// The introspection client secret.
     pub client_secret: Option<SecretRef>,
+}
+
+fn default_require_token_type() -> bool {
+    true
 }
 
 fn default_jwks_max_age() -> Duration {

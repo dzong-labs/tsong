@@ -181,6 +181,11 @@ impl Config {
                             "trusted_issuers.{name}.algorithms is empty, and jwt validation needs at least one"
                         ));
                     }
+                    if trusted.token_types.is_empty() {
+                        problems.push(format!(
+                            "trusted_issuers.{name}.token_types is empty, which refuses every token; leave it unset for [\"at+jwt\"]"
+                        ));
+                    }
                 }
                 Validation::Introspection => {
                     for (field, set) in [

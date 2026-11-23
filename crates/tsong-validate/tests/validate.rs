@@ -236,6 +236,44 @@ async fn only_allowed_algorithms_are_accepted() -> TestResult {
     Ok(())
 }
 
+/// Every other test signs `at+jwt`, which the default accepts. A
+/// configured list replaces the default, and a refusal comes before any
+/// key is fetched.
+#[tokio::test]
+async fn configured_token_types_replace_the_default() -> TestResult {
+    let h = harness_with("token_types = [\"JWT\"]\n")?;
+    assert!(matches!(
+        refused(&h, &h.key.sign(&claims())?).await?,
+        ValidateError::TokenType
+    ));
+    assert_eq!(h.fetcher.fetches(), 0);
+    h.validator
+        .validate(&h.key.sign_typed(Some("JWT"), &claims())?)
+        .await?;
+    Ok(())
+}
+
+/// An issuer whose access tokens carry no `typ` may let them through, but
+/// a `typ` that is present is still checked.
+#[tokio::test]
+async fn an_issuer_may_accept_tokens_without_a_type() -> TestResult {
+    let h = harness_with(
+        "require_token_type = false
+",
+    )?;
+    h.validator
+        .validate(&h.key.sign_typed(None, &claims())?)
+        .await?;
+    h.validator.validate(&h.key.sign(&claims())?).await?;
+    let error = refused(&h, &h.key.sign_typed(Some("JWT"), &claims())?).await?;
+    assert!(matches!(error, ValidateError::TokenType));
+    assert_eq!(
+        error.to_string(),
+        "token type is not accepted for this issuer"
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn the_header_algorithm_must_match_the_key() -> TestResult {
     let h = harness()?;
@@ -260,7 +298,11 @@ async fn a_key_without_an_algorithm_is_used_for_the_header_algorithm() -> TestRe
 #[tokio::test]
 async fn the_token_must_name_its_key() -> TestResult {
     let h = harness()?;
-    let token = jsonwebtoken::encode(&Header::new(Algorithm::ES256), &claims(), h.key.encoding())?;
+    let header = Header {
+        typ: Some("at+jwt".into()),
+        ..Header::new(Algorithm::ES256)
+    };
+    let token = jsonwebtoken::encode(&header, &claims(), h.key.encoding())?;
     assert!(matches!(
         refused(&h, &token).await?,
         ValidateError::MissingKid

@@ -46,7 +46,7 @@ admins-only = '"orders-admins" in claims.groups'
 
 Tsong applies it in this order:
 
-0. Validation, as today (`Validator::validate` in `crates/tsong-validate/src/lib.rs`): the signature first, then `iss`, `exp`, `nbf` and the trusted issuer's `audiences`. The signature comes first so no claim is read from a token that may be forged, and a forgery is reported as one, never as expired.
+0. Validation, as today (`Validator::validate` in `crates/tsong-validate/src/lib.rs`): `iss` picks the trusted issuer, the header checks follow (`alg`, `typ`, `kid`), then the signature, then the trusted issuer's `audiences`, `exp` and `nbf`. The signature comes before the claim checks so no claim but `iss` is read from a token that may be forged, and a forgery is reported as one, never as expired.
 1. Audiences: none outside `allow`, every `require` present, no `deny` present.
 2. Scopes: the same three checks. The request's `scope` parameter then narrows the scopes, in inbound names, as it does today.
 3. Rules: every rule must evaluate to `true`.

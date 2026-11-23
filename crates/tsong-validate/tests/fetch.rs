@@ -5,7 +5,7 @@ use axum::Router;
 use axum::http::StatusCode;
 use axum::routing::get;
 use serde_json::{Value, json};
-use tsong_config::{TrustedIssuer, Validation};
+use tsong_config::{TokenType, TrustedIssuer, Validation};
 use tsong_validate::{FetchError, HttpFetcher, JwksFetcher};
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
@@ -51,6 +51,8 @@ fn trusted(issuer: &str, jwks_url: Option<&str>) -> TestResult<TrustedIssuer> {
         audiences: vec!["tsong".into()],
         validation: Validation::Jwt,
         algorithms: vec![],
+        token_types: vec![TokenType::try_from("at+jwt".to_owned())?],
+        require_token_type: true,
         discovery_url: None,
         jwks_url: jwks_url.map(str::parse).transpose()?,
         jwks_max_age: Duration::from_secs(3600),

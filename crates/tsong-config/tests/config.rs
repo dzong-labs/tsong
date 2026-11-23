@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use tsong_config::{
     ANY, Config, ConfigError, ConfigStore, FileStore, InboundAlgorithm, KeyProvider, KeyState,
     Policy, Refusal, Route, RouteTable, Scheme, SecretRef, SecretRefError, SigningAlgorithm,
-    TrustedIssuer, Validation, Warnings, hex,
+    TokenType, TrustedIssuer, Validation, Warnings, hex,
 };
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
@@ -780,6 +780,112 @@ fn jwt_validation_needs_algorithms() -> TestResult {
         problems(&text)?,
         ["trusted_issuers.okta.algorithms is empty, and jwt validation needs at least one"]
     );
+    Ok(())
+}
+
+#[test]
+fn token_types_default_to_access_tokens_and_are_held_short() -> TestResult {
+    for (lines, held) in [
+        ("", &["at+jwt"][..]),
+        (
+            r#"token_types = ["Application/AT+JWT", "JWT", "Text/Plain"]"#,
+            &["at+jwt", "jwt", "text/plain"][..],
+        ),
+    ] {
+        let config = Config::from_toml(&okta_with(lines))?;
+        let held = held
+            .iter()
+            .map(|typ| TokenType::try_from((*typ).to_owned()))
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(trusted(&config, "okta")?.token_types, held, "{lines}");
+    }
+    Ok(())
+}
+
+#[test]
+fn token_types_match_as_media_types() -> TestResult {
+    let types = Config::from_toml(&okta_with(r#"token_types = ["application/at+jwt"]"#))?;
+    let accepted = &trusted(&types, "okta")?.token_types;
+    let matches = |typ: &str| accepted.iter().any(|accepted| accepted.matches(typ));
+    for typ in [
+        "at+jwt",
+        "AT+JWT",
+        "application/at+jwt",
+        "APPLICATION/at+JWT",
+    ] {
+        assert!(matches(typ), "{typ}");
+    }
+    for typ in [
+        "JWT",
+        "",
+        "application/",
+        "text/at+jwt",
+        "application/x/at+jwt",
+        " at+jwt",
+        // Twelve characters that aren't `application/`, before a bare type.
+        "applicationXat+jwt",
+    ] {
+        assert!(!matches(typ), "{typ}");
+    }
+    Ok(())
+}
+
+#[test]
+fn an_empty_token_types_list_is_refused() -> TestResult {
+    assert_eq!(
+        problems(&okta_with("token_types = []"))?,
+        [
+            r#"trusted_issuers.okta.token_types is empty, which refuses every token; leave it unset for ["at+jwt"]"#
+        ]
+    );
+    // An introspected issuer's tokens have no header to check.
+    Config::from_toml(&okta_with(
+        r#"validation = "introspection"
+introspection_url = "https://okta.example.com/introspect"
+client_id = "tsong"
+client_secret = { env = "SECRET" }
+token_types = []"#,
+    ))?;
+    Ok(())
+}
+
+#[test]
+fn token_type_is_required_unless_turned_off() -> TestResult {
+    for (lines, required) in [
+        ("", true),
+        ("require_token_type = true", true),
+        ("require_token_type = false", false),
+    ] {
+        let config = Config::from_toml(&okta_with(lines))?;
+        assert_eq!(
+            trusted(&config, "okta")?.require_token_type,
+            required,
+            "{lines}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn token_types_must_be_media_types() -> TestResult {
+    for typ in [
+        "",
+        " ",
+        "at+jwt ",
+        "at jwt",
+        "application/",
+        "/at+jwt",
+        "a/b/c",
+        "at+jwt,JWT",
+        "+jwt",
+        "\u{e9}t+jwt",
+    ] {
+        let error = parse_error(&okta_with(&format!("token_types = [{typ:?}]")))?;
+        assert!(
+            error.contains(&format!("token type {typ:?} is not a media type")),
+            "{typ:?}: {error}"
+        );
+    }
     Ok(())
 }
 

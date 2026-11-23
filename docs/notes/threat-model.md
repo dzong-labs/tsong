@@ -22,7 +22,7 @@ Tsong sits between callers and the services behind it, and takes input from five
 
 Every check on a caller is mandatory, and config sets the values but never turns a check off.
 
-- The token is validated in full: signature, `alg` against the issuer's allowed list, `kid`, `iss`, `aud`, `exp`, `nbf`, and the shape of `scope` and `scp`. A failure is a 401, or `invalid_request` at the token endpoint.
+- The token is validated in full: signature, `alg` against the issuer's allowed list, `typ` against its token types, `kid`, `iss`, `aud`, `exp`, `nbf`, and the shape of `scope` and `scp`. A failure is a 401, or `invalid_request` at the token endpoint.
 - The route comes from the host header alone, and route policy bounds the audiences and scopes a minted token may carry.
 - `gateway.allow`, narrowed per route, admits callers by address. `X-Forwarded-For` counts only from a peer in `trusted_proxies`.
 - The original token never reaches a downstream, and hop-by-hop and `Forwarded` headers are stripped.

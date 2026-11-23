@@ -1,11 +1,12 @@
 //! Inbound token validation, shared by the issuer and the gateway.
 //!
 //! [`Validator::validate`] accepts a JWT only when every check passes: the
-//! issuer is trusted, the algorithm is one the issuer is allowed, the
-//! signature verifies against the issuer's JWKS, the audience is accepted,
-//! the `scope` and `scp` claims are well formed, and the token is inside
-//! its `nbf`..`exp` window, give or take the clock skew. The config sets
-//! the values each check compares against; no check can be turned off.
+//! issuer is trusted, the algorithm is one the issuer is allowed, the `typ`
+//! header is one of the issuer's token types, the signature verifies
+//! against the issuer's JWKS, the audience is accepted, the `scope` and
+//! `scp` claims are well formed, and the token is inside its `nbf`..`exp`
+//! window, give or take the clock skew. The config sets the values each
+//! check compares against; no check can be turned off.
 //!
 //! Each issuer's keys expire `jwks_max_age` after they were fetched.
 //! [`Validator::refresh_due`] renews them before then; keys that expire
@@ -55,6 +56,10 @@ pub enum ValidateError {
     Unsupported(&'static str),
     #[error("algorithm {0} is not allowed for this issuer")]
     Algorithm(String),
+    #[error("the token has no typ header")]
+    MissingType,
+    #[error("token type is not accepted for this issuer")]
+    TokenType,
     #[error("the token has no kid")]
     MissingKid,
     #[error("no key {0:?} in the issuer's JWKS")]
@@ -165,6 +170,7 @@ impl Validator {
             return Err(ValidateError::Unsupported("introspection"));
         }
         let algorithm = allowed_algorithm(&issuer.trusted, header.alg)?;
+        check_type(&issuer.trusted, header.typ.as_deref())?;
         let kid = header.kid.ok_or(ValidateError::MissingKid)?;
         let (jwk, _) = self.key(issuer, &kid, Refetch::IfUnknown).await?;
         match verify(token, &jwk, algorithm) {
@@ -369,6 +375,28 @@ fn allowed_algorithm(
         .map(|&allowed| algorithms(allowed))
         .find(|(algorithm, _)| *algorithm == alg)
         .ok_or_else(|| ValidateError::Algorithm(format!("{alg:?}")))
+}
+
+/// Checks the header's `typ` is one of the issuer's token types (RFC 8725
+/// section 3.11). A token without one is refused unless the issuer sets
+/// `require_token_type = false`.
+fn check_type(trusted: &TrustedIssuer, typ: Option<&str>) -> Result<(), ValidateError> {
+    let Some(typ) = typ else {
+        return if trusted.require_token_type {
+            Err(ValidateError::MissingType)
+        } else {
+            Ok(())
+        };
+    };
+    if trusted
+        .token_types
+        .iter()
+        .any(|accepted| accepted.matches(typ))
+    {
+        Ok(())
+    } else {
+        Err(ValidateError::TokenType)
+    }
 }
 
 fn algorithms(allowed: InboundAlgorithm) -> (Algorithm, KeyAlgorithm) {

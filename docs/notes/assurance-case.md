@@ -36,13 +36,13 @@ The design applies Saltzer and Schroeder's principles, and the requirements foll
 - **Economy of mechanism** (5): one config file, one immutable state per config swapped whole, one crate per job.
 - **Open design** (6): security rests on keys and secrets, never on secrecy of the code; secrets are references, never values.
 - **Limited attack surface**: the admin and health listeners are separate, configured only by the host, each with its own allow list.
-- **Allowlists for input** (7): algorithms, issuers, audiences, scopes, client ranges, hosts and secret schemes are all allowlists, and unknown config fields are errors. An omitted policy `allow` means `"*"`, and only that policy's `deny` narrows it.
+- **Allowlists for input** (7): algorithms, token types, issuers, audiences, scopes, client ranges, hosts and secret schemes are all allowlists, and unknown config fields are errors. An omitted policy `allow` means `"*"`, and only that policy's `deny` narrows it.
 
 ## Common weaknesses and their countermeasures
 
 | Weakness | Countermeasure | Evidence |
 | --- | --- | --- |
-| Broken JWT validation: `alg: none`, RS/HS key confusion, `kid`, `jku` and `x5u` tricks, cross-issuer keys | Per-issuer algorithm allowlists; keys only from the issuer's own JWKS; every claim checked | 43 hand-built attacks refused: `crates/tsong-validate/tests/attacks.rs` |
+| Broken JWT validation: `alg: none`, RS/HS key confusion, `kid`, `jku` and `x5u` tricks, cross-issuer keys | Per-issuer algorithm and token type allowlists; keys only from the issuer's own JWKS; every claim checked | 50 hand-built attacks refused: `crates/tsong-validate/tests/attacks.rs` |
 | Missing authentication or authorization (CWE-306, CWE-862) | Every request validated and checked against route policy and allow lists, at the gateway and the token endpoint alike | Gateway and issuer tests; audience, scope and claim properties: `crates/tsong-issuer/tests/mint_properties.rs` |
 | Client address spoofing | `X-Forwarded-For` believed only from trusted proxies, read from the right | Properties: `crates/tsong-config/tests/properties.rs`; the `forwarded` fuzz target |
 | SSRF through discovery or JWKS URLs (CWE-918) | https only, the JWKS on the issuer's scheme, timeouts on every fetch | `crates/tsong-validate/tests/fetch.rs` |
