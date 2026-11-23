@@ -242,8 +242,7 @@ proptest! {
     /// accepts a subject token exactly when it doesn't carry `admin` and
     /// the request asks for no scope it doesn't hold. A token it accepts is
     /// minted with the requested scopes, or the subject token's when the
-    /// request names none; one
-    /// it refuses is `invalid_scope`.
+    /// request names none; one it refuses is `invalid_scope`.
     #[test]
     fn a_route_s_scope_policy_decides_the_exchange(
         held in scopes_from(&POLICY_SCOPES),
