@@ -694,6 +694,56 @@ async fn malformed_requests_are_invalid() -> TestResult {
     Ok(())
 }
 
+/// What an exchange of `request` returns, without the parts of a minted
+/// token that differ on every exchange.
+async fn outcome(
+    h: &Harness,
+    request: TestResult<TokenRequest>,
+) -> TestResult<Result<(Option<String>, String, String), (&'static str, String)>> {
+    Ok(match h.issuer.exchange(request?).await {
+        Ok(response) => Ok((
+            response.scope,
+            response.issued_token_type,
+            response.token_type,
+        )),
+        Err(error) => Err((error.code(), error.to_string())),
+    })
+}
+
+/// A parameter of a token request.
+type Parameter = fn(&mut TokenRequest) -> &mut Option<String>;
+
+#[tokio::test]
+async fn an_empty_parameter_counts_as_omitted() -> TestResult {
+    let h = harness()?;
+    // RFC 6749 section 3.1: a parameter sent without a value is omitted.
+    let parameters: [(&str, Parameter); 9] = [
+        ("grant_type", |r| &mut r.grant_type),
+        ("subject_token", |r| &mut r.subject_token),
+        ("subject_token_type", |r| &mut r.subject_token_type),
+        ("audience", |r| &mut r.audience),
+        ("scope", |r| &mut r.scope),
+        ("requested_token_type", |r| &mut r.requested_token_type),
+        ("resource", |r| &mut r.resource),
+        ("actor_token", |r| &mut r.actor_token),
+        ("actor_token_type", |r| &mut r.actor_token_type),
+    ];
+    for (name, parameter) in parameters {
+        let omitted = changed(request(&h, "orders.test", subject(json!({}))), |r| {
+            *parameter(r) = None;
+        });
+        let empty = changed(request(&h, "orders.test", subject(json!({}))), |r| {
+            *parameter(r) = Some(String::new());
+        });
+        assert_eq!(
+            outcome(&h, empty).await?,
+            outcome(&h, omitted).await?,
+            "{name}"
+        );
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn jwt_token_types_are_accepted() -> TestResult {
     let h = harness()?;

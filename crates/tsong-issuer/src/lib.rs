@@ -64,6 +64,36 @@ pub struct TokenRequest {
     pub actor_token_type: Option<String>,
 }
 
+impl TokenRequest {
+    /// This request with every parameter sent without a value omitted, as
+    /// RFC 6749 section 3.1 requires.
+    fn without_empty_parameters(self) -> Self {
+        let given = |value: Option<String>| value.filter(|value| !value.is_empty());
+        let Self {
+            grant_type,
+            subject_token,
+            subject_token_type,
+            audience,
+            scope,
+            requested_token_type,
+            resource,
+            actor_token,
+            actor_token_type,
+        } = self;
+        Self {
+            grant_type: given(grant_type),
+            subject_token: given(subject_token),
+            subject_token_type: given(subject_token_type),
+            audience: given(audience),
+            scope: given(scope),
+            requested_token_type: given(requested_token_type),
+            resource: given(resource),
+            actor_token: given(actor_token),
+            actor_token_type: given(actor_token_type),
+        }
+    }
+}
+
 /// A successful exchange, as RFC 8693 section 2.2.1 defines it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenResponse {
@@ -136,6 +166,7 @@ impl Issuer {
         context: &ExchangeContext,
     ) -> Result<TokenResponse, ExchangeError> {
         let started = Instant::now();
+        let request = request.without_empty_parameters();
         let mut seen = Seen::default();
         let result = self.run(&request, &mut seen).await;
         if let Some(observer) = &self.observer {
@@ -380,8 +411,7 @@ fn check_request(request: &TokenRequest) -> Result<(&str, &str, Option<&str>), E
     let Some(audience) = request.audience.as_deref() else {
         return invalid("audience is required");
     };
-    // An empty `scope` counts as omitted, by RFC 6749 section 3.1.
-    let scope = request.scope.as_deref().filter(|text| !text.is_empty());
+    let scope = request.scope.as_deref();
     // The request's `scope` is scope tokens separated by spaces, by RFC 6749
     // section 3.3.
     if scope.is_some_and(|text| !text.chars().all(|c| c == ' ' || is_scope_char(c))) {
