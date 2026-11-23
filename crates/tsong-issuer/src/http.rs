@@ -34,6 +34,7 @@ async fn token(
     let forwarded_for = headers.get_all("x-forwarded-for");
     let result = match form {
         Ok(Form(request)) => {
+            // Normalized here for `admits`; `exchange_with` normalizes too, for Rust callers.
             let request = request.without_empty_parameters();
             match issuer.admits(
                 peer.ip(),
