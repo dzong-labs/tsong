@@ -146,6 +146,27 @@ async fn a_malformed_scope_claim_is_an_invalid_request() -> TestResult {
 }
 
 #[tokio::test]
+async fn a_subject_token_of_the_wrong_type_is_an_invalid_request() -> TestResult {
+    let h = harness()?;
+    let token = h.inbound.sign_typed(Some("JWT"), &subject(json!({}))?)?;
+    let request = form(&format!(
+        "grant_type={}&subject_token={token}&subject_token_type={}&audience=orders.test",
+        TOKEN_EXCHANGE.replace(':', "%3A"),
+        ACCESS_TOKEN.replace(':', "%3A"),
+    ))?;
+    let (status, _, body) = send(&h, request).await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body,
+        json!({
+            "error": "invalid_request",
+            "error_description": "token type is not accepted for this issuer",
+        })
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn an_unavailable_jwks_is_a_503() -> TestResult {
     let h = harness()?;
     h.fetcher.fail(true);

@@ -46,6 +46,6 @@ Tsong would build these once someone needs them, but they aren't scheduled. If y
 Tsong will not do these, this year or later:
 
 - Authenticate users itself. Tsong trusts identity providers to log users in; it has no login page, sessions, consent screens or user store, and stores no passwords.
-- Turn a check off. Config sets the values a check uses, such as audiences, scopes and allowed algorithms, but every check stays on.
+- Turn a check off. Config sets the values a check uses, such as audiences, scopes, allowed algorithms and token types, but every check stays on.
 - Sign or accept tokens with a shared secret. Tsong signs with asymmetric keys only, and refuses HS256 and its kin inbound.
 - Run on platforms other than Linux.

@@ -126,9 +126,9 @@ fn signed(header: &Value, payload: &Value, key: &EncodingKey) -> TestResult<Stri
     Ok(format!("{message}.{signature}"))
 }
 
-/// The ES256 header naming `kid`.
+/// The ES256 access token header naming `kid`.
 fn header(kid: &str) -> Value {
-    json!({ "alg": "ES256", "typ": "JWT", "kid": kid })
+    json!({ "alg": "ES256", "typ": "at+jwt", "kid": kid })
 }
 
 /// `value` with `changes` applied: a null removes the field.
@@ -146,11 +146,14 @@ fn with(value: Value, changes: Value) -> TestResult<Value> {
     Ok(Value::Object(fields))
 }
 
+/// Whether an error is the refusal an attack must get.
+type Refusal = fn(&ValidateError) -> bool;
+
 /// One attack: what it is, the token, and the refusal it must get.
 struct Attack {
     name: &'static str,
     token: String,
-    refused: fn(&ValidateError) -> bool,
+    refused: Refusal,
 }
 
 fn attacks(keys: &Keys) -> TestResult<Vec<Attack>> {
@@ -165,7 +168,7 @@ fn attacks(keys: &Keys) -> TestResult<Vec<Attack>> {
     let signature_bytes = URL_SAFE_NO_PAD.decode(signature)?;
     let malformed = |e: &ValidateError| matches!(e, ValidateError::Malformed);
     let bad_signature = |e: &ValidateError| matches!(e, ValidateError::Signature);
-    Ok(vec![
+    let mut attacks = vec![
         // Algorithms.
         Attack {
             name: "alg none, unsigned",
@@ -265,7 +268,7 @@ fn attacks(keys: &Keys) -> TestResult<Vec<Attack>> {
         // Key IDs.
         Attack {
             name: "no kid",
-            token: signed(&json!({ "alg": "ES256" }), &claims(), k1)?,
+            token: signed(&json!({ "alg": "ES256", "typ": "at+jwt" }), &claims(), k1)?,
             refused: |e| matches!(e, ValidateError::MissingKid),
         },
         Attack {
@@ -349,7 +352,7 @@ fn attacks(keys: &Keys) -> TestResult<Vec<Attack>> {
             name: "the header swapped under a valid signature",
             token: format!(
                 "{}.{body}.{signature}",
-                encode(&with(header("k1"), json!({ "typ": "at+jwt" }))?)
+                encode(&with(header("k1"), json!({ "typ": "application/at+jwt" }))?)
             ),
             refused: bad_signature,
         },
@@ -469,7 +472,44 @@ fn attacks(keys: &Keys) -> TestResult<Vec<Attack>> {
             )?,
             refused: |e| matches!(e, ValidateError::NotYetValid),
         },
-    ])
+    ];
+    // Token types, RFC 8725 section 3.11: another kind of JWT from the same
+    // issuer, such as an ID token, isn't an access token.
+    let wrong_type: Refusal = |e| matches!(e, ValidateError::TokenType);
+    let typed: [(&'static str, Value, Refusal); 6] = [
+        ("no typ", Value::Null, |e| {
+            matches!(e, ValidateError::MissingType)
+        }),
+        (
+            "a plain JWT typ, as an ID token carries",
+            json!("JWT"),
+            wrong_type,
+        ),
+        (
+            "a typ of another kind of token",
+            json!("secevent+jwt"),
+            wrong_type,
+        ),
+        (
+            "the access token typ under another top-level type",
+            json!("text/at+jwt"),
+            wrong_type,
+        ),
+        (
+            "the access token typ with a trailing NUL",
+            json!("at+jwt\u{0}"),
+            wrong_type,
+        ),
+        ("a typ that is an array", json!(["at+jwt"]), malformed),
+    ];
+    for (name, typ, refused) in typed {
+        attacks.push(Attack {
+            name,
+            token: signed(&with(header("k1"), json!({ "typ": typ }))?, &claims(), k1)?,
+            refused,
+        });
+    }
+    Ok(attacks)
 }
 
 #[tokio::test]

@@ -106,3 +106,30 @@ async fn a_malformed_scope_claim_is_an_invalid_token() -> TestResult {
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn a_token_of_another_type_is_an_invalid_token() -> TestResult {
+    let (router, inbound) = gateway().await?;
+
+    // A plain JWT typ, and no typ, are refused before any exchange.
+    for typ in [Some("JWT"), None] {
+        let mistyped = inbound.sign_typed(
+            typ,
+            &json!({
+                "iss": "https://issuer.test",
+                "sub": "alice",
+                "aud": "tsong",
+                "exp": NOW + 3600,
+                "scope": "orders.read",
+            }),
+        )?;
+        let answer = send_to(&router, get("orders.test", "/", Some(&mistyped))?).await?;
+        assert_eq!(answer.status, StatusCode::UNAUTHORIZED, "{typ:?}");
+        assert_eq!(
+            answer.header("www-authenticate"),
+            Some(r#"Bearer error="invalid_token""#),
+            "{typ:?}"
+        );
+    }
+    Ok(())
+}

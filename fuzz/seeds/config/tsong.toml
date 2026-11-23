@@ -49,6 +49,8 @@ sub_prefix = "okta"   # minted sub is "okta:<sub>"; unique; a-z, 0-9 and -
 issuer = "https://example.okta.com/oauth2/default"
 audiences = ["api://default"]
 algorithms = ["RS256"]
+token_types = ["at+jwt"]   # accepted typ headers; case and "application/" don't matter
+require_token_type = false # Okta access tokens carry no typ; this gives up explicit typing, but a typ that is present is still checked
 jwks_max_age = "01:00:00"  # keys are trusted this long, then refetched; tokens are refused until a refetch succeeds
 jwks_retry = "00:00:10"    # how often a failed refetch of expired keys is retried
 jwks_refetch = "00:00:30"  # least time between refetches an unknown kid or a failed signature triggers
@@ -61,6 +63,7 @@ issuer = "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000
 discovery_url = "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0/.well-known/openid-configuration"
 audiences = ["api://tsong"]
 algorithms = ["RS256"]
+token_types = ["JWT"]  # Entra access tokens carry typ "JWT", not RFC 9068's "at+jwt". So do its ID tokens, so audiences must not admit the client ID of an app that signs users in
 
 [trusted_issuers.gitlab]
 sub_prefix = "gitlab"

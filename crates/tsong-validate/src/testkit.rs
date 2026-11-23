@@ -50,9 +50,17 @@ impl TestKey {
         &self.encoding
     }
 
-    /// An ES256 JWT of `claims`, naming this key.
+    /// An ES256 JWT access token (`typ` `at+jwt`) of `claims`, naming
+    /// this key.
     pub fn sign(&self, claims: &Value) -> Result<String, TestKitError> {
+        self.sign_typed(Some("at+jwt"), claims)
+    }
+
+    /// An ES256 JWT of `claims` with header `typ`, or none, naming this
+    /// key.
+    pub fn sign_typed(&self, typ: Option<&str>, claims: &Value) -> Result<String, TestKitError> {
         let mut header = Header::new(Algorithm::ES256);
+        header.typ = typ.map(str::to_owned);
         header.kid = Some(self.kid.clone());
         Ok(jsonwebtoken::encode(&header, claims, &self.encoding)?)
     }

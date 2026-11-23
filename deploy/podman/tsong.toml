@@ -35,6 +35,8 @@ max_entries = 10_000
 # issuer = "https://idp.example.com"
 # audiences = ["tsong"]
 # algorithms = ["RS256"]
+# token_types = ["at+jwt"]  # the default; Entra ID access tokens carry typ "JWT", so for Entra set ["JWT"]
+# require_token_type = true # set false for an issuer whose access tokens carry no typ, such as an Okta authorization server or AWS Cognito
 
 # ── a route ───────────────────────────────────────────
 # [[routes]]
