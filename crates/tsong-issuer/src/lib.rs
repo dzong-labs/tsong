@@ -412,12 +412,17 @@ fn check_request(request: &TokenRequest) -> Result<(&str, &str, Option<&str>), E
         return invalid("audience is required");
     };
     let scope = request.scope.as_deref();
-    // The request's `scope` is scope tokens separated by spaces, by RFC 6749
-    // section 3.3.
-    if scope.is_some_and(|text| !text.chars().all(|c| c == ' ' || is_scope_char(c))) {
-        return invalid(
-            "the scope parameter holds a character other than a space and RFC 6749 scope token characters",
-        );
+    // The request's `scope` is scope tokens separated by single spaces, by
+    // RFC 6749 section 3.3, and a malformed one is `invalid_scope`, by
+    // section 5.2.
+    if scope.is_some_and(|text| {
+        !text
+            .split(' ')
+            .all(|token| !token.is_empty() && token.chars().all(is_scope_char))
+    }) {
+        return Err(ExchangeError::InvalidScope(
+            "the scope parameter is not RFC 6749 scope tokens separated by single spaces".into(),
+        ));
     }
     Ok((subject_token, audience, scope))
 }
@@ -467,7 +472,7 @@ fn granted_scopes(
         None => held.clone(),
         Some(requested) => {
             let mut narrowed = BTreeSet::new();
-            for scope in requested.split(' ').filter(|scope| !scope.is_empty()) {
+            for scope in requested.split(' ') {
                 if !held.contains(scope) {
                     return Err(ExchangeError::InvalidScope(format!(
                         "the subject token lacks scope {scope:?}"

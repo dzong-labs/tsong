@@ -201,16 +201,25 @@ async fn requested_scopes_narrow_the_subjects() -> TestResult {
     Ok(())
 }
 
+/// The error for a request `scope` outside the RFC 6749 grammar.
+const MALFORMED_SCOPE: &str =
+    "the scope parameter is not RFC 6749 scope tokens separated by single spaces";
+
 #[tokio::test]
-async fn a_requested_scope_splits_only_on_spaces() -> TestResult {
+async fn a_requested_scope_is_scope_tokens_separated_by_single_spaces() -> TestResult {
     let h = harness()?;
     let spaced = changed(request(&h, "orders.test", subject(json!({}))), |r| {
-        r.scope = Some(" orders.write  orders.read ".into());
+        r.scope = Some("orders.write orders.read".into());
     });
     let (response, _) = exchanged(&h, spaced).await?;
     assert_eq!(response.scope.as_deref(), Some("orders.read orders.write"));
 
     for scope in [
+        " ",
+        "   ",
+        " orders.read",
+        "orders.read ",
+        "orders.read  orders.write",
         "orders.read\u{a0}orders.write",
         "orders.read\torders.write",
         "orders.read\norders.write",
@@ -223,10 +232,7 @@ async fn a_requested_scope_splits_only_on_spaces() -> TestResult {
         });
         assert_eq!(
             refused(&h, malformed).await?,
-            (
-                "invalid_request",
-                "the scope parameter holds a character other than a space and RFC 6749 scope token characters".into()
-            ),
+            ("invalid_scope", MALFORMED_SCOPE.into()),
             "{scope:?}"
         );
     }
@@ -237,14 +243,11 @@ async fn a_requested_scope_splits_only_on_spaces() -> TestResult {
 async fn a_malformed_requested_scope_is_refused_before_the_route_lookup() -> TestResult {
     let h = harness()?;
     let malformed = changed(request(&h, "nowhere", subject(json!({}))), |r| {
-        r.scope = Some("orders.read	orders.write".into());
+        r.scope = Some("orders.read\torders.write".into());
     });
     assert_eq!(
         refused(&h, malformed).await?,
-        (
-            "invalid_request",
-            "the scope parameter holds a character other than a space and RFC 6749 scope token characters".into()
-        )
+        ("invalid_scope", MALFORMED_SCOPE.into())
     );
     Ok(())
 }
