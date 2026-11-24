@@ -1,0 +1,86 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "Monitor.dc.html": {
+      "h": 1500,
+      "is_interactive": true,
+      "title": "Monitoring strip, Segoe UI",
+      "w": 12320,
+      "x": 0,
+      "y": 3700
+    },
+    "MonitorOpenSans.dc.html": {
+      "h": 1500,
+      "is_interactive": true,
+      "title": "Monitoring strip, Open Sans",
+      "w": 12320,
+      "x": 0,
+      "y": 6940
+    },
+    "MonitorPanorama.dc.html": {
+      "h": 1433,
+      "is_interactive": true,
+      "title": "Monitoring panorama, window over the strip",
+      "w": 1440,
+      "x": 0,
+      "y": 1656
+    },
+    "MonitorSelawik.dc.html": {
+      "h": 1500,
+      "is_interactive": true,
+      "title": "Monitoring strip, Selawik",
+      "w": 12320,
+      "x": 0,
+      "y": 5320
+    },
+    "SignIn.dc.html": {
+      "expand": "fill",
+      "h": 800,
+      "is_interactive": true,
+      "title": "Sign in",
+      "w": 1280,
+      "x": -1499,
+      "y": 1656
+    },
+    "Route.dc.html": {
+      "x": 1520,
+      "y": 1656,
+      "w": 1280,
+      "h": 1000,
+      "is_interactive": true,
+      "title": "Route page, orders.test"
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-11-22T21:30:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "view": "canvas"
+  },
+  "noteOrder": [
+    "monitoringFonts"
+  ],
+  "notes": {
+    "monitoringFonts": {
+      "kind": "title1",
+      "maxW": 12320,
+      "text": "Tsong hub strip in three typefaces",
+      "w": 240,
+      "x": 0,
+      "y": 3420
+    }
+  },
+  "order": [
+    "SignIn.dc.html",
+    "Monitor.dc.html",
+    "MonitorSelawik.dc.html",
+    "MonitorOpenSans.dc.html",
+    "MonitorPanorama.dc.html",
+    "Route.dc.html"
+  ],
+  "pages": [],
+  "title": "Tsong Metro"
+}

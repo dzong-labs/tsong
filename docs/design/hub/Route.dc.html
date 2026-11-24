@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Route orders.test</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:'Selawik';font-weight:300;font-display:swap;src:url(/_blob/d81226ad7c78c84ccb3f998c75f9a7d7) format('truetype')}
+@font-face{font-family:'Selawik';font-weight:400;font-display:swap;src:url(/_blob/a3da87f847b156031919d650163f7617) format('truetype')}
+@font-face{font-family:'Selawik';font-weight:600 700;font-display:swap;src:url(/_blob/1f81253b6a28b91b4cd108ba48d8cbde) format('truetype')}
+@font-face{font-family:'Cascadia Mono Web';font-weight:400;font-display:swap;src:url(/_blob/a0fe85ab1c4359da7e4ffeb9a50108fa) format('woff2')}
+@font-face{font-family:'Cascadia Mono Web';font-weight:600;font-display:swap;src:url(/_blob/5ab9541533be0d33718bc58d8636170d) format('woff2')}
+body{margin:0}
+.memo{box-sizing:border-box;width:100%;padding:12px;background:rgba(0,0,0,0.2);color:#D4D4D4;caret-color:#D4D4D4;border:0;outline:none;box-shadow:none;font-family:'Cascadia Mono Web','Cascadia Mono',monospace;font-size:14px;line-height:1.6;resize:vertical}
+input.memo{width:240px;min-height:44px;padding:0 12px;font-family:inherit;font-size:16px}
+:root{color-scheme:dark}
+.events>li:nth-child(odd){background:#282828}
+a,button,[role="tab"]{cursor:pointer}
+a{color:#D4D4D4;text-decoration-thickness:1px;text-underline-offset:3px}a:visited{color:#D4D4D4}a:hover{color:#9D9D9D}
+.mono{font-family:'Cascadia Mono Web','Cascadia Mono',monospace}
+</style>
+</helmet>
+<div style="width: 1280px; height: 1000px; box-sizing: border-box; overflow: hidden; background: #1E1E1E; color: #D4D4D4; font-family: 'Segoe UI', 'Selawik', sans-serif; font-size: 16px; line-height: 1.5; display: flex; flex-direction: column">
+<header style="padding: 24px 64px 0; height: 76px; box-sizing: border-box; display: flex; align-items: center; gap: 24px">
+<a href="MonitorPanorama.dc.html#routes" aria-label="Back to routes" style="width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; margin-left: -12px"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="#D4D4D4" stroke-width="1.6" aria-hidden="true"><circle cx="11" cy="11" r="10"></circle><path d="M12.5 6.5L8 11l4.5 4.5"></path></svg></a>
+<span style="font-size: 21px; font-weight: 600">tsong</span>
+<span style="font-size: 21px; font-weight: 300; color: #9D9D9D">routes</span>
+</header>
+<main style="flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 64px 64px; box-sizing: border-box; display: flex; flex-direction: column; gap: 32px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h1 style="margin: 0; font-size: 40px; font-weight: 300; line-height: 1.1">orders.test</h1>
+<span class="mono" style="font-size: 14px; color: #9D9D9D">→ https://orders.internal:8443</span>
+</div>
+<div role="tablist" aria-label="Route views" style="display: flex; gap: 32px">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="5">
+<button type="button" role="tab" aria-selected="{{t.sel}}" onClick="{{t.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 29px; font-weight: 300; color: {{t.color}}">{{t.name}}</button>
+</sc-for>
+</div>
+
+<sc-if value="{{on.overview}}" hint-placeholder-val="{{ true }}">
+<div role="tabpanel" aria-label="overview" style="display: flex; flex-direction: column; gap: 48px">
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px 40px">
+<span style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">2.14 M</span><span>exchanges in 24 hours</span><span style="font-size: 14px; color: #9D9D9D">1,490 per minute now</span></span>
+<span style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">0.7%</span><span>refused</span><span style="font-size: 14px; color: #9D9D9D">usually 0.6%</span></span>
+<span style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">28 ms</span><span>exchange latency (p99)</span><span style="font-size: 14px; color: #9D9D9D">objective: 50 ms</span></span>
+<span style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">91%</span><span>exchange cache hit rate</span><span style="font-size: 14px; color: #9D9D9D">usually 88 to 92%</span></span>
+</div>
+<div style="display: flex; gap: 64px; align-items: flex-start">
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 29px; font-weight: 300">alerts</h2>
+<div style="display: grid; grid-template-columns: 17px minmax(0, 1fr); align-items: center; gap: 2px 16px"><svg width="17" height="17" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5L13.5 3.5V8C13.5 11 11 13.25 8 14.5C5 13.25 2.5 11 2.5 8V3.5Z" fill="none" stroke="#E5322D" stroke-width="1.5" stroke-linejoin="round"></path><path d="M8 5V9" stroke="#E5322D" stroke-width="1.5" stroke-linecap="round"></path><circle cx="8" cy="11.3" r="0.9" fill="#E5322D"></circle></svg><span style="font-weight: 600">replica-d serves the old policy</span><span></span><span>It's still on 3f9c2a1, so it mints orders.test tokens without requiring <span class="mono">orders.read</span>.</span></div>
+</div>
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 29px; font-weight: 300">refusals, 24 hours</h2>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 72px; gap: 4px 16px"><span class="mono">scope orders.delete not in allow</span><span style="text-align: right; font-variant-numeric: tabular-nums">8,120</span><span class="mono">scope orders.read required</span><span style="text-align: right; font-variant-numeric: tabular-nums">4,630</span><span class="mono">token expired</span><span style="text-align: right; font-variant-numeric: tabular-nums">1,710</span><span class="mono">audience missing tsong</span><span style="text-align: right; font-variant-numeric: tabular-nums">520</span></div>
+<button type="button" onClick="{{goEvents}}" style="align-self: flex-start; min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; color: #9D9D9D; text-decoration: underline; text-underline-offset: 3px">see the refused events</button>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 29px; font-weight: 300">top callers, 24 hours</h2>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 120px 120px; gap: 4px 24px"><span style="color: #9D9D9D">subject</span><span style="color: #9D9D9D; text-align: right">exchanges</span><span style="color: #9D9D9D; text-align: right">refused</span><span class="mono">entra:svc-checkout</span><span style="text-align: right; font-variant-numeric: tabular-nums">1.62 M</span><span style="text-align: right; font-variant-numeric: tabular-nums">0.2%</span><span class="mono">okta:svc-reporting</span><span style="text-align: right; font-variant-numeric: tabular-nums">380 k</span><span style="text-align: right; font-variant-numeric: tabular-nums">0.9%</span><span class="mono">okta:jdoe</span><span style="text-align: right; font-variant-numeric: tabular-nums">1,210</span><span style="text-align: right; font-variant-numeric: tabular-nums">4.1%</span></div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{on.policy}}" hint-placeholder-val="{{ false }}">
+<div role="tabpanel" aria-label="policy" style="display: flex; flex-direction: column; gap: 40px; max-width: 880px">
+<p style="margin: 0; color: #9D9D9D">Tsong checks these, in this order, on every token sent to orders.test. A token that fails any of them is refused.</p>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-size: 29px; font-weight: 300">audiences</h2>
+<span>The token must carry <span class="mono">tsong</span>. It may also carry <span class="mono">api://orders</span>, and nothing else.</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-size: 29px; font-weight: 300">scopes</h2>
+<span>The token must carry <span class="mono">orders.read</span>. It may also carry <span class="mono">orders.write</span>, and nothing else. A request may narrow these, but never drop <span class="mono">orders.read</span>.</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-size: 29px; font-weight: 300">rules</h2>
+<span style="color: #9D9D9D">None. Rules come with CEL support.</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-size: 29px; font-weight: 300">the minted token</h2>
+<span>Signed with ES256, key <span class="mono">es256-2026-11</span>. Its audience is the inbound audience plus <span class="mono">orders.test</span>, and its scopes are the inbound scopes, narrowed by the request.</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-size: 29px; font-weight: 300">callers</h2>
+<span>Any client address may call this route.</span>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{on.config}}" hint-placeholder-val="{{ false }}">
+<div role="tabpanel" aria-label="config" style="display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px"><span style="color: #9D9D9D">from <span class="mono">tsong.toml</span> at 8b0e6d4, served by 3 of 4 replicas</span><a href="#" style="min-height: 44px; display: inline-flex; align-items: center">edit in composer</a></div>
+<pre class="mono" style="margin: 0; padding: 20px 24px; background: #141414; font-size: 14px; line-height: 1.7; white-space: pre; overflow-x: auto">[[routes]]
+host = "orders.test"
+downstream = "https://orders.internal:8443"
+signing_algorithm = "ES256"
+append_audience = "orders.test"
+
+[routes.audiences]
+allow = ["tsong", "api://orders"]
+require = ["tsong"]
+
+[routes.scopes]
+allow = ["orders.read", "orders.write"]
+require = ["orders.read"]</pre>
+<span style="color: #9D9D9D">Read-only. Changes go through the composer and a pull request.</span>
+</div>
+</sc-if>
+
+<sc-if value="{{on.events}}" hint-placeholder-val="{{ false }}">
+<div role="tabpanel" aria-label="events" style="display: flex; flex-direction: column; gap: 16px">
+<span style="color: #9D9D9D">showing only <span class="mono">route = orders.test</span>, newest first</span>
+<div aria-hidden="true" style="display: grid; grid-template-columns: 80px 320px 56px minmax(0, 1fr) 64px; gap: 0 16px; padding: 0 12px; color: #9D9D9D"><span>time</span><span>outcome</span><span>issuer</span><span>subject</span><span>cache</span></div>
+<ol aria-label="Events" class="events" style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column">
+<sc-for list="{{events}}" as="ev" hint-placeholder-count="8">
+<li style="display: grid; grid-template-columns: 80px 320px 56px minmax(0, 1fr) 64px; gap: 0 16px; align-items: baseline; padding: 10px 12px">
+<span class="mono" style="font-size: 14px; color: #9D9D9D">{{ev.time}}</span>
+<span style="display: flex; flex-direction: column"><span style="font-weight: 600">{{ev.outcome}}</span><sc-if value="{{ev.refused}}" hint-placeholder-val="{{ false }}"><span class="mono" style="font-size: 14px">{{ev.reason}}</span></sc-if></span>
+<span>{{ev.issuer}}</span>
+<span class="mono" style="font-size: 14px">{{ev.subject}}</span>
+<span style="color: #9D9D9D">{{ev.cache}}</span>
+</li>
+</sc-for>
+</ol>
+<a href="MonitorPanorama.dc.html#watch" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; color: #9D9D9D">open in watch</a>
+</div>
+</sc-if>
+
+<sc-if value="{{on.explain}}" hint-placeholder-val="{{ false }}">
+<div role="tabpanel" aria-label="explain" style="display: flex; flex-direction: column; gap: 16px; max-width: 880px">
+<label for="route-token" style="color: #9D9D9D">a bearer token to explain against orders.test</label>
+<textarea id="route-token" rows="5" spellcheck="false" placeholder="paste a bearer token" class="memo"></textarea>
+<div style="display: flex; justify-content: flex-end"><button type="button" style="min-height: 44px; padding: 0 20px; background: #D4D4D4; color: #1E1E1E; border: 0; font: inherit; font-weight: 600">explain</button></div>
+<span style="color: #9D9D9D">Explain runs on the admin listener and never forwards the token.</span>
+</div>
+</sc-if>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1000}}'>
+class Component extends DCLogic {
+constructor(props) {
+super(props);
+this.state = { tab: 'overview' };
+}
+renderVals() {
+const names = ['overview', 'policy', 'config', 'events', 'explain'];
+const tab = this.state.tab;
+const on = {};
+names.forEach((n) => { on[n] = n === tab; });
+const ev = (time, outcome, reason, issuer, subject, cache) => ({ time, outcome, reason, refused: reason !== '', issuer, subject, cache });
+return {
+on,
+tabs: names.map((name) => ({
+name,
+sel: name === tab ? 'true' : 'false',
+color: name === tab ? '#D4D4D4' : '#9D9D9D',
+go: () => this.setState({ tab: name }),
+})),
+goEvents: () => this.setState({ tab: 'events' }),
+events: [
+ev('12:10:04', 'minted', '', 'entra', 'entra:svc-checkout', 'cached'),
+ev('12:10:03', 'refused 403', 'scope orders.delete not in allow', 'okta', 'okta:jdoe', ''),
+ev('12:10:03', 'minted', '', 'entra', 'entra:svc-checkout', 'cached'),
+ev('12:10:01', 'minted', '', 'okta', 'okta:svc-reporting', 'fresh'),
+ev('12:09:58', 'refused 403', 'scope orders.read required', 'okta', 'okta:svc-crawler', ''),
+ev('12:09:57', 'minted', '', 'entra', 'entra:svc-checkout', 'cached'),
+ev('12:09:55', 'refused 401', 'token expired 12 s ago', 'entra', 'entra:svc-checkout', ''),
+ev('12:09:54', 'minted', '', 'okta', 'okta:svc-reporting', 'cached'),
+],
+};
+}
+}
+</script>
+</body>
+</html>
