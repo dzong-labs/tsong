@@ -231,17 +231,13 @@ fn a_failed_write_drops_only_unfinished_lines_and_never_runs_lines_together() ->
 }
 
 /// A writer that reports its first write, waits for its gate, then panics
-/// on the audit thread. `alive` is dropped as the thread unwinds.
-struct Dying {
-    gated: Gated,
-    alive: Sender<()>,
-}
+/// on the audit thread.
+struct Dying(Gated);
 
 impl Write for Dying {
     #[expect(clippy::panic, reason = "simulates a writer thread that dies")]
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.gated.write(bytes)?;
-        let _ = self.alive.send(());
+        self.0.write(bytes)?;
         panic!("the audit writer died");
     }
 
@@ -253,13 +249,9 @@ impl Write for Dying {
 #[test]
 fn a_writer_that_dies_drops_later_lines_and_close_counts_the_rest() -> TestResult {
     let (gated, entered) = Gated::new(false);
-    let (alive, died) = mpsc::channel();
-    let dying = Dying {
-        gated: gated.clone(),
-        alive,
-    };
     let dropped = Counter::<u64>::default();
-    let queued = Queued::spawn(dying, 16, dropped.clone(), WAIT)?;
+    // Room enough that the queue never fills, so only a dead writer drops.
+    let queued = Queued::spawn(Dying(gated.clone()), 1 << 20, dropped.clone(), WAIT)?;
     queued.record("first".into());
     entered.recv_timeout(WAIT)?;
     // Queued while the writer is held, so they are left when it dies.
@@ -267,18 +259,21 @@ fn a_writer_that_dies_drops_later_lines_and_close_counts_the_rest() -> TestResul
     queued.record("left 2".into());
     assert_eq!(dropped.get(), 0);
     gated.open();
-    // The write's one message, then the disconnect as the thread unwinds.
-    died.recv_timeout(WAIT)?;
+    // Until the writer is marked done, late lines queue; the first line
+    // after that is dropped.
+    let mut late = 0_u64;
     let deadline = Instant::now() + WAIT;
-    while died.recv_timeout(WAIT).is_ok() && Instant::now() < deadline {}
-    // The thread marks itself done just after the writer drops.
-    std::thread::sleep(Duration::from_millis(50));
-    queued.record("late".into());
+    while dropped.get() == 0 && Instant::now() < deadline {
+        queued.record("late".into());
+        late += 1;
+        std::thread::sleep(Duration::from_millis(1));
+    }
     assert_eq!(dropped.get(), 1, "a line after the writer died");
     let started = Instant::now();
     queued.close();
     assert!(started.elapsed() < WAIT, "close waited for a dead writer");
-    assert_eq!(dropped.get(), 3, "and the two it left queued");
+    // The two left queued and the late lines queued before it died.
+    assert_eq!(dropped.get(), 1 + 2 + (late - 1));
     assert_eq!(gated.lines()?, ["first"]);
     Ok(())
 }
