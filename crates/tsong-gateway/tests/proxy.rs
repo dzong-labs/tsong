@@ -245,7 +245,7 @@ async fn malformed_headers_and_other_schemes_are_refused() -> TestResult {
         assert_refused(&answer, "Bearer", body, &format!("{values:?}"));
     }
     assert!(h.exchanger.calls().is_empty());
-    assert!(h.anonymous.passed().is_empty());
+    assert_eq!(h.anonymous_total()?, 0);
     Ok(())
 }
 
@@ -276,38 +276,18 @@ async fn a_request_without_a_token_passes_through_unexchanged() -> TestResult {
         (h.metrics.cache_hits.get(), h.metrics.cache_misses.get()),
         (0, 0)
     );
-    let passed = h.anonymous.passed();
-    assert_eq!(passed.len(), 1);
-    let passed = passed.first().ok_or("nothing passed")?;
-    assert_eq!(passed.audience, "orders.test");
-    assert_eq!(passed.client, "10.1.2.3".parse::<std::net::IpAddr>()?);
-    assert_eq!(passed.status, 200);
-    assert_eq!(passed.context.request_id.as_deref(), Some("r-anon"));
+    assert_eq!(h.anonymous("orders", 200), 1);
+    assert_eq!(h.anonymous_total()?, 1);
     Ok(())
 }
 
 #[tokio::test]
-async fn an_anonymous_request_is_observed_with_the_status_it_got() -> TestResult {
+async fn an_anonymous_request_is_counted_with_the_status_it_got() -> TestResult {
     let h = closing_harness().await?;
     let answer = send(&h, get("orders.test", "/", None)?).await?;
     assert_eq!(answer.status, StatusCode::BAD_GATEWAY);
-    let statuses: Vec<u16> = h.anonymous.passed().iter().map(|p| p.status).collect();
-    assert_eq!(statuses, [502]);
-    Ok(())
-}
-
-#[tokio::test]
-async fn an_abandoned_anonymous_request_is_still_observed() -> TestResult {
-    let h = harness().await?;
-    let abandoned = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        send(&h, get("orders.test", "/stall", None)?),
-    )
-    .await;
-    assert!(abandoned.is_err(), "the downstream answered too soon");
-    let passed = h.anonymous.passed();
-    let statuses: Vec<u16> = passed.iter().map(|p| p.status).collect();
-    assert_eq!(statuses, [499]);
+    assert_eq!(h.anonymous("orders", 502), 1);
+    assert_eq!(h.anonymous_total()?, 1);
     Ok(())
 }
 
@@ -353,7 +333,7 @@ async fn an_access_token_in_the_query_is_refused_as_a_downstream_reads_it() -> T
         }
     }
     assert!(h.exchanger.calls().is_empty());
-    assert!(h.anonymous.passed().is_empty());
+    assert_eq!(h.anonymous_total()?, 0);
     for query in [
         "my_access_token=x",
         "access_token_x=1",
@@ -402,7 +382,7 @@ async fn a_bad_bearer_token_is_refused_not_passed_through() -> TestResult {
     let answer = send(&h, get("orders.test", "/", Some("unscoped"))?).await?;
     assert_eq!(answer.status, StatusCode::FORBIDDEN);
     assert_eq!(answer.header("x-echo"), None);
-    assert!(h.anonymous.passed().is_empty());
+    assert_eq!(h.anonymous_total()?, 0);
     Ok(())
 }
 
@@ -420,7 +400,7 @@ async fn the_bearer_scheme_is_case_insensitive() -> TestResult {
     }
     assert_eq!(h.exchanger.calls().len(), 1);
     assert_eq!(h.metrics.cache_hits.get(), 2);
-    assert!(h.anonymous.passed().is_empty());
+    assert_eq!(h.anonymous_total()?, 0);
     Ok(())
 }
 
@@ -533,13 +513,8 @@ async fn the_allow_lists_refuse_anonymous_requests_too() -> TestResult {
         let answer = send(&h, from(peer, request)?).await?;
         assert_eq!(answer.status, status, "{peer} {host}");
     }
-    let passed: Vec<String> = h
-        .anonymous
-        .passed()
-        .into_iter()
-        .map(|passed| passed.audience)
-        .collect();
-    assert_eq!(passed, ["builds.test"]);
+    assert_eq!(h.anonymous("builds", 200), 1);
+    assert_eq!(h.anonymous_total()?, 1);
     Ok(())
 }
 

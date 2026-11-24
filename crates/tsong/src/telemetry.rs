@@ -1,7 +1,6 @@
 //! What Tsong reports about itself: Prometheus metrics, kept for the life
-//! of the process, the audit lines written for each token exchange and
-//! each anonymous request, and the audit lines for JWKS fetches that fail
-//! and for the fetch that recovers.
+//! of the process, the audit line written for each token exchange, and the
+//! audit lines for JWKS fetches that fail and for the fetch that recovers.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -15,7 +14,7 @@ use serde_json::json;
 use std::time::Duration;
 use tsong_clock::Clock;
 use tsong_config::TrustedIssuer;
-use tsong_gateway::{AnonymousRequest, GatewayMetrics, RequestObserver};
+use tsong_gateway::GatewayMetrics;
 use tsong_issuer::{ExchangeEvent, ExchangeObserver, Issuer};
 use tsong_validate::{FetchFuture, JwksFetcher};
 
@@ -46,10 +45,6 @@ pub struct Metrics {
     pub gateway: Arc<GatewayMetrics>,
     /// Token exchanges, by outcome.
     pub exchanges: Family<OutcomeLabel, Counter>,
-    /// Gateway requests with no `Authorization` header that passed the
-    /// allow lists and the `access_token` query check, whatever the status
-    /// they got. Requests those checks refuse aren't counted here.
-    pub anonymous_requests: Counter,
     /// Audit lines dropped because the writer had fallen behind, or was
     /// still stuck at shutdown.
     pub audit_dropped: Counter,
@@ -101,12 +96,6 @@ impl Default for Metrics {
             "Config reloads that found a new revision, by outcome",
             reloads.clone(),
         );
-        let anonymous_requests = Counter::default();
-        registry.register(
-            "tsong_anonymous_requests",
-            "Gateway requests with no Authorization header that passed the allow lists and the access_token query check, whatever the status",
-            anonymous_requests.clone(),
-        );
         let audit_dropped = Counter::default();
         registry.register(
             "tsong_audit_lines_dropped",
@@ -135,7 +124,6 @@ impl Default for Metrics {
             registry,
             gateway,
             exchanges,
-            anonymous_requests,
             audit_dropped,
             jwks_failures,
             jwks_age,
@@ -156,12 +144,10 @@ impl Metrics {
     }
 }
 
-/// Writes one audit line per token exchange and per anonymous request,
-/// and counts each.
+/// Writes one audit line per token exchange and counts it.
 pub struct ExchangeAudit {
     pub audit: Arc<dyn Audit>,
     pub exchanges: Family<OutcomeLabel, Counter>,
-    pub anonymous_requests: Counter,
     pub clock: Arc<dyn Clock>,
 }
 
@@ -186,22 +172,6 @@ impl ExchangeObserver for ExchangeAudit {
             "scope": event.scope,
             "error_description": event.error_description,
             "duration_ms": event.duration.as_secs_f64() * 1000.0,
-        });
-        self.audit.record(&line.to_string());
-    }
-}
-
-impl RequestObserver for ExchangeAudit {
-    fn passed_anonymous(&self, request: &AnonymousRequest<'_>) {
-        self.anonymous_requests.inc();
-        let line = json!({
-            "event": "anonymous_request",
-            "at": self.clock.unix_seconds(),
-            "request_id": request.context.request_id,
-            "trace_id": request.context.trace_id,
-            "audience": request.audience,
-            "client": request.client.to_string(),
-            "status": request.status,
         });
         self.audit.record(&line.to_string());
     }

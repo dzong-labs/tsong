@@ -18,7 +18,6 @@ use tsong::telemetry::{
 };
 use tsong_clock::ManualClock;
 use tsong_config::{Config, ConfigError, TrustedIssuer};
-use tsong_gateway::{AnonymousRequest, RequestObserver};
 use tsong_issuer::{ExchangeContext, ExchangeEvent, ExchangeObserver};
 use tsong_validate::JwksFetcher;
 use tsong_validate::testkit::FakeFetcher;
@@ -47,7 +46,6 @@ fn each_exchange_writes_one_audit_line_and_is_counted() -> TestResult {
     let audit = ExchangeAudit {
         audit: lines.clone(),
         exchanges: metrics.exchanges.clone(),
-        anonymous_requests: metrics.anonymous_requests.clone(),
         clock: Arc::new(ManualClock::at(NOW)),
     };
     audit.exchanged(&event(None));
@@ -86,41 +84,6 @@ fn each_exchange_writes_one_audit_line_and_is_counted() -> TestResult {
             .get()
     };
     assert_eq!((count("issued"), count("invalid_scope")), (2, 1));
-    Ok(())
-}
-
-#[test]
-fn an_anonymous_request_writes_an_audit_line_and_is_counted() -> TestResult {
-    let lines = Arc::new(Recorded::default());
-    let metrics = Metrics::default();
-    let audit = ExchangeAudit {
-        audit: lines.clone(),
-        exchanges: metrics.exchanges.clone(),
-        anonymous_requests: metrics.anonymous_requests.clone(),
-        clock: Arc::new(ManualClock::at(NOW)),
-    };
-    audit.passed_anonymous(&AnonymousRequest {
-        audience: "orders.test",
-        client: "10.1.2.3".parse()?,
-        status: 502,
-        context: &event(None).context,
-    });
-    assert_eq!(
-        lines.parsed()?,
-        [json!({
-            "event": "anonymous_request",
-            "at": NOW,
-            "request_id": "r-1",
-            "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
-            "audience": "orders.test",
-            "client": "10.1.2.3",
-            "status": 502,
-        })]
-    );
-    assert_eq!(metrics.anonymous_requests.get(), 1);
-    let text = metrics.encode()?;
-    assert!(text.contains("tsong_anonymous_requests_total 1"), "{text}");
-    assert!(!text.contains("tsong_exchanges_total{"), "{text}");
     Ok(())
 }
 
@@ -306,6 +269,15 @@ fn the_metrics_encode_as_prometheus_text() -> TestResult {
         .inc();
     metrics
         .gateway
+        .anonymous_requests
+        .get_or_create(&tsong_gateway::RouteStatus {
+            route: route(),
+            status: 200,
+        })
+        .inc();
+    metrics.audit_dropped.inc();
+    metrics
+        .gateway
         .downstream_seconds
         .get_or_create(&tsong_gateway::RouteLabel { route: route() })
         .observe(0.01);
@@ -331,8 +303,10 @@ fn the_metrics_encode_as_prometheus_text() -> TestResult {
         "# TYPE tsong_cache_misses counter",
         "# TYPE tsong_cache_entries gauge",
         r#"tsong_gateway_requests_total{route="orders",status="200"} 1"#,
+        r#"tsong_anonymous_requests_total{route="orders",status="200"} 1"#,
         r#"tsong_downstream_seconds_count{route="orders"} 1"#,
         r#"tsong_exchanges_total{outcome="issued"} 1"#,
+        "tsong_audit_lines_dropped_total 1",
         r#"tsong_jwks_fetch_failures_total{issuer="https://okta.test"} 1"#,
         r#"tsong_config_reloads_total{outcome="applied"} 1"#,
     ] {

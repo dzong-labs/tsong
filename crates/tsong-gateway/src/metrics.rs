@@ -33,6 +33,11 @@ pub struct GatewayMetrics {
     pub cache_entries: Gauge,
     /// Requests answered, by route and status.
     pub requests: Family<RouteStatus, Counter>,
+    /// Requests with no `Authorization` header passed through without a
+    /// token, by route and the status they were answered with. Requests
+    /// refused before that, by the allow lists or the `access_token`
+    /// query check, aren't counted here.
+    pub anonymous_requests: Family<RouteStatus, Counter>,
     /// Seconds from sending a request downstream to receiving its response
     /// headers, by route.
     pub downstream_seconds: Family<RouteLabel, Histogram>,
@@ -45,6 +50,7 @@ impl Default for GatewayMetrics {
             cache_misses: Counter::default(),
             cache_entries: Gauge::default(),
             requests: Family::default(),
+            anonymous_requests: Family::default(),
             // 1ms to about 16s.
             downstream_seconds: Family::new_with_constructor(|| {
                 Histogram::new(exponential_buckets(0.001, 2.0, 15))
@@ -76,6 +82,11 @@ impl GatewayMetrics {
             "tsong_gateway_requests",
             "Gateway requests answered, by route and status",
             metrics.requests.clone(),
+        );
+        registry.register(
+            "tsong_anonymous_requests",
+            "Requests passed through without a token, by route and status",
+            metrics.anonymous_requests.clone(),
         );
         registry.register(
             "tsong_downstream_seconds",

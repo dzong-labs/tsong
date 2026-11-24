@@ -15,7 +15,6 @@ mod correlate;
 mod exchange;
 mod forward;
 mod metrics;
-mod observe;
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -36,7 +35,6 @@ pub use cache::{ExchangeCache, lifetime};
 pub use correlate::correlate;
 pub use exchange::{ExchangeFuture, Exchanger};
 pub use metrics::{GatewayMetrics, RouteLabel, RouteStatus};
-pub use observe::{AnonymousRequest, RequestObserver};
 
 /// How long the gateway waits to connect to a downstream.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -58,7 +56,6 @@ pub struct Gateway {
     /// One downstream client per read timeout in the config.
     clients: HashMap<Duration, reqwest::Client>,
     metrics: Arc<GatewayMetrics>,
-    observer: Arc<dyn RequestObserver>,
 }
 
 impl Gateway {
@@ -67,7 +64,6 @@ impl Gateway {
         exchanger: Arc<dyn Exchanger>,
         clock: Arc<dyn Clock>,
         metrics: Arc<GatewayMetrics>,
-        observer: Arc<dyn RequestObserver>,
     ) -> Result<Self, GatewayError> {
         let mut clients = HashMap::new();
         let timeouts = config
@@ -94,7 +90,6 @@ impl Gateway {
             ),
             clients,
             metrics,
-            observer,
         })
     }
 
@@ -148,16 +143,12 @@ impl Gateway {
         if has_access_token(request.uri().query()) {
             return unauthorized("a token in the query is not accepted", None);
         }
-        let (minted, mut anonymous) = match credential(request.headers()) {
-            Credential::None => {
-                let context = ExchangeContext::from_headers(request.headers());
-                let observed = Observed::new(&*self.observer, &host, client, context);
-                (None, Some(observed))
-            }
+        let minted = match credential(request.headers()) {
+            Credential::None => None,
             Credential::Bearer(token) => {
                 let context = ExchangeContext::from_headers(request.headers());
                 match self.cache.token(token, &host, &context).await {
-                    Ok(minted) => (Some(minted), None),
+                    Ok(minted) => Some(minted),
                     Err(error) => return exchange_failure(&error),
                 }
             }
@@ -169,11 +160,18 @@ impl Gateway {
                 return unauthorized("only the Bearer scheme is accepted", None);
             }
         };
+        let anonymous = minted.is_none();
         let response = self
             .send_downstream(route, request, minted.as_deref(), peer)
             .await;
-        if let Some(observed) = &mut anonymous {
-            observed.status = response.status().as_u16();
+        if anonymous {
+            self.metrics
+                .anonymous_requests
+                .get_or_create(&RouteStatus {
+                    route: route.name.clone(),
+                    status: response.status().as_u16(),
+                })
+                .inc();
         }
         response
     }
@@ -202,49 +200,6 @@ impl Gateway {
             })
             .observe(started.elapsed().as_secs_f64());
         response
-    }
-}
-
-/// The status an anonymous request is reported with when the caller went
-/// away before it was answered, as nginx logs it.
-const CLIENT_CLOSED_REQUEST: u16 = 499;
-
-/// An anonymous request, reported to the observer when dropped, so a
-/// request the caller abandons mid-flight is still reported.
-struct Observed<'a> {
-    observer: &'a dyn RequestObserver,
-    audience: &'a str,
-    client: IpAddr,
-    context: ExchangeContext,
-    /// The answer's status, or 499 until there is one.
-    status: u16,
-}
-
-impl<'a> Observed<'a> {
-    fn new(
-        observer: &'a dyn RequestObserver,
-        audience: &'a str,
-        client: IpAddr,
-        context: ExchangeContext,
-    ) -> Self {
-        Self {
-            observer,
-            audience,
-            client,
-            context,
-            status: CLIENT_CLOSED_REQUEST,
-        }
-    }
-}
-
-impl Drop for Observed<'_> {
-    fn drop(&mut self) {
-        self.observer.passed_anonymous(&AnonymousRequest {
-            audience: self.audience,
-            client: self.client,
-            status: self.status,
-            context: &self.context,
-        });
     }
 }
 

@@ -60,9 +60,9 @@ impl State {
     }
 
     /// Builds the state for `snapshot`, loading its signing keys. It counts
-    /// into `metrics`, audits each exchange and anonymous request to
-    /// `audit`, fetches keys with `fetcher`, reads its secrets through
-    /// `secrets`, and renews keys in the background while it lives.
+    /// into `metrics`, audits each exchange to `audit`, fetches keys with
+    /// `fetcher`, reads its secrets through `secrets`, and renews keys in
+    /// the background while it lives.
     pub async fn build_with(
         snapshot: Snapshot,
         clock: Arc<dyn Clock>,
@@ -89,23 +89,15 @@ impl State {
         let observer = ExchangeAudit {
             audit,
             exchanges: metrics.exchanges.clone(),
-            anonymous_requests: metrics.anonymous_requests.clone(),
             clock: clock.clone(),
         };
-        let observer = Arc::new(observer);
         let issuer = Issuer::new(config.clone(), keys, validator, clock.clone())
-            .with_observer(observer.clone());
+            .with_observer(Arc::new(observer));
         let issuer = Arc::new(issuer);
         let refresher = refresh
             .then(|| Refresher::spawn(issuer.clone(), metrics.jwks_age.clone(), REFRESH_TICK))
             .flatten();
-        let gateway = Gateway::new(
-            &config,
-            issuer.clone(),
-            clock,
-            metrics.gateway.clone(),
-            observer,
-        )?;
+        let gateway = Gateway::new(&config, issuer.clone(), clock, metrics.gateway.clone())?;
         let gateway = Arc::new(gateway);
         Ok(Self {
             revision: snapshot.revision,

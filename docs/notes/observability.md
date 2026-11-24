@@ -1,7 +1,7 @@
 ---
 title: Tsong reports health, metrics and an audit line per exchange
 type: note
-summary: Liveness and readiness on their own listener, Prometheus metrics on the admin listener, one JSON audit line per token exchange or request passed through without a token, and every request correlated by X-Request-Id and W3C traceparent.
+summary: Liveness and readiness on their own listener, Prometheus metrics on the admin listener, one JSON audit line per token exchange, and every request correlated by X-Request-Id and W3C traceparent.
 status: evolving
 created: 2026-11-16
 ---
@@ -12,7 +12,7 @@ Tsong reports four things about itself:
 
 - whether it is alive and ready
 - Prometheus metrics
-- one audit line per token exchange or request passed through without a token
+- one audit line per token exchange
 - a request ID and trace context on every gateway request
 
 This is item 9 of the [roadmap](../../ROADMAP.md); config loads are audited as described in [[config-source]].
@@ -43,7 +43,7 @@ The list is deployed in the bootstrap file, never loaded from the config, and ch
 | `tsong_gateway_requests_total` | `route`, `status` | Gateway answers. `route` is `-` when no route matched |
 | `tsong_downstream_seconds` | `route` | Time to a downstream's response headers, 1ms to about 16s |
 | `tsong_exchanges_total` | `outcome` | Token exchanges: `issued`, or the OAuth error code |
-| `tsong_anonymous_requests_total` | | Gateway requests with no `Authorization` header that passed the allow lists and the `access_token` query check, whatever the status they got, 499 included. Requests those checks refuse aren't counted here; `tsong_gateway_requests_total` counts them by status. They aren't exchanges |
+| `tsong_anonymous_requests_total` | `route`, `status` | Gateway requests with no `Authorization` header passed through without a token, by the status they were answered with: the downstream's, or the gateway's own when forwarding failed. Requests the allow lists or the `access_token` query check refuse aren't counted here, nor are requests the caller abandons before the response head; `tsong_gateway_requests_total` counts what was answered. They aren't exchanges and write no audit line |
 | `tsong_jwks_fetch_failures_total` | `issuer` | Failed JWKS fetches, by the trusted issuer's `iss` |
 | `tsong_jwks_age_seconds` | `issuer` | Seconds since the trusted issuer's keys were fetched, for the config being served. Past its `jwks_max_age`, its tokens are refused. An issuer whose keys were never fetched has no series |
 | `tsong_config_reloads_total` | `outcome` | Reloads that found a new revision: `applied`, `fetch_failed`, `invalid_config` or `build_failed` |
@@ -66,15 +66,9 @@ Each token exchange writes one JSON line to stdout. That covers every cache miss
 
 `iss` and `sub` are the subject token's, which identify the caller together. A refusal carries the OAuth error code as its `outcome` and its `error_description`. `iss` and `sub` are null when the token never validated. Tokens are never written.
 
-A gateway request with no `Authorization` header is passed through without a token ([roadmap](../../ROADMAP.md) item 33). It isn't an exchange, so it writes a line of its own once it is answered, with the route's host as its `audience`, the client address the allow lists admitted, which is the only identity an anonymous caller has, and the status: the downstream's, the gateway's own when forwarding failed, or 499 when the caller went away before the answer. The status comes from the response head, written before the body streams, so a body that fails partway still shows the head's status.
+The audit log is for exchanges. A gateway request with no `Authorization` header, passed through without a token ([roadmap](../../ROADMAP.md) item 33), writes no line; `tsong_anonymous_requests_total` counts it by route and the status in its response head. Nor does a request refused for its `Authorization` header or an `access_token` query parameter; the request metrics count it as a 401.
 
-```json
-{"event":"anonymous_request","at":1763251200,"request_id":"9f1c…","trace_id":"4bf92f35…","audience":"orders.example.com","client":"10.20.1.7","status":200}
-```
-
-A request refused for its `Authorization` header writes no line; the request metrics count it as a 401.
-
-The issuer reports each exchange to an `ExchangeObserver` (`crates/tsong-issuer/src/context.rs`), and the gateway reports each anonymous request to a `RequestObserver` (`crates/tsong-gateway/src/observe.rs`). `ExchangeAudit` in `crates/tsong/src/telemetry.rs` implements both: it writes each line and counts it.
+The issuer reports each exchange to an `ExchangeObserver` (`crates/tsong-issuer/src/context.rs`). `ExchangeAudit` in `crates/tsong/src/telemetry.rs` writes the line and counts the exchange.
 
 Each failed JWKS fetch writes a line, and so does the first fetch that succeeds after a failure. While an issuer is down, a line appears every `jwks_retry`.
 

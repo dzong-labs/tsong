@@ -18,9 +18,7 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 use tsong_clock::ManualClock;
 use tsong_config::Config;
-use tsong_gateway::{
-    AnonymousRequest, ExchangeFuture, Exchanger, Gateway, GatewayMetrics, RequestObserver,
-};
+use tsong_gateway::{ExchangeFuture, Exchanger, Gateway, GatewayMetrics, RouteStatus};
 use tsong_issuer::{ExchangeContext, ExchangeError, TokenResponse};
 
 /// What a test returns: nothing, or why it failed.
@@ -155,42 +153,6 @@ impl Exchanger for FakeExchanger {
     }
 }
 
-/// An anonymous request as the observer saw it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Passed {
-    pub audience: String,
-    pub client: std::net::IpAddr,
-    pub status: u16,
-    pub context: ExchangeContext,
-}
-
-/// An observer that records each anonymous request.
-#[derive(Default)]
-pub struct Anonymous(Mutex<Vec<Passed>>);
-
-impl Anonymous {
-    pub fn passed(&self) -> Vec<Passed> {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-    }
-}
-
-impl RequestObserver for Anonymous {
-    fn passed_anonymous(&self, request: &AnonymousRequest<'_>) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(Passed {
-                audience: request.audience.into(),
-                client: request.client,
-                status: request.status,
-                context: request.context.clone(),
-            });
-    }
-}
-
 /// The request a fake downstream received, as JSON: its method, path and
 /// query, headers (each name to its values) and body.
 async fn echo(request: Request) -> Response {
@@ -264,7 +226,40 @@ pub struct Harness {
     pub exchanger: Arc<FakeExchanger>,
     pub downstream: SocketAddr,
     pub metrics: Arc<GatewayMetrics>,
-    pub anonymous: Arc<Anonymous>,
+}
+
+impl Harness {
+    /// Anonymous requests counted for `route` with `status`.
+    pub fn anonymous(&self, route: &str, status: u16) -> u64 {
+        self.metrics
+            .anonymous_requests
+            .get_or_create(&RouteStatus {
+                route: route.into(),
+                status,
+            })
+            .get()
+    }
+
+    /// Every anonymous request counted, whatever its route and status.
+    pub fn anonymous_total(&self) -> TestResult<u64> {
+        let mut registry = prometheus_client::registry::Registry::default();
+        registry.register(
+            "anonymous",
+            "anonymous requests",
+            self.metrics.anonymous_requests.clone(),
+        );
+        let mut text = String::new();
+        prometheus_client::encoding::text::encode(&mut text, &registry)?;
+        let mut total = 0;
+        for line in text
+            .lines()
+            .filter(|line| line.starts_with("anonymous_total{"))
+        {
+            let count = line.rsplit(' ').next().ok_or("no count")?;
+            total += count.parse::<u64>()?;
+        }
+        Ok(total)
+    }
 }
 
 /// The config with every route forwarding to `downstream` over plain
@@ -291,20 +286,12 @@ pub fn harness_with(
 ) -> TestResult<Harness> {
     let clock = Arc::new(ManualClock::at(NOW));
     let metrics = Arc::new(GatewayMetrics::default());
-    let anonymous = Arc::new(Anonymous::default());
-    let gateway = Gateway::new(
-        config,
-        exchanger.clone(),
-        clock,
-        metrics.clone(),
-        anonymous.clone(),
-    )?;
+    let gateway = Gateway::new(config, exchanger.clone(), clock, metrics.clone())?;
     Ok(Harness {
         router: tsong_gateway::router(Arc::new(gateway)),
         exchanger,
         downstream,
         metrics,
-        anonymous,
     })
 }
 

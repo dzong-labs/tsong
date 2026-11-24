@@ -171,6 +171,13 @@ fn the_gateway_metrics_register_under_their_names() -> TestResult {
         })
         .inc();
     metrics
+        .anonymous_requests
+        .get_or_create(&RouteStatus {
+            route: route(),
+            status: 502,
+        })
+        .inc();
+    metrics
         .downstream_seconds
         .get_or_create(&RouteLabel { route: route() })
         .observe(0.002);
@@ -181,6 +188,7 @@ fn the_gateway_metrics_register_under_their_names() -> TestResult {
         "tsong_cache_misses_total 1",
         "tsong_cache_entries 3",
         r#"tsong_gateway_requests_total{route="orders",status="200"} 1"#,
+        r#"tsong_anonymous_requests_total{route="orders",status="502"} 1"#,
         r#"tsong_downstream_seconds_count{route="orders"} 1"#,
         r#"tsong_downstream_seconds_bucket{le="0.001",route="orders"} 0"#,
     ] {
