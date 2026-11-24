@@ -18,7 +18,7 @@ What Tsong has built and what comes next. The open items are the plan for the ne
 14. Minted-token policy per route: audiences and scopes the minted token carries, beyond the filters on the inbound token.
 15. Split route files: load routes from many files in the config folder, so one config file doesn't grow unbounded.
 16. Remote exchanger: an HTTP `Exchanger` for a gateway that runs apart from the issuer.
-17. Upgraded connections: WebSocket and other `Upgrade` requests through the gateway, which strips hop-by-hop headers until then.
+17. Upgraded connections: WebSocket and other `Upgrade` requests through the gateway, which strips hop-by-hop headers until then. Browsers can't set an `Authorization` header on a WebSocket or Server-Sent Events request, so clients often put the token in the query; this item would exchange a token in a refused query parameter and replace it, rather than refuse the request.
 18. `Forwarded`: read and send the RFC 7239 `Forwarded` header alongside `X-Forwarded-*`. Until then the gateway strips it.
 19. Git over HTTPS (withdrawn with item 7): a Git store in its own repository, item 32, would decide its transports.
 20. Git host file API (withdrawn with item 7): a store that reads a Git host's API is one of the stores item 32 allows.
