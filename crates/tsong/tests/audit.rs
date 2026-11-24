@@ -229,3 +229,56 @@ fn a_failed_write_drops_only_unfinished_lines_and_never_runs_lines_together() ->
     assert_eq!(gated.lines()?, ["first", "aaaa", "bb", "dddd"]);
     Ok(())
 }
+
+/// A writer that reports its first write, waits for its gate, then panics
+/// on the audit thread. `alive` is dropped as the thread unwinds.
+struct Dying {
+    gated: Gated,
+    alive: Sender<()>,
+}
+
+impl Write for Dying {
+    #[expect(clippy::panic, reason = "simulates a writer thread that dies")]
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.gated.write(bytes)?;
+        let _ = self.alive.send(());
+        panic!("the audit writer died");
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_writer_that_dies_drops_later_lines_and_close_counts_the_rest() -> TestResult {
+    let (gated, entered) = Gated::new(false);
+    let (alive, died) = mpsc::channel();
+    let dying = Dying {
+        gated: gated.clone(),
+        alive,
+    };
+    let dropped = Counter::<u64>::default();
+    let queued = Queued::spawn(dying, 16, dropped.clone(), WAIT)?;
+    queued.record("first".into());
+    entered.recv_timeout(WAIT)?;
+    // Queued while the writer is held, so they are left when it dies.
+    queued.record("left 1".into());
+    queued.record("left 2".into());
+    assert_eq!(dropped.get(), 0);
+    gated.open();
+    // The write's one message, then the disconnect as the thread unwinds.
+    died.recv_timeout(WAIT)?;
+    let deadline = Instant::now() + WAIT;
+    while died.recv_timeout(WAIT).is_ok() && Instant::now() < deadline {}
+    // The thread marks itself done just after the writer drops.
+    std::thread::sleep(Duration::from_millis(50));
+    queued.record("late".into());
+    assert_eq!(dropped.get(), 1, "a line after the writer died");
+    let started = Instant::now();
+    queued.close();
+    assert!(started.elapsed() < WAIT, "close waited for a dead writer");
+    assert_eq!(dropped.get(), 3, "and the two it left queued");
+    assert_eq!(gated.lines()?, ["first"]);
+    Ok(())
+}
