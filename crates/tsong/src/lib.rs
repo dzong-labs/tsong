@@ -42,7 +42,7 @@ const AUDIT_QUEUE: usize = 65_536;
 
 /// How long shutdown waits for the audit writer to finish before leaving
 /// it behind.
-const AUDIT_SHUTDOWN: std::time::Duration = std::time::Duration::from_secs(5);
+const AUDIT_SHUTDOWN: Duration = Duration::from_secs(5);
 
 /// The flag that makes `check` fail on warnings.
 pub const DENY_WARNINGS: &str = "--deny-warnings";
@@ -114,21 +114,31 @@ pub async fn serve_until(
     let bootstrap = Bootstrap::load(path)?;
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let metrics = Arc::new(Metrics::default());
+    audited(&metrics, |audit| {
+        serve_with(bootstrap, clock, metrics.clone(), audit, shutdown)
+    })
+    .await
+}
+
+/// Runs `serve` with an audit writer on stdout, then closes the writer
+/// off the async workers, since closing waits on its thread.
+async fn audited<F: Future<Output = Result<(), Error>>>(
+    metrics: &Metrics,
+    serve: impl FnOnce(Arc<dyn Audit>) -> F,
+) -> Result<(), Error> {
     let queued = Arc::new(Queued::spawn(
         std::io::stdout(),
         AUDIT_QUEUE,
         metrics.audit_dropped.clone(),
         AUDIT_SHUTDOWN,
     )?);
-    let audit: Arc<dyn Audit> = queued.clone();
-    let served = serve_with(bootstrap, clock, metrics, audit, shutdown).await;
-    // Closing waits on the writer thread, so it runs off the async workers.
+    let served = serve(queued.clone()).await;
     let _ = tokio::task::spawn_blocking(move || queued.close()).await;
     served
 }
 
-/// Serves Tsong for `bootstrap`, auditing to `audit`, as `serve_until`
-/// describes.
+/// Serves Tsong for `bootstrap` until `shutdown` completes, auditing to
+/// `audit`: the listeners and servers `serve_until` names.
 async fn serve_with(
     bootstrap: Bootstrap,
     clock: Arc<dyn Clock>,

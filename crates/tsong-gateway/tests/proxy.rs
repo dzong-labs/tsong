@@ -245,7 +245,7 @@ async fn malformed_headers_and_other_schemes_are_refused() -> TestResult {
         assert_refused(&answer, "Bearer", body, &format!("{values:?}"));
     }
     assert!(h.exchanger.calls().is_empty());
-    assert_eq!(h.anonymous_total()?, 0);
+    assert_eq!(h.anonymous("orders", 401), 0);
     Ok(())
 }
 
@@ -277,17 +277,15 @@ async fn a_request_without_a_token_passes_through_unexchanged() -> TestResult {
         (0, 0)
     );
     assert_eq!(h.anonymous("orders", 200), 1);
-    assert_eq!(h.anonymous_total()?, 1);
     Ok(())
 }
 
 #[tokio::test]
 async fn an_anonymous_request_is_counted_with_the_status_it_got() -> TestResult {
-    let h = closing_harness().await?;
+    let (_refusing, h) = refusing_harness()?;
     let answer = send(&h, get("orders.test", "/", None)?).await?;
     assert_eq!(answer.status, StatusCode::BAD_GATEWAY);
     assert_eq!(h.anonymous("orders", 502), 1);
-    assert_eq!(h.anonymous_total()?, 1);
     Ok(())
 }
 
@@ -338,7 +336,7 @@ async fn an_access_token_in_the_query_is_refused_as_a_downstream_reads_it() -> T
         }
     }
     assert!(h.exchanger.calls().is_empty());
-    assert_eq!(h.anonymous_total()?, 0);
+    assert_eq!(h.anonymous("orders", 401), 0);
     for query in [
         "my_access_token=x",
         "access_token_x=1",
@@ -389,7 +387,10 @@ async fn a_bad_bearer_token_is_refused_not_passed_through() -> TestResult {
     let answer = send(&h, get("orders.test", "/", Some("unscoped"))?).await?;
     assert_eq!(answer.status, StatusCode::FORBIDDEN);
     assert_eq!(answer.header("x-echo"), None);
-    assert_eq!(h.anonymous_total()?, 0);
+    assert_eq!(
+        (h.anonymous("orders", 401), h.anonymous("orders", 403)),
+        (0, 0)
+    );
     Ok(())
 }
 
@@ -407,7 +408,7 @@ async fn the_bearer_scheme_is_case_insensitive() -> TestResult {
     }
     assert_eq!(h.exchanger.calls().len(), 1);
     assert_eq!(h.metrics.cache_hits.get(), 2);
-    assert_eq!(h.anonymous_total()?, 0);
+    assert_eq!(h.anonymous("orders", 200), 0);
     Ok(())
 }
 
@@ -521,7 +522,10 @@ async fn the_allow_lists_refuse_anonymous_requests_too() -> TestResult {
         assert_eq!(answer.status, status, "{peer} {host}");
     }
     assert_eq!(h.anonymous("builds", 200), 1);
-    assert_eq!(h.anonymous_total()?, 1);
+    assert_eq!(
+        (h.anonymous("orders", 403), h.anonymous("builds", 403)),
+        (0, 0)
+    );
     Ok(())
 }
 
@@ -553,16 +557,9 @@ async fn a_trusted_proxy_with_a_malformed_chain_is_a_400() -> TestResult {
 
 #[tokio::test]
 async fn an_unreachable_downstream_is_a_502() -> TestResult {
-    // A socket bound but never listening holds its port, so every
-    // connection to it is refused and no other test can take the port.
-    let refusing = tokio::net::TcpSocket::new_v4()?;
-    refusing.bind("127.0.0.1:0".parse()?)?;
-    let address = refusing.local_addr()?;
-    let config = config_to(&format!("http://{address}"))?;
-    let h = harness_with(&config, Arc::new(FakeExchanger::default()), address)?;
+    let (_refusing, h) = refusing_harness()?;
     let answer = send(&h, get("orders.test", "/", Some("alice"))?).await?;
     assert_eq!(answer.status, StatusCode::BAD_GATEWAY);
-    drop(refusing);
     Ok(())
 }
 

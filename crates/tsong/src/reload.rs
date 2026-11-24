@@ -3,7 +3,6 @@
 //! revision, or fails, is audited and counted.
 
 use std::collections::BTreeMap;
-use std::io::Write;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::Serialize;
@@ -24,36 +23,9 @@ pub const INVALID_CONFIG: &str = "invalid_config";
 /// file.
 pub const BUILD_FAILED: &str = "build_failed";
 
+pub use crate::audit::{Audit, Lines};
 use crate::state::{State, listen_addresses};
 use crate::telemetry::{Metrics, OutcomeLabel, RevisionLabel};
-
-/// Where audit lines go: stdout in production, collected by the platform.
-pub trait Audit: Send + Sync {
-    fn record(&self, line: &str);
-}
-
-/// Writes each audit line, and a newline, to a writer as it is recorded.
-/// A line that can't be written is dropped; auditing never stops a
-/// reload. Production writes through [`crate::audit::Queued`] instead.
-pub struct Lines<W>(Mutex<W>);
-
-impl<W> Lines<W> {
-    pub fn new(writer: W) -> Self {
-        Self(Mutex::new(writer))
-    }
-
-    /// The writer, with everything written to it.
-    pub fn into_inner(self) -> W {
-        self.0.into_inner().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-impl<W: Write + Send> Audit for Lines<W> {
-    fn record(&self, line: &str) {
-        let mut writer = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        let _ = writeln!(writer, "{line}").and_then(|()| writer.flush());
-    }
-}
 
 /// What `GET /status` reports.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]

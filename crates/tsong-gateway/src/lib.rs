@@ -12,9 +12,11 @@
 
 mod cache;
 mod correlate;
+mod credential;
 mod exchange;
 mod forward;
 mod metrics;
+mod query;
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -24,12 +26,15 @@ use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use ipnet::IpNet;
 use tsong_clock::Clock;
 use tsong_config::{Config, Route, RouteTable, allowed, client_ip};
 use tsong_issuer::{ExchangeContext, ExchangeError};
+
+use credential::{Credential, credential};
+use query::has_access_token;
 
 pub use cache::{ExchangeCache, lifetime};
 pub use correlate::correlate;
@@ -160,18 +165,12 @@ impl Gateway {
                 return unauthorized("only the Bearer scheme is accepted", None);
             }
         };
-        let anonymous = minted.is_none();
         let response = self
             .send_downstream(route, request, minted.as_deref(), peer)
             .await;
-        if anonymous {
+        if minted.is_none() {
             self.metrics
-                .anonymous_requests
-                .get_or_create(&RouteStatus {
-                    route: route.name.clone(),
-                    status: response.status().as_u16(),
-                })
-                .inc();
+                .record_anonymous(&route.name, response.status());
         }
         response
     }
@@ -226,165 +225,6 @@ async fn proxy(
     request: Request,
 ) -> Response {
     gateway.handle(peer, request).await
-}
-
-/// What a request's `Authorization` header carries.
-#[derive(Debug, PartialEq, Eq)]
-enum Credential<'a> {
-    /// No `Authorization` header.
-    None,
-    /// The token in the request's one `Authorization: Bearer` header.
-    Bearer(&'a str),
-    /// More than one `Authorization` header.
-    Repeated,
-    /// An empty or unreadable header, a scheme that isn't an RFC 9110
-    /// token, or a `Bearer` header without exactly one token.
-    Malformed,
-    /// One header with a scheme other than `Bearer`, which Tsong can't
-    /// vouch for and never forwards.
-    Unsupported,
-}
-
-/// The credential in `headers`. Scheme names compare case-insensitively
-/// (RFC 9110 section 11.1).
-fn credential(headers: &HeaderMap) -> Credential<'_> {
-    let mut values = headers.get_all(header::AUTHORIZATION).iter();
-    let Some(value) = values.next() else {
-        return Credential::None;
-    };
-    if values.next().is_some() {
-        return Credential::Repeated;
-    }
-    let Ok(value) = value.to_str() else {
-        return Credential::Malformed;
-    };
-    let (scheme, token) = value.split_once(' ').unwrap_or((value, ""));
-    if !is_token(scheme) {
-        return Credential::Malformed;
-    }
-    if !scheme.eq_ignore_ascii_case("bearer") {
-        return Credential::Unsupported;
-    }
-    match token.trim_matches(' ') {
-        token if is_visible(token) => Credential::Bearer(token),
-        _ => Credential::Malformed,
-    }
-}
-
-/// Whether `text` is one or more visible ASCII characters, 0x21 to 0x7E,
-/// so a token holds no whitespace. Opaque tokens use more than RFC 6750's
-/// `b64token` characters, such as `:`, `%` and `,`.
-fn is_visible(text: &str) -> bool {
-    !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_graphic())
-}
-
-/// Whether `query` has an `access_token` parameter (RFC 6750 section
-/// 2.3) as some downstream could read it: pairs split on `&` or `;`, and
-/// the name percent-decoded, `+` read as a space.
-fn has_access_token(query: Option<&str>) -> bool {
-    query.is_some_and(|query| {
-        query.split(['&', ';']).any(|pair| {
-            let name = pair.split_once('=').map_or(pair, |(name, _)| name);
-            reads_as_access_token(&percent_decoded(name))
-        })
-    })
-}
-
-/// Whether some downstream framework could read the decoded parameter
-/// name `name` as `access_token`. Rather than follow each framework's
-/// parser, the name is normalized generously: cut at the first NUL and
-/// the first `[`, trimmed, case-folded, and stripped of everything but
-/// ASCII letters and digits. It counts when that leaves `accesstoken`,
-/// cut or not, so `access_token[]`, `access-token`, `ACCESS.TOKEN` and
-/// look-alikes with `ſ` or the Kelvin sign all count.
-fn reads_as_access_token(name: &[u8]) -> bool {
-    let cut = name
-        .iter()
-        .position(|&byte| byte == 0 || byte == b'[')
-        .and_then(|end| name.get(..end))
-        .unwrap_or(name);
-    normalized(cut) == ACCESS_TOKEN || normalized(name) == ACCESS_TOKEN
-}
-
-/// `name` trimmed, case-folded and stripped to ASCII letters and digits.
-fn normalized(name: &[u8]) -> String {
-    String::from_utf8_lossy(name)
-        .trim()
-        .chars()
-        .flat_map(|c| match c {
-            // The non-ASCII characters whose Unicode simple case folding
-            // is an ASCII letter: the long s and the Kelvin sign.
-            '\u{017F}' => 's'.to_lowercase(),
-            '\u{212A}' => 'k'.to_lowercase(),
-            c => c.to_lowercase(),
-        })
-        .filter(char::is_ascii_alphanumeric)
-        .collect()
-}
-
-/// `access_token`, as [`normalized`] leaves it.
-const ACCESS_TOKEN: &str = "accesstoken";
-
-/// `text` percent-decoded as some downstream could read it: `%XX`, and
-/// IIS's `%uXXXX` as UTF-8, with `+` read as a space. Decoding repeats, up
-/// to three passes, until the text stops changing, so a double-encoded
-/// `%255F` decodes too. A malformed escape is kept as it is.
-fn percent_decoded(text: &str) -> Vec<u8> {
-    let mut decoded = text.as_bytes().to_vec();
-    for _ in 0..3 {
-        let next = decoded_once(&decoded);
-        if next == decoded {
-            break;
-        }
-        decoded = next;
-    }
-    decoded
-}
-
-/// `bytes` with one pass of escapes decoded.
-fn decoded_once(bytes: &[u8]) -> Vec<u8> {
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while let Some(&byte) = bytes.get(index) {
-        let rest = bytes.get(index + 1..).unwrap_or_default();
-        let wide = rest
-            .split_first()
-            .filter(|&(&u, _)| byte == b'%' && u.eq_ignore_ascii_case(&b'u'))
-            .and_then(|(_, digits)| hex(digits.get(..4)?))
-            .and_then(char::from_u32);
-        let narrow = (byte == b'%')
-            .then(|| hex(rest.get(..2)?))
-            .flatten()
-            .and_then(|value| u8::try_from(value).ok());
-        if let Some(c) = wide {
-            let mut utf8 = [0; 4];
-            decoded.extend_from_slice(c.encode_utf8(&mut utf8).as_bytes());
-            index += 6;
-        } else if let Some(value) = narrow {
-            decoded.push(value);
-            index += 3;
-        } else {
-            decoded.push(if byte == b'+' { b' ' } else { byte });
-            index += 1;
-        }
-    }
-    decoded
-}
-
-/// The value of `digits`, when they are all hex digits.
-fn hex(digits: &[u8]) -> Option<u32> {
-    if !digits.iter().all(u8::is_ascii_hexdigit) {
-        return None;
-    }
-    u32::from_str_radix(std::str::from_utf8(digits).ok()?, 16).ok()
-}
-
-/// Whether `text` is an RFC 9110 token, as an auth scheme must be.
-fn is_token(text: &str) -> bool {
-    !text.is_empty()
-        && text
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
 }
 
 /// The response to an exchange that failed.

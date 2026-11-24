@@ -13,7 +13,7 @@ Tsong is an API gateway and RFC 8693 token exchange issuer that centralizes acce
 4. Tsong exchanges the token for a new one signed by Tsong. The new token's subject names the issuer, such as `entra:<id>`, so subjects from different providers never collide.
 5. Tsong forwards the request to the route's service with the new token in place of the original. The original token never reaches the service.
 
-A request with no `Authorization` header skips steps 3 and 4: once the IP allow lists pass, Tsong passes it through without a token and counts it in `tsong_anonymous_requests_total`. It writes no audit line. A token that fails is refused, never passed through as anonymous, and any scheme other than `Bearer` is refused with a 401. So is a request with an `access_token` query parameter. Tsong doesn't inspect bodies or cookies, so a service must not accept a token from either.
+A request with no `Authorization` header skips steps 3 and 4 and is passed through without a token, while a token that fails, any other scheme and an `access_token` in the query are refused, never passed through; bodies and cookies aren't inspected. The [gateway plan](docs/notes/gateway-plan.md) has the rules.
 
 Tsong caches the new token until shortly before it expires, so a repeat request with the same token skips steps 3 and 4.
 

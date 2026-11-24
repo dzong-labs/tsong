@@ -29,7 +29,7 @@ The [threat model](threat-model.md) names the five sources of input, how far eac
 The design applies Saltzer and Schroeder's principles, and the requirements follow from them:
 
 - **Fail-safe defaults** (requirements 1, 5): an empty IP allow list denies every client, an empty policy `allow` is a load error, expired issuer keys refuse their tokens, and a config that fails stops Tsong from starting.
-- **Complete mediation** (1, 3): every request passes the allow lists, and every request that sends a token passes full token validation and route policy. A token that fails is refused, never passed through as anonymous. The token endpoint enforces the same policy as the gateway, so it offers no way around it.
+- **Complete mediation** (1, 3): every request passes the allow lists, and every request that sends a token passes full token validation and route policy. A token that fails is refused, never passed through as anonymous, by the rules in [gateway-plan](gateway-plan.md). The token endpoint enforces the same policy as the gateway, so it offers no way around it.
 - **Separation of privilege** (1): a request with a token needs an admitted address, a valid signature from a trusted issuer, and an accepted audience and scope. Defeating one isn't enough.
 - **Least privilege** (3): a minted token holds only what the route, the caller and the request all allow. The container runs as an unprivileged user on a read-only filesystem, and CI workflow tokens are read-only by default.
 - **Least common mechanism** (4): each trusted issuer has its own key cache and subject prefix, so issuers share no trust.

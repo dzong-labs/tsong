@@ -8,8 +8,8 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use prometheus_client::metrics::counter::Counter;
+use tsong::audit::Audit;
 use tsong::audit::Queued;
-use tsong::reload::Audit;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 

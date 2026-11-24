@@ -1,6 +1,7 @@
 //! The gateway's Prometheus metrics. They outlive any one config, so a
 //! reload keeps counting into the same series.
 
+use axum::http::StatusCode;
 use prometheus_client::encoding::EncodeLabelSet;
 use prometheus_client::metrics::counter::Counter;
 use prometheus_client::metrics::family::Family;
@@ -60,6 +61,17 @@ impl Default for GatewayMetrics {
 }
 
 impl GatewayMetrics {
+    /// Counts a request passed through without a token to `route`,
+    /// answered with `status`.
+    pub fn record_anonymous(&self, route: &str, status: StatusCode) {
+        self.anonymous_requests
+            .get_or_create(&RouteStatus {
+                route: route.to_owned(),
+                status: status.as_u16(),
+            })
+            .inc();
+    }
+
     /// New metrics, registered in `registry` under `tsong_`.
     pub fn register(registry: &mut Registry) -> Self {
         let metrics = Self::default();

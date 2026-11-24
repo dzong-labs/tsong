@@ -200,25 +200,16 @@ pub async fn downstream() -> TestResult<SocketAddr> {
     Ok(address)
 }
 
-/// Starts a downstream that accepts each connection and closes it at once,
-/// so every request to it fails, and returns its address.
-pub async fn closing_downstream() -> TestResult<SocketAddr> {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-    let address = listener.local_addr()?;
-    tokio::spawn(async move {
-        while let Ok((connection, _)) = listener.accept().await {
-            drop(connection);
-        }
-    });
-    Ok(address)
-}
-
-/// The harness with every route forwarding to a downstream that closes
-/// each connection.
-pub async fn closing_harness() -> TestResult<Harness> {
-    let address = closing_downstream().await?;
+/// The harness with every route forwarding to a socket that is bound but
+/// never listening, so every connection is refused. The socket holds its
+/// port while the caller keeps it, so no other test can take the port.
+pub fn refusing_harness() -> TestResult<(tokio::net::TcpSocket, Harness)> {
+    let refusing = tokio::net::TcpSocket::new_v4()?;
+    refusing.bind("127.0.0.1:0".parse()?)?;
+    let address = refusing.local_addr()?;
     let config = config_to(&format!("http://{address}"))?;
-    harness_with(&config, Arc::new(FakeExchanger::default()), address)
+    let harness = harness_with(&config, Arc::new(FakeExchanger::default()), address)?;
+    Ok((refusing, harness))
 }
 
 pub struct Harness {
@@ -238,27 +229,6 @@ impl Harness {
                 status,
             })
             .get()
-    }
-
-    /// Every anonymous request counted, whatever its route and status.
-    pub fn anonymous_total(&self) -> TestResult<u64> {
-        let mut registry = prometheus_client::registry::Registry::default();
-        registry.register(
-            "anonymous",
-            "anonymous requests",
-            self.metrics.anonymous_requests.clone(),
-        );
-        let mut text = String::new();
-        prometheus_client::encoding::text::encode(&mut text, &registry)?;
-        let mut total = 0;
-        for line in text
-            .lines()
-            .filter(|line| line.starts_with("anonymous_total{"))
-        {
-            let count = line.rsplit(' ').next().ok_or("no count")?;
-            total += count.parse::<u64>()?;
-        }
-        Ok(total)
     }
 }
 
