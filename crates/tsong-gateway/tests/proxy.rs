@@ -232,10 +232,6 @@ async fn malformed_headers_and_other_schemes_are_refused() -> TestResult {
         (&["Bearer\talice"], MALFORMED),
         (&["Bearer al\tice"], MALFORMED),
         (&["Bearer alice\t"], MALFORMED),
-        (&["Bearer al!ce"], MALFORMED),
-        (&["Bearer =alice"], MALFORMED),
-        (&["Bearer alice=x"], MALFORMED),
-        (&["Bearer ==="], MALFORMED),
         (&["Bearer alice", "Bearer bob"], REPEATED),
         (&["Bearer alice", "Basic YWxpY2U="], REPEATED),
         (&["", ""], REPEATED),
@@ -337,6 +333,14 @@ async fn an_access_token_in_the_query_is_refused_as_a_downstream_reads_it() -> T
         "access_token[]=alice",
         "access_token[x]=alice",
         "access_token%5B%5D=alice",
+        "+access_token=alice",
+        "%20access_token=alice",
+        "access_token%00x=alice",
+        "acce%C5%BF%C5%BF_token=alice",
+        "ACCE%C5%BFS_TO%E2%84%AAEN=alice",
+        "access_to%E2%84%AAen=alice",
+        "access-token=alice",
+        "access__token=alice",
     ] {
         for token in [None, Some("alice")] {
             let answer = send(&h, get("orders.test", &format!("/?{query}"), token)?).await?;
@@ -358,8 +362,6 @@ async fn an_access_token_in_the_query_is_refused_as_a_downstream_reads_it() -> T
         "access%5token=x",
         "access_tokens=x",
         "xaccess_token=x",
-        "access-token=x",
-        "access__token=x",
     ] {
         let answer = send(&h, get("orders.test", &format!("/?{query}"), None)?).await?;
         assert_eq!(answer.status, StatusCode::OK, "{query}");
@@ -368,15 +370,22 @@ async fn an_access_token_in_the_query_is_refused_as_a_downstream_reads_it() -> T
 }
 
 #[tokio::test]
-async fn a_bearer_token_with_every_b64token_character_is_exchanged() -> TestResult {
+async fn a_bearer_token_of_visible_ascii_is_exchanged() -> TestResult {
     let h = harness().await?;
-    let token = "AZaz09-._~+/==";
-    let answer = send(&h, get("orders.test", "/", Some(token))?).await?;
-    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
-    assert_eq!(
-        h.exchanger.calls(),
-        [(token.to_owned(), "orders.test".to_owned())]
-    );
+    let tokens = [
+        "AZaz09-._~+/==",
+        "glpat:x%2Cy,z",
+        "al!ce=x",
+        "=alice",
+        "===",
+        r##"!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"##,
+    ];
+    for token in tokens {
+        let answer = send(&h, get("orders.test", "/", Some(token))?).await?;
+        assert_eq!(answer.status, StatusCode::OK, "{token}: {}", answer.body);
+    }
+    let exchanged: Vec<String> = h.exchanger.calls().into_iter().map(|(t, _)| t).collect();
+    assert_eq!(exchanged, tokens);
     Ok(())
 }
 

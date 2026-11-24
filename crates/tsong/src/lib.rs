@@ -4,6 +4,7 @@
 
 pub mod admin;
 pub mod allow;
+pub mod audit;
 pub mod reload;
 pub mod state;
 pub mod telemetry;
@@ -26,7 +27,8 @@ use tsong_keys::{KeyError, KeySet};
 use tsong_secrets::Secrets;
 use tsong_validate::{HttpFetcher, JwksFetcher};
 
-use crate::reload::{Audit, Queued, Reloader};
+use crate::audit::Queued;
+use crate::reload::{Audit, Reloader};
 use crate::state::State;
 use crate::telemetry::{Metrics, ObservedFetcher};
 
@@ -34,8 +36,13 @@ use crate::telemetry::{Metrics, ObservedFetcher};
 pub const USAGE: &str =
     "usage: tsong check [--deny-warnings] <config.toml> | tsong serve <bootstrap.toml>";
 
-/// The audit lines held for the writer thread before new ones are dropped.
+/// The audit lines held for the writer thread before new ones are
+/// dropped.
 const AUDIT_QUEUE: usize = 65_536;
+
+/// How long shutdown waits for the audit writer to finish before leaving
+/// it behind.
+const AUDIT_SHUTDOWN: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The flag that makes `check` fail on warnings.
 pub const DENY_WARNINGS: &str = "--deny-warnings";
@@ -112,6 +119,7 @@ pub async fn serve_until(
         std::io::stdout(),
         AUDIT_QUEUE,
         metrics.audit_dropped.clone(),
+        AUDIT_SHUTDOWN,
     )?);
     let fetcher: Arc<dyn JwksFetcher> = Arc::new(ObservedFetcher::new(
         HttpFetcher::default(),

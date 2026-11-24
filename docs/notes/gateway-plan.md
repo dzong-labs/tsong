@@ -92,8 +92,8 @@ The cache is read-through. A miss exchanges the token and stores the result, and
 - The gateway-wide `allow` list applies first, then the route's `allow`.
 - The token comes from `Authorization: Bearer`. The scheme name compares without regard to case (RFC 9110 section 11.1).
 - A request with no `Authorization` header is anonymous. It is passed through without a token, never exchanged and never cached. Once it is answered, it writes an `anonymous_request` audit line with the client address and the status, and counts in `tsong_anonymous_requests_total`.
-- A bearer token must be an RFC 6750 `b64token`: letters, digits, `-`, `.`, `_`, `~`, `+` and `/`, then any `=`. Anything else, such as a tab inside the token, is malformed.
-- A request whose query has an `access_token` parameter (RFC 6750 section 2.3) is refused with a 401, whatever its `Authorization` header, so a token in the URL never reaches a downstream. The name is matched as downstream frameworks read it: pairs split on `&` or `;`, the name percent-decoded with `+` as a space, compared without regard to ASCII case, `.`, space and `[` read as `_`, and anything from `[` on ignored, so `ACCESS_TOKEN`, `access.token` and `access_token[]` all count. This changes the bearer path too: a bearer request whose URL carries `access_token` used to be forwarded and is now refused. Bodies and cookies are not inspected: a downstream must not accept a token from either.
+- A bearer token must be one or more visible ASCII characters, 0x21 to 0x7E. Whitespace inside it, such as a tab, is malformed. That is wider than RFC 6750's `b64token`, because opaque tokens use characters such as `:`, `%` and `,`.
+- A request whose query has an `access_token` parameter (RFC 6750 section 2.3) is refused with a 401, whatever its `Authorization` header, so a token in the URL never reaches a downstream. Rather than follow each framework's parser, the name is normalized generously: pairs split on `&` or `;`, the name percent-decoded with `+` as a space, cut at the first NUL and the first `[`, trimmed, case-folded (Unicode simple folding, so `ſ` reads as `s` and the Kelvin sign as `k`), and stripped of everything but ASCII letters and digits. It counts when that leaves `accesstoken`, with or without the cut, so `ACCESS_TOKEN`, `access.token`, `access-token`, ` access_token` and `access_token[]` all count, while `access_tokens` and `my_access_token` don't. This changes the bearer path too: a bearer request whose URL carries `access_token` used to be forwarded and is now refused. Bodies and cookies are not inspected: a downstream must not accept a token from either.
 - A bearer token that fails is refused, never downgraded to anonymous. Any other scheme, such as `Basic`, `Digest`, `NTLM`, `Negotiate` or `DPoP`, is refused, so no `Authorization` credential Tsong hasn't vouched for reaches a downstream.
 - The `Authorization` header is replaced with the minted token. The inbound token is never forwarded.
 - Hop-by-hop headers are stripped, as RFC 9110 section 7.6.1 requires of an intermediary.
@@ -111,7 +111,7 @@ The gateway fails closed:
 | Client IP not allowed | 403 |
 | An `access_token` query parameter | 401 with `WWW-Authenticate: Bearer` |
 | More than one `Authorization` header | 401 with `WWW-Authenticate: Bearer` |
-| Malformed `Authorization`: empty, or `Bearer` without exactly one `b64token` | 401 with `WWW-Authenticate: Bearer` |
+| Malformed `Authorization`: empty, or `Bearer` without exactly one token of visible ASCII | 401 with `WWW-Authenticate: Bearer` |
 | A scheme other than `Bearer` | 401 with `WWW-Authenticate: Bearer` |
 | Inbound token invalid | 401 with `WWW-Authenticate: Bearer error="invalid_token"` |
 | Audience or scope not allowed for the route | 403 |

@@ -50,7 +50,8 @@ pub struct Metrics {
     /// allow lists and the `access_token` query check, whatever the status
     /// they got. Requests those checks refuse aren't counted here.
     pub anonymous_requests: Counter,
-    /// Audit lines dropped because the writer had fallen behind.
+    /// Audit lines dropped because the writer had fallen behind, or was
+    /// still stuck at shutdown.
     pub audit_dropped: Counter,
     /// Failed JWKS fetches, by trusted issuer.
     pub jwks_failures: Family<IssuerLabel, Counter>,

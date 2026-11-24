@@ -311,24 +311,21 @@ fn credential(headers: &HeaderMap) -> Credential<'_> {
         return Credential::Unsupported;
     }
     match token.trim_matches(' ') {
-        token if is_b64token(token) => Credential::Bearer(token),
+        token if is_visible(token) => Credential::Bearer(token),
         _ => Credential::Malformed,
     }
 }
 
-/// Whether `text` is an RFC 6750 `b64token`: one or more of ALPHA, DIGIT,
-/// `-`, `.`, `_`, `~`, `+` and `/`, then any number of `=`.
-fn is_b64token(text: &str) -> bool {
-    let body = text.trim_end_matches('=');
-    !body.is_empty()
-        && body
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"-._~+/".contains(&byte))
+/// Whether `text` is one or more visible ASCII characters, 0x21 to 0x7E,
+/// so a token holds no whitespace. Opaque tokens use more than RFC 6750's
+/// `b64token` characters, such as `:`, `%` and `,`.
+fn is_visible(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_graphic())
 }
 
 /// Whether `query` has an `access_token` parameter (RFC 6750 section
-/// 2.3) as a downstream could read it: pairs split on `&` or `;`, and the
-/// name percent-decoded, `+` read as a space.
+/// 2.3) as some downstream could read it: pairs split on `&` or `;`, and
+/// the name percent-decoded, `+` read as a space.
 fn has_access_token(query: Option<&str>) -> bool {
     query.is_some_and(|query| {
         query.split(['&', ';']).any(|pair| {
@@ -338,31 +335,40 @@ fn has_access_token(query: Option<&str>) -> bool {
     })
 }
 
-/// Whether a downstream framework could read the decoded parameter name
-/// `name` as `access_token`: compared without regard to ASCII case, with
-/// `.`, space and `[` read as `_` as PHP renames them, and with or without
-/// anything from the first `[` on, so `access_token[]` counts.
+/// Whether some downstream framework could read the decoded parameter
+/// name `name` as `access_token`. Rather than follow each framework's
+/// parser, the name is normalized generously: cut at the first NUL and
+/// the first `[`, trimmed, case-folded, and stripped of everything but
+/// ASCII letters and digits. It counts when that leaves `accesstoken`,
+/// cut or not, so `access_token[]`, `access-token`, `ACCESS.TOKEN` and
+/// look-alikes with `ſ` or the Kelvin sign all count.
 fn reads_as_access_token(name: &[u8]) -> bool {
-    let matches = |name: &[u8]| {
-        name.len() == ACCESS_TOKEN.len()
-            && name.iter().zip(ACCESS_TOKEN).all(|(&byte, &expected)| {
-                let byte = match byte {
-                    b'.' | b' ' | b'[' => b'_',
-                    byte => byte.to_ascii_lowercase(),
-                };
-                byte == expected
-            })
-    };
-    let base = name
+    let cut = name
         .iter()
-        .position(|&byte| byte == b'[')
-        .and_then(|bracket| name.get(..bracket))
+        .position(|&byte| byte == 0 || byte == b'[')
+        .and_then(|end| name.get(..end))
         .unwrap_or(name);
-    matches(name) || matches(base)
+    normalized(cut) == ACCESS_TOKEN || normalized(name) == ACCESS_TOKEN
 }
 
-/// The query parameter RFC 6750 section 2.3 carries a token in.
-const ACCESS_TOKEN: &[u8] = b"access_token";
+/// `name` trimmed, case-folded and stripped to ASCII letters and digits.
+fn normalized(name: &[u8]) -> String {
+    String::from_utf8_lossy(name)
+        .trim()
+        .chars()
+        .flat_map(|c| match c {
+            // The non-ASCII characters whose Unicode simple case folding
+            // is an ASCII letter: the long s and the Kelvin sign.
+            '\u{017F}' => 's'.to_lowercase(),
+            '\u{212A}' => 'k'.to_lowercase(),
+            c => c.to_lowercase(),
+        })
+        .filter(char::is_ascii_alphanumeric)
+        .collect()
+}
+
+/// `access_token`, as [`normalized`] leaves it.
+const ACCESS_TOKEN: &str = "accesstoken";
 
 /// `text` with each `%XX` escape decoded and `+` read as a space, as
 /// `application/x-www-form-urlencoded` reads a name. A malformed escape is

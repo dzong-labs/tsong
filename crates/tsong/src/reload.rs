@@ -4,11 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::thread::JoinHandle;
-
-use prometheus_client::metrics::counter::Counter;
 
 use serde::Serialize;
 use serde_json::json;
@@ -38,7 +34,7 @@ pub trait Audit: Send + Sync {
 
 /// Writes each audit line, and a newline, to a writer as it is recorded.
 /// A line that can't be written is dropped; auditing never stops a
-/// reload. Production writes through [`Queued`] instead.
+/// reload. Production writes through [`crate::audit::Queued`] instead.
 pub struct Lines<W>(Mutex<W>);
 
 impl<W> Lines<W> {
@@ -56,67 +52,6 @@ impl<W: Write + Send> Audit for Lines<W> {
     fn record(&self, line: &str) {
         let mut writer = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         let _ = writeln!(writer, "{line}").and_then(|()| writer.flush());
-    }
-}
-
-/// Audit lines written by a thread of their own, so recording one never
-/// blocks the caller: `record` queues the line, and a full queue drops it
-/// and counts the drop. Lines keep the order they were recorded in.
-/// Dropping it writes what is queued before returning.
-pub struct Queued {
-    sender: Option<SyncSender<String>>,
-    dropped: Counter,
-    writer: Option<JoinHandle<()>>,
-}
-
-impl Queued {
-    /// Starts the thread that writes to `writer`, holding up to `capacity`
-    /// lines and counting each line it drops in `dropped`.
-    pub fn spawn<W: Write + Send + 'static>(
-        mut writer: W,
-        capacity: usize,
-        dropped: Counter,
-    ) -> std::io::Result<Self> {
-        let (sender, receiver) = mpsc::sync_channel::<String>(capacity);
-        let handle = std::thread::Builder::new()
-            .name("audit".into())
-            .spawn(move || {
-                while let Ok(line) = receiver.recv() {
-                    let _ = writeln!(writer, "{line}");
-                    // Flush once the queue is empty, not after every line.
-                    while let Ok(line) = receiver.try_recv() {
-                        let _ = writeln!(writer, "{line}");
-                    }
-                    let _ = writer.flush();
-                }
-            })?;
-        Ok(Self {
-            sender: Some(sender),
-            dropped,
-            writer: Some(handle),
-        })
-    }
-}
-
-impl Audit for Queued {
-    fn record(&self, line: &str) {
-        let sent = self
-            .sender
-            .as_ref()
-            .is_some_and(|sender| sender.try_send(line.to_owned()).is_ok());
-        if !sent {
-            self.dropped.inc();
-        }
-    }
-}
-
-impl Drop for Queued {
-    fn drop(&mut self) {
-        // Closing the channel ends the thread once the queue is written.
-        drop(self.sender.take());
-        if let Some(writer) = self.writer.take() {
-            let _ = writer.join();
-        }
     }
 }
 
