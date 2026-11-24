@@ -77,7 +77,7 @@ fn lines_are_written_in_order_by_their_own_thread() -> TestResult {
     for n in 0..10 {
         queued.record(format!("{n}"));
     }
-    drop(queued);
+    queued.close();
     let expected: Vec<String> = (0..10).map(|n| n.to_string()).collect();
     assert_eq!(writer.lines()?, expected);
     assert_eq!(dropped.get(), 0);
@@ -96,7 +96,7 @@ fn a_full_queue_drops_and_counts_without_blocking() -> TestResult {
     }
     assert_eq!(dropped.get(), 3);
     writer.open();
-    drop(queued);
+    queued.close();
     assert_eq!(writer.lines()?, ["first", "0", "1"]);
     Ok(())
 }
@@ -157,5 +157,75 @@ fn lines_whose_write_fails_are_counted_once() -> TestResult {
     queued.record("three".into());
     queued.close();
     assert_eq!(dropped.get(), 3);
+    Ok(())
+}
+
+#[test]
+fn dropping_never_waits_for_a_stuck_writer() -> TestResult {
+    let (writer, entered) = Gated::new(false);
+    let dropped = Counter::<u64>::default();
+    let queued = Queued::spawn(writer, 4, dropped.clone(), WAIT)?;
+    queued.record("first".into());
+    entered.recv_timeout(WAIT)?;
+    let started = Instant::now();
+    drop(queued);
+    assert!(started.elapsed() < WAIT, "dropping waited for the writer");
+    assert_eq!(dropped.get(), 0);
+    Ok(())
+}
+
+/// A writer that waits for its gate on the first write, takes only the
+/// first `partial` bytes of the second, fails the third, and takes
+/// everything after that.
+struct Flaky {
+    gated: Gated,
+    partial: usize,
+    calls: usize,
+}
+
+impl Write for Flaky {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.calls += 1;
+        match self.calls {
+            2 => {
+                let taken = bytes.get(..self.partial).unwrap_or(bytes);
+                self.gated.write(taken)
+            }
+            3 => Err(std::io::ErrorKind::BrokenPipe.into()),
+            _ => self.gated.write(bytes),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_failed_write_drops_only_unfinished_lines_and_never_runs_lines_together() -> TestResult {
+    let (gated, entered) = Gated::new(false);
+    let dropped = Counter::<u64>::default();
+    let flaky = Flaky {
+        gated: gated.clone(),
+        partial: "aaaa\nbb".len(),
+        calls: 0,
+    };
+    let queued = Queued::spawn(flaky, 16, dropped.clone(), WAIT)?;
+    queued.record("first".into());
+    entered.recv_timeout(WAIT)?;
+    // These wait together while the first write is held, so they go as one
+    // batch, which the writer cuts off inside "bbbb".
+    for line in ["aaaa", "bbbb", "cccc"] {
+        queued.record(line.into());
+    }
+    gated.open();
+    let deadline = Instant::now() + WAIT;
+    while dropped.get() < 2 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    queued.record("dddd".into());
+    queued.close();
+    assert_eq!(dropped.get(), 2, "bbbb and cccc");
+    assert_eq!(gated.lines()?, ["first", "aaaa", "bb", "dddd"]);
     Ok(())
 }

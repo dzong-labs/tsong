@@ -242,9 +242,11 @@ async fn sigterm_stops_the_server() -> TestResult {
     assert!(killed.success());
     let output = tokio::time::timeout(Duration::from_secs(10), child.wait_with_output()).await??;
     assert!(output.status.success(), "{output:?}");
-    // Audit lines come first on stdout; the last line is the report.
+    // Stdout carries audit lines only: serve prints no report there.
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(stdout.lines().last(), Some("stopped"), "{stdout}");
+    for line in stdout.lines() {
+        serde_json::from_str::<serde_json::Value>(line)?;
+    }
     Ok(())
 }
 

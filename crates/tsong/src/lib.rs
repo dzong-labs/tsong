@@ -59,7 +59,8 @@ pub enum Error {
 }
 
 /// Runs the command for its arguments, without the program name, and
-/// returns what to print.
+/// returns what to print on stdout. `serve` returns nothing: its stdout
+/// carries only audit lines, and a stuck audit writer may still hold it.
 pub async fn run(args: impl IntoIterator<Item = String>) -> Result<String, Error> {
     let args: Vec<_> = args.into_iter().collect();
     match args.as_slice() {
@@ -69,7 +70,7 @@ pub async fn run(args: impl IntoIterator<Item = String>) -> Result<String, Error
         }
         [command, path] if command == "serve" => {
             serve_until(Path::new(path), shutdown_signal()).await?;
-            Ok("stopped".into())
+            Ok(String::new())
         }
         _ => Err(Error::Usage),
     }

@@ -17,7 +17,7 @@ A replica that is stopping must leave the load balancer's rotation before its li
 1. `GET /health/ready` starts answering 503. `GET /health/live` keeps answering 200.
 2. Tsong keeps serving for `health.drain`, `"00:00:05"` (5 seconds) by default.
 3. The listeners stop accepting connections. Requests in flight finish, and idle keep-alive connections close.
-4. The process exits with status 0 and prints `stopped`.
+4. The process exits with status 0. It prints nothing more: stdout carries only audit lines.
 
 A second signal during the drain ends it at once. Without a `[health]` listener there is no drain, and the listeners stop at once. A request or stream that outlives the runtime's stop timeout is cut when the runtime kills the process.
 

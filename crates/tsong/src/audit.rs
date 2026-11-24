@@ -4,7 +4,7 @@
 //! docs/notes/observability.md.
 
 use std::collections::VecDeque;
-use std::io::{BufWriter, Write};
+use std::io::Write;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -80,7 +80,7 @@ impl Drop for Done<'_> {
 
 /// Audit lines written by a thread of their own through a bounded queue.
 /// A line is dropped and counted when the queue is full, when its write
-/// fails, or when it is recorded after `close`.
+/// fails, or when it is recorded after closing or after the writer ended.
 pub struct Queued {
     shared: Arc<Shared>,
     capacity: usize,
@@ -89,8 +89,9 @@ pub struct Queued {
 }
 
 impl Queued {
-    /// Starts the thread that writes to `writer` through a buffer, flushing
-    /// once per batch: whatever was queued when it last looked.
+    /// Starts the thread that writes to `writer`, one batch at a time:
+    /// whatever was queued when it last looked, written as one buffer and
+    /// flushed once.
     pub fn spawn<W: Write + Send + 'static>(
         writer: W,
         capacity: usize,
@@ -116,30 +117,37 @@ impl Queued {
     }
 
     /// Writes what is queued and stops the writer, waiting at most the
-    /// shutdown deadline. A writer still stuck then is left behind, and
-    /// the lines still queued are discarded and counted as dropped. It
-    /// blocks, so call it outside async code.
+    /// shutdown deadline. A writer still stuck then is left behind. Either
+    /// way, lines still queued, such as those a writer that ended early
+    /// left, are discarded and counted as dropped. It blocks, so call it
+    /// outside async code.
     pub fn close(&self) {
-        let mut queue = self.shared.queue();
-        queue.closed = true;
+        let mut queue = self.signal_close();
         let Some(writer) = queue.writer.take() else {
             return;
         };
-        self.shared.ready.notify_all();
-        let (mut queue, waited) = self
+        let waited;
+        (queue, waited) = self
             .shared
             .finished
             .wait_timeout_while(queue, self.shutdown, |queue| !queue.done)
             .unwrap_or_else(PoisonError::into_inner);
-        if waited.timed_out() {
-            // Cleared under the lock, so a writer that comes unstuck can't
-            // write lines counted here.
-            count(&self.dropped, queue.lines.len());
-            queue.lines.clear();
-        } else {
-            drop(queue);
+        // Cleared under the lock, so a writer that comes unstuck can't write
+        // lines counted here.
+        count(&self.dropped, queue.lines.len());
+        queue.lines.clear();
+        drop(queue);
+        if !waited.timed_out() {
             let _ = writer.join();
         }
+    }
+
+    /// Stops taking lines and tells the writer to finish, without waiting.
+    fn signal_close(&self) -> MutexGuard<'_, Queue> {
+        let mut queue = self.shared.queue();
+        queue.closed = true;
+        self.shared.ready.notify_all();
+        queue
     }
 }
 
@@ -148,13 +156,19 @@ fn count(counter: &Counter, lines: usize) {
     counter.inc_by(u64::try_from(lines).unwrap_or(u64::MAX));
 }
 
-/// Writes batches as they arrive until the queue is closed and empty. A
-/// batch whose write or flush fails, such as on a closed stdout or a full
-/// disk, is counted as dropped, and the buffer is discarded so it isn't
-/// counted twice.
-fn write_lines<W: Write>(shared: &Shared, writer: W, dropped: &Counter) {
-    let mut writer = BufWriter::new(writer);
+/// Writes batches as they arrive until the queue is closed and empty.
+///
+/// Each line is atomic on the stream: a write that fails, such as on a
+/// closed stdout or a full disk, counts as dropped only the lines it
+/// didn't finish, and if it stopped mid-line, the next batch starts with a
+/// newline, so a reader sees a broken line rather than two lines run
+/// together. A flush that fails drops nothing more: the writer took every
+/// line.
+fn write_lines<W: Write>(shared: &Shared, mut writer: W, dropped: &Counter) {
     let mut batch = VecDeque::new();
+    let mut bytes = Vec::new();
+    let mut ends = Vec::new();
+    let mut mid_line = false;
     loop {
         {
             let mut queue = shared.queue();
@@ -169,26 +183,50 @@ fn write_lines<W: Write>(shared: &Shared, writer: W, dropped: &Counter) {
             }
             std::mem::swap(&mut queue.lines, &mut batch);
         }
-        let written = batch
-            .iter()
-            .try_for_each(|line| {
-                writer.write_all(line.as_bytes())?;
-                writer.write_all(b"\n")
-            })
-            .and_then(|()| writer.flush());
-        if written.is_err() {
-            count(dropped, batch.len());
-            let (inner, _unwritten) = writer.into_parts();
-            writer = BufWriter::new(inner);
+        bytes.clear();
+        ends.clear();
+        if mid_line {
+            bytes.push(b'\n');
         }
-        batch.clear();
+        let start = bytes.len();
+        for line in batch.drain(..) {
+            bytes.extend_from_slice(line.as_bytes());
+            bytes.push(b'\n');
+            ends.push(bytes.len());
+        }
+        let (written, failed) = write_some(&mut writer, &bytes);
+        if failed {
+            let finished = ends.iter().filter(|&&end| end <= written).count();
+            count(dropped, ends.len().saturating_sub(finished));
+            if written >= start {
+                mid_line = !ends.contains(&written) && written != start;
+            }
+        } else {
+            mid_line = false;
+            let _ = writer.flush();
+        }
     }
+}
+
+/// Writes as much of `bytes` as `writer` takes, and returns how many bytes
+/// it took and whether a write failed before the end.
+fn write_some<W: Write>(writer: &mut W, bytes: &[u8]) -> (usize, bool) {
+    let mut written = 0;
+    while let Some(rest) = bytes.get(written..).filter(|rest| !rest.is_empty()) {
+        match writer.write(rest) {
+            Ok(0) => return (written, true),
+            Ok(taken) => written += taken,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => return (written, true),
+        }
+    }
+    (written, false)
 }
 
 impl Audit for Queued {
     fn record(&self, line: String) {
         let mut queue = self.shared.queue();
-        if queue.closed || queue.lines.len() >= self.capacity {
+        if queue.closed || queue.done || queue.lines.len() >= self.capacity {
             drop(queue);
             self.dropped.inc();
             return;
@@ -203,7 +241,10 @@ impl Audit for Queued {
 }
 
 impl Drop for Queued {
+    /// Signals the writer to finish what is queued, without waiting for
+    /// it: dropping must never block. Call [`Queued::close`] off the async
+    /// workers to wait and count what a stuck writer left.
     fn drop(&mut self) {
-        self.close();
+        drop(self.signal_close());
     }
 }
