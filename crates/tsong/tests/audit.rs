@@ -119,12 +119,11 @@ fn shutdown_leaves_a_stuck_writer_behind_and_counts_what_it_never_wrote() -> Tes
     let started = Instant::now();
     queued.close();
     assert!(started.elapsed() < WAIT, "shutdown waited too long");
-    assert_eq!(dropped.get(), 3, "the queued lines and the one mid-write");
+    assert_eq!(dropped.get(), 2, "the queued lines, not the one mid-write");
     queued.record("late".into());
-    assert_eq!(dropped.get(), 4, "a line after closing is dropped");
+    assert_eq!(dropped.get(), 3, "a line after closing is dropped");
 
-    // Unstuck, the writer finishes its write, but the queue was cleared and
-    // it counts nothing more.
+    // Unstuck, the writer finishes the line it held, but nothing queued.
     writer.open();
     let deadline = Instant::now() + WAIT;
     while writer.lines()?.is_empty() && Instant::now() < deadline {
@@ -132,7 +131,7 @@ fn shutdown_leaves_a_stuck_writer_behind_and_counts_what_it_never_wrote() -> Tes
     }
     assert_eq!(writer.lines()?, ["first"]);
     drop(queued);
-    assert_eq!(dropped.get(), 4);
+    assert_eq!(dropped.get(), 3);
     Ok(())
 }
 

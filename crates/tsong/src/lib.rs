@@ -56,6 +56,8 @@ pub enum Error {
     Warnings(Warnings),
     #[error("serving: {0}")]
     Io(#[from] std::io::Error),
+    #[error("starting the audit writer: {0}")]
+    Audit(std::io::Error),
 }
 
 /// Runs the command for its arguments, without the program name, and
@@ -121,12 +123,15 @@ async fn audited<F: Future<Output = Result<(), Error>>>(
     settings: &AuditWriter,
     serve: impl FnOnce(Arc<dyn Audit>) -> F,
 ) -> Result<(), Error> {
-    let queued = Arc::new(Queued::spawn(
-        std::io::stdout(),
-        settings.queue,
-        metrics.audit_dropped.clone(),
-        settings.shutdown,
-    )?);
+    let queued = Arc::new(
+        Queued::spawn(
+            std::io::stdout(),
+            settings.queue,
+            metrics.audit_dropped.clone(),
+            settings.shutdown,
+        )
+        .map_err(Error::Audit)?,
+    );
     let served = serve(queued.clone()).await;
     let _ = tokio::task::spawn_blocking(move || queued.close()).await;
     served

@@ -48,9 +48,6 @@ struct Queue {
     /// The lines of the batch being written, taken off `lines` but not yet
     /// written. They count against the capacity.
     writing: usize,
-    /// Set when `close` gave up on a stuck writer and counted its lines,
-    /// so the writer counts no more.
-    abandoned: bool,
     /// Set by `close`: no more lines are taken.
     closed: bool,
     /// Set when the writer thread ends.
@@ -123,10 +120,10 @@ impl Queued {
     }
 
     /// Writes what is queued and stops the writer, waiting at most the
-    /// shutdown deadline. A writer still stuck then is left behind. Either
-    /// way, lines still queued or being written, such as those a stuck
-    /// writer holds or one that ended early lost, are discarded and counted
-    /// as dropped. It blocks, so call it
+    /// shutdown deadline. A writer still stuck then is left behind, and
+    /// the batch it holds may still appear. Lines still queued are
+    /// discarded and counted as dropped, and so is the batch a writer that
+    /// ended early lost. It blocks, so call it
     /// outside async code.
     pub fn close(&self) {
         let mut queue = self.signal_close();
@@ -141,13 +138,14 @@ impl Queued {
             .unwrap_or_else(PoisonError::into_inner);
         // Cleared under the lock, so a writer that comes unstuck can't write
         // lines counted here.
-        // A batch still being written counts too: a stuck writer holds it,
-        // and a writer that ended early lost it. A stuck writer counts
-        // nothing more if it ever finishes.
-        let unwritten = queue.lines.len().saturating_add(queue.writing);
+        // A writer that ended early lost the batch it was writing, so that
+        // counts too. A stuck writer may still write its batch, so that
+        // doesn't, and the writer counts what it fails to write.
+        let mut unwritten = queue.lines.len();
+        if !waited.timed_out() {
+            unwritten = unwritten.saturating_add(queue.writing);
+        }
         queue.lines.clear();
-        queue.writing = 0;
-        queue.abandoned = true;
         count(&self.dropped, unwritten);
         drop(queue);
         if !waited.timed_out() {
@@ -209,16 +207,10 @@ fn write_lines<W: Write>(shared: &Shared, mut writer: W, dropped: &Counter) {
             ends.push(bytes.len());
         }
         let (written, failed) = write_some(&mut writer, &bytes);
-        let abandoned = {
-            let mut queue = shared.queue();
-            queue.writing = 0;
-            queue.abandoned
-        };
+        shared.queue().writing = 0;
         if failed {
-            if !abandoned {
-                let finished = ends.iter().filter(|&&end| end <= written).count();
-                count(dropped, ends.len().saturating_sub(finished));
-            }
+            let finished = ends.iter().filter(|&&end| end <= written).count();
+            count(dropped, ends.len().saturating_sub(finished));
             if written >= start {
                 mid_line = !ends.contains(&written) && written != start;
             }
@@ -226,8 +218,19 @@ fn write_lines<W: Write>(shared: &Shared, mut writer: W, dropped: &Counter) {
             mid_line = false;
             let _ = writer.flush();
         }
+        // A burst's buffer isn't kept for the quiet that follows.
+        bytes.clear();
+        bytes.shrink_to(KEPT_BUFFER);
+        ends.clear();
+        ends.shrink_to(KEPT_LINES);
     }
 }
+
+/// The batch buffer the writer keeps between batches, in bytes.
+const KEPT_BUFFER: usize = 64 * 1024;
+
+/// The line ends the writer keeps room for between batches.
+const KEPT_LINES: usize = 1024;
 
 /// Writes as much of `bytes` as `writer` takes, and returns how many bytes
 /// it took and whether a write failed before the end.

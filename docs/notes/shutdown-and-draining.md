@@ -17,7 +17,8 @@ A replica that is stopping must leave the load balancer's rotation before its li
 1. `GET /health/ready` starts answering 503. `GET /health/live` keeps answering 200.
 2. Tsong keeps serving for `health.drain`, `"00:00:05"` (5 seconds) by default.
 3. The listeners stop accepting connections. Requests in flight finish, and idle keep-alive connections close.
-4. The process exits with status 0. It prints nothing more: stdout carries only audit lines.
+4. The audit writer writes the lines still queued, waiting at most `audit.shutdown`, `"00:00:05"` by default, from the bootstrap file ([[observability]]).
+5. The process exits with status 0. It prints nothing more: stdout carries only audit lines.
 
 A second signal during the drain ends it at once. Without a `[health]` listener there is no drain, and the listeners stop at once. A request or stream that outlives the runtime's stop timeout is cut when the runtime kills the process.
 
@@ -32,7 +33,7 @@ So point the load balancer's health check at `/health/ready`. Both endpoints are
 ## Settings that must line up
 
 - `health.drain` must last at least the health check's interval times its unhealthy threshold, plus a margin. With a 10-second interval and a threshold of 2, a 5-second drain ends before the load balancer has noticed. A 25-second drain, `"00:00:25"`, covers it.
-- The runtime's stop timeout must exceed `health.drain`, or the runtime kills Tsong mid-drain. `deploy/podman/run.sh` stops with a 15-second timeout against the stub's 5-second drain.
+- The runtime's stop timeout, such as Kubernetes' termination grace period, must exceed `health.drain` plus `audit.shutdown`, with time for requests in flight to finish, or the runtime kills Tsong mid-drain or before its audit lines are written. `deploy/podman/run.sh` stops with a 15-second timeout against the stub's 5-second drain.
 - Where the orchestrator deregisters first, its deregistration delay covers the in-flight requests. The drain then only guards against a stop that skipped deregistration.
 
 ## The two endpoints

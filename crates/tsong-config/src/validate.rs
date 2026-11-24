@@ -20,6 +20,24 @@ pub const RESERVED_CLAIMS: [&str; 11] = [
 /// its `scope`, after the route's scope policy and narrowing.
 const SCOPE_CLAIMS: [&str; 2] = ["scope", "scp"];
 
+/// Whether the normalized header name `name` is one the gateway reads,
+/// sets or strips itself, so refusing it would refuse every request or
+/// clash with the gateway's own handling: `Authorization`,
+/// `Proxy-Authorization`, `Host`, the correlation headers, and the
+/// forwarding headers.
+fn is_gateway_header(name: &str) -> bool {
+    matches!(
+        name,
+        "authorization"
+            | "proxyauthorization"
+            | "host"
+            | "xrequestid"
+            | "traceparent"
+            | "tracestate"
+            | "forwarded"
+    ) || name.starts_with("xforwarded")
+}
+
 /// Whether `text` is an RFC 9110 token, as a header name must be.
 fn is_header_name(text: &str) -> bool {
     !text.is_empty()
@@ -101,9 +119,9 @@ impl Config {
                 problems.push(format!(
                     "gateway.refused_headers has \"{name}\", which has no letters or digits"
                 ));
-            } else if normalized == "authorization" || normalized == "proxyauthorization" {
+            } else if is_gateway_header(&normalized) {
                 problems.push(format!(
-                    "gateway.refused_headers may not hold {name}, which the gateway reads itself"
+                    "gateway.refused_headers may not hold {name}, which the gateway reads, sets or strips itself"
                 ));
             }
         }

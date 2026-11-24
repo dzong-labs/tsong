@@ -2196,19 +2196,39 @@ fn credential_names_that_would_turn_the_check_off_or_never_match_are_refused() -
         ),
         (
             "refused_headers = [\"Authorization\"]",
-            "gateway.refused_headers may not hold Authorization, which the gateway reads itself",
+            "gateway.refused_headers may not hold Authorization, which the gateway reads, sets or strips itself",
         ),
         (
             "refused_headers = [\"proxy-authorization\"]",
-            "gateway.refused_headers may not hold proxy-authorization, which the gateway reads itself",
+            "gateway.refused_headers may not hold proxy-authorization, which the gateway reads, sets or strips itself",
         ),
         (
             "refused_headers = [\"Proxy_Authorization\"]",
-            "gateway.refused_headers may not hold Proxy_Authorization, which the gateway reads itself",
+            "gateway.refused_headers may not hold Proxy_Authorization, which the gateway reads, sets or strips itself",
         ),
         (
             "refused_headers = [\"AUTHORIZATION\"]",
-            "gateway.refused_headers may not hold AUTHORIZATION, which the gateway reads itself",
+            "gateway.refused_headers may not hold AUTHORIZATION, which the gateway reads, sets or strips itself",
+        ),
+        (
+            "refused_headers = [\"host\"]",
+            "gateway.refused_headers may not hold host, which the gateway reads, sets or strips itself",
+        ),
+        (
+            "refused_headers = [\"X_Request_Id\"]",
+            "gateway.refused_headers may not hold X_Request_Id, which the gateway reads, sets or strips itself",
+        ),
+        (
+            "refused_headers = [\"traceparent\"]",
+            "gateway.refused_headers may not hold traceparent, which the gateway reads, sets or strips itself",
+        ),
+        (
+            "refused_headers = [\"Forwarded\"]",
+            "gateway.refused_headers may not hold Forwarded, which the gateway reads, sets or strips itself",
+        ),
+        (
+            "refused_headers = [\"X-Forwarded-Port\"]",
+            "gateway.refused_headers may not hold X-Forwarded-Port, which the gateway reads, sets or strips itself",
         ),
         (
             "refused_headers = [\"--\"]",

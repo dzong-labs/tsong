@@ -96,6 +96,34 @@ async fn hop_by_hop_and_forwarding_headers_do_not_pass() -> TestResult {
 }
 
 #[tokio::test]
+async fn underscored_spellings_of_stripped_headers_do_not_pass() -> TestResult {
+    let h = harness().await?;
+    let spoofed = [
+        "x_forwarded_for",
+        "X_Forwarded_Host",
+        "x_forwarded_proto",
+        "X-Forwarded_For",
+        "proxy_authorization",
+        "Proxy_Connection",
+        "keep_alive",
+        "transfer_encoding",
+    ];
+    let mut builder = Request::get("/").header("host", "orders.test");
+    for name in spoofed {
+        builder = builder.header(name, "spoofed");
+    }
+    let answer = send(&h, from(CLIENT, builder.body(Body::empty())?)?).await?;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+    for name in spoofed {
+        let lower = name.to_ascii_lowercase();
+        assert_eq!(answer.received(&lower)?, Vec::<String>::new(), "{name}");
+    }
+    assert_eq!(answer.received_one("x-forwarded-for")?, "10.1.2.3");
+    assert_eq!(answer.received_one("x-forwarded-host")?, "orders.test");
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_trusted_proxy_chain_is_kept() -> TestResult {
     let h = harness().await?;
     let request = from(

@@ -8,7 +8,7 @@ use axum::extract::Request;
 use axum::http::uri::Authority;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::Response;
-use tsong_config::Route;
+use tsong_config::{Route, fold_name_char};
 
 use crate::refuse;
 
@@ -34,7 +34,10 @@ const HOP_BY_HOP: [&str; 9] = [
 ];
 
 /// Headers the gateway sets or strips itself, so the inbound values never
-/// pass. `Forwarded` is stripped and not set.
+/// pass. `Forwarded` is stripped and not set. These and the hop-by-hop
+/// headers are matched by normalized name, so `X_Forwarded_For` or
+/// `Proxy_Authorization`, which some frameworks read as the dashed name,
+/// is stripped too.
 const REPLACED: [&str; 6] = [
     "host",
     "authorization",
@@ -112,9 +115,7 @@ fn outbound_headers(
 ) -> Option<HeaderMap> {
     let inbound = request.headers();
     let mut headers = end_to_end(inbound);
-    for name in REPLACED {
-        headers.remove(name);
-    }
+    strip(&mut headers, &REPLACED);
 
     if let Some(minted) = minted {
         let mut authorization = HeaderValue::from_str(&format!("Bearer {minted}")).ok()?;
@@ -172,11 +173,29 @@ fn end_to_end(headers: &HeaderMap) -> HeaderMap {
         .filter_map(|name| HeaderName::from_bytes(name.trim().as_bytes()).ok())
         .collect();
     let mut kept = headers.clone();
-    for name in HOP_BY_HOP.into_iter() {
-        kept.remove(name);
-    }
+    strip(&mut kept, &HOP_BY_HOP);
     for name in &listed {
         kept.remove(name);
     }
     kept
+}
+
+/// Removes every header in `headers` whose name normalizes as one of
+/// `names` does.
+fn strip(headers: &mut HeaderMap, names: &[&str]) {
+    let doomed: Vec<HeaderName> = headers
+        .keys()
+        .filter(|header| names.iter().any(|name| same_name(header.as_str(), name)))
+        .cloned()
+        .collect();
+    for header in doomed {
+        headers.remove(header);
+    }
+}
+
+/// Whether `a` and `b` normalize to the same name.
+fn same_name(a: &str, b: &str) -> bool {
+    a.chars()
+        .flat_map(fold_name_char)
+        .eq(b.chars().flat_map(fold_name_char))
 }
