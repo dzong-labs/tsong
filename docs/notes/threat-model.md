@@ -1,7 +1,7 @@
 ---
 title: Each input to Tsong is trusted only as far as its source
 type: note
-summary: Callers and downstreams are untrusted, trusted issuers are trusted only for their own tokens, the config is trusted less than the host, and the host's environment, files and bootstrap file are trusted.
+summary: Callers and downstreams are untrusted, trusted issuers are trusted only for their own tokens, the config is trusted less than the host, and the host's environment, files and bootstrap file are trusted. A request without Tsong's minted token is anonymous.
 status: evolving
 created: 2026-11-18
 ---
@@ -22,10 +22,11 @@ Tsong sits between callers and the services behind it, and takes input from five
 
 Every check on a caller is mandatory, and config sets the values but never turns a check off.
 
-- The token is validated in full: signature, `alg` against the issuer's allowed list, `typ` against its token types, `kid`, `iss`, `aud`, `exp`, `nbf`, and the shape of `scope` and `scp`. A failure is a 401, or `invalid_request` at the token endpoint.
+- A request with no `Authorization` header is passed through without a token, and any other credential Tsong can't vouch for is refused, never passed through, by the rules in [gateway-plan](gateway-plan.md).
+- A bearer token is validated in full: signature, `alg` against the issuer's allowed list, `typ` against its token types, `kid`, `iss`, `aud`, `exp`, `nbf`, and the shape of `scope` and `scp`. A failure is a 401, or `invalid_request` at the token endpoint.
 - The route comes from the host header alone, and route policy bounds the audiences and scopes a minted token may carry.
 - `gateway.allow`, narrowed per route, admits callers by address. `X-Forwarded-For` counts only from a peer in `trusted_proxies`.
-- The original token never reaches a downstream, and hop-by-hop and `Forwarded` headers are stripped.
+- No token in the `Authorization` header, a refused query parameter such as `access_token`, or a refused header such as `PRIVATE-TOKEN` reaches a downstream: a request carrying one is refused ([gateway-plan](gateway-plan.md) lists the defaults). Hop-by-hop headers, `Proxy-Authorization` among them, and `Forwarded` are stripped. Bodies and cookies are not inspected, so a token a caller puts there passes through, and a downstream must not accept it.
 - The token endpoint has no client authentication. In its place are the subject token's validation, the allow lists and route policy.
 
 ## Trusted issuers
@@ -34,7 +35,9 @@ A trusted issuer's keys are fetched over https, expire after `jwks_max_age`, and
 
 ## Downstreams
 
-A downstream is reached over https only. Its response passes back to the caller, but it never sees the caller's token, only the minted one, which is scoped to its route.
+A downstream is reached over https only. Its response passes back to the caller, but it never sees the caller's bearer token, only the minted one, which is scoped to its route.
+
+A downstream must treat a request without Tsong's minted token as anonymous, and must not trust identity headers a caller could set, such as `X-User` or `X-Remote-User`: Tsong passes them through until roadmap item 34 strips them.
 
 ## The config
 

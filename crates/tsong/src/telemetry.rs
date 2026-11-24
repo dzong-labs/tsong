@@ -45,6 +45,9 @@ pub struct Metrics {
     pub gateway: Arc<GatewayMetrics>,
     /// Token exchanges, by outcome.
     pub exchanges: Family<OutcomeLabel, Counter>,
+    /// Audit lines dropped: the queue was full, the write failed, or the
+    /// writer was still stuck at shutdown.
+    pub audit_dropped: Counter,
     /// Failed JWKS fetches, by trusted issuer.
     pub jwks_failures: Family<IssuerLabel, Counter>,
     /// Seconds since each trusted issuer's keys were fetched, for the
@@ -93,6 +96,12 @@ impl Default for Metrics {
             "Config reloads that found a new revision, by outcome",
             reloads.clone(),
         );
+        let audit_dropped = Counter::default();
+        registry.register(
+            "tsong_audit_lines_dropped",
+            "Audit lines dropped: queue full, write failed, or left unwritten at shutdown",
+            audit_dropped.clone(),
+        );
         let config_fetched = Gauge::default();
         registry.register(
             "tsong_config_last_fetch_timestamp_seconds",
@@ -115,6 +124,7 @@ impl Default for Metrics {
             registry,
             gateway,
             exchanges,
+            audit_dropped,
             jwks_failures,
             jwks_age,
             reloads,
@@ -163,7 +173,7 @@ impl ExchangeObserver for ExchangeAudit {
             "error_description": event.error_description,
             "duration_ms": event.duration.as_secs_f64() * 1000.0,
         });
-        self.audit.record(&line.to_string());
+        self.audit.record(line.to_string());
     }
 }
 
@@ -215,7 +225,7 @@ impl<F> ObservedFetcher<F> {
             "issuer": issuer,
             "error": error,
         });
-        self.audit.record(&line.to_string());
+        self.audit.record(line.to_string());
     }
 }
 

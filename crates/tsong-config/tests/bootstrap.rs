@@ -119,3 +119,37 @@ fn the_drain_defaults_to_five_seconds_and_may_be_zero() -> TestResult {
     }
     Ok(())
 }
+
+#[test]
+fn the_audit_writer_defaults_and_may_be_set() -> TestResult {
+    let defaults = Bootstrap::from_toml(FILE)?.audit;
+    assert_eq!(defaults.queue, 65_536);
+    assert_eq!(defaults.shutdown, std::time::Duration::from_secs(5));
+    let text = format!("{FILE}\n[audit]\nqueue = 1048576\nshutdown = \"00:01:00\"\n");
+    let set = Bootstrap::from_toml(&text)?.audit;
+    assert_eq!(set.queue, 1_048_576);
+    assert_eq!(set.shutdown, std::time::Duration::from_secs(60));
+    Ok(())
+}
+
+#[test]
+fn an_audit_writer_with_no_room_or_no_deadline_or_absurd_ones_is_refused() -> TestResult {
+    for (audit, problem) in [
+        ("queue = 0", "audit.queue must be 1 to 1048576 lines"),
+        ("queue = 1048577", "audit.queue must be 1 to 1048576 lines"),
+        (
+            "shutdown = \"00:00:00\"",
+            "audit.shutdown must be above zero and at most 00:01:00",
+        ),
+        (
+            "shutdown = \"00:01:00.0000001\"",
+            "audit.shutdown must be above zero and at most 00:01:00",
+        ),
+    ] {
+        let text = format!("{FILE}\n[audit]\n{audit}\n");
+        assert_eq!(problems(&text)?, [problem], "{audit}");
+    }
+    parse_error(&format!("{FILE}\n[audit]\nqueue = -1\n"))?;
+    assert!(parse_error(&format!("{FILE}\n[audit]\nlines = 5\n"))?.contains("lines"));
+    Ok(())
+}

@@ -96,6 +96,34 @@ async fn hop_by_hop_and_forwarding_headers_do_not_pass() -> TestResult {
 }
 
 #[tokio::test]
+async fn underscored_spellings_of_stripped_headers_do_not_pass() -> TestResult {
+    let h = harness().await?;
+    let spoofed = [
+        "x_forwarded_for",
+        "X_Forwarded_Host",
+        "x_forwarded_proto",
+        "X-Forwarded_For",
+        "proxy_authorization",
+        "Proxy_Connection",
+        "keep_alive",
+        "transfer_encoding",
+    ];
+    let mut builder = Request::get("/").header("host", "orders.test");
+    for name in spoofed {
+        builder = builder.header(name, "spoofed");
+    }
+    let answer = send(&h, from(CLIENT, builder.body(Body::empty())?)?).await?;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+    for name in spoofed {
+        let lower = name.to_ascii_lowercase();
+        assert_eq!(answer.received(&lower)?, Vec::<String>::new(), "{name}");
+    }
+    assert_eq!(answer.received_one("x-forwarded-for")?, "10.1.2.3");
+    assert_eq!(answer.received_one("x-forwarded-host")?, "orders.test");
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_trusted_proxy_chain_is_kept() -> TestResult {
     let h = harness().await?;
     let request = from(
@@ -207,45 +235,213 @@ async fn an_opaque_minted_token_is_forwarded() -> TestResult {
     Ok(())
 }
 
+/// Asserts the gateway answered a 401 with `challenge` and `body` itself,
+/// so the downstream never saw the request.
+fn assert_refused(answer: &Answer, challenge: &str, body: &str, case: &str) {
+    assert_eq!(answer.status, StatusCode::UNAUTHORIZED, "{case}");
+    assert_eq!(answer.header("www-authenticate"), Some(challenge), "{case}");
+    assert_eq!(answer.header("x-echo"), None, "{case}");
+    assert_eq!(answer.body, body, "{case}");
+}
+
 #[tokio::test]
-async fn a_missing_or_malformed_bearer_token_is_a_401() -> TestResult {
+async fn malformed_headers_and_other_schemes_are_refused() -> TestResult {
+    const MALFORMED: &str = "a bearer token is required\n";
+    const UNSUPPORTED: &str = "only the Bearer scheme is accepted\n";
+    const REPEATED: &str = "more than one Authorization header\n";
     let h = harness().await?;
-    for authorization in [
-        None,
-        Some("Basic YWxpY2U="),
-        Some("Bearer"),
-        Some("Bearer "),
-        Some("Bearer a b"),
-        Some("bearer\talice"),
+    for (values, body) in [
+        (&[""][..], MALFORMED),
+        (&["Bearer"], MALFORMED),
+        (&["Bearer "], MALFORMED),
+        (&["bearer   "], MALFORMED),
+        (&["Bearer a b"], MALFORMED),
+        (&[" Bearer alice"], MALFORMED),
+        (&["Bearer\talice"], MALFORMED),
+        (&["Bearer al\tice"], MALFORMED),
+        (&["Bearer alice\t"], MALFORMED),
+        (&["Bearer alice", "Bearer bob"], REPEATED),
+        (&["Bearer alice", "Basic YWxpY2U="], REPEATED),
+        (&["", ""], REPEATED),
+        (&["Basic YWxpY2U6c2VjcmV0"], UNSUPPORTED),
+        (&["basic YWxpY2U6c2VjcmV0"], UNSUPPORTED),
+        (&["Basic"], UNSUPPORTED),
+        (&["DPoP eyJhbGciOiJFUzI1NiJ9.e30.c2ln"], UNSUPPORTED),
+        (&["Negotiate YIIBhwYGKwYBBQUCoIIBezCCAXc="], UNSUPPORTED),
     ] {
-        let mut builder = Request::get("/").header("host", "orders.test");
-        if let Some(value) = authorization {
-            builder = builder.header("authorization", value);
-        }
-        let answer = send(&h, from(CLIENT, builder.body(Body::empty())?)?).await?;
-        assert_eq!(answer.status, StatusCode::UNAUTHORIZED, "{authorization:?}");
-        assert_eq!(answer.header("www-authenticate"), Some("Bearer"));
+        let answer = send(&h, authorized(values)?).await?;
+        assert_refused(&answer, "Bearer", body, &format!("{values:?}"));
     }
-    let twice = Request::get("/")
-        .header("host", "orders.test")
-        .header("authorization", "Bearer alice")
-        .header("authorization", "Bearer bob")
-        .body(Body::empty())?;
-    let answer = send(&h, from(CLIENT, twice)?).await?;
-    assert_eq!(answer.status, StatusCode::UNAUTHORIZED);
     assert!(h.exchanger.calls().is_empty());
+    assert_eq!(h.anonymous("orders", 401), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_request_without_a_token_passes_through_unexchanged() -> TestResult {
+    let h = harness().await?;
+    let request = from(
+        CLIENT,
+        Request::post("/catalog?page=2")
+            .header("host", "orders.test")
+            .header("x-request-id", "r-anon")
+            .header("proxy-authorization", "Basic cHJveHk=")
+            .body(Body::from("hello"))?,
+    )?;
+    let answer = send(&h, request).await?;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+    assert_eq!(answer.header("x-echo"), Some("yes"));
+    assert!(answer.received("authorization")?.is_empty());
+    assert!(answer.received("proxy-authorization")?.is_empty());
+    let echoed = answer.echoed()?;
+    assert_eq!(echoed.get("path"), Some(&json!("/catalog?page=2")));
+    assert_eq!(echoed.get("body"), Some(&json!("hello")));
+    assert_eq!(answer.received_one("x-forwarded-for")?, "10.1.2.3");
+    assert_eq!(answer.received_one("x-request-id")?, "r-anon");
+
+    assert!(h.exchanger.calls().is_empty());
+    assert_eq!(
+        (h.metrics.cache_hits.get(), h.metrics.cache_misses.get()),
+        (0, 0)
+    );
+    assert_eq!(h.anonymous("orders", 200), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_anonymous_request_is_counted_with_the_status_it_got() -> TestResult {
+    let (_refusing, h) = refusing_harness()?;
+    let answer = send(&h, get("orders.test", "/", None)?).await?;
+    assert_eq!(answer.status, StatusCode::BAD_GATEWAY);
+    assert_eq!(h.anonymous("orders", 502), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_access_token_in_the_query_is_refused_as_a_downstream_reads_it() -> TestResult {
+    let h = harness().await?;
+    let refused = [
+        "access_token=alice",
+        "page=2&access_token=alice",
+        "access_token",
+        "access_token=",
+        "%61ccess_token=alice",
+        "access%5Ftoken=alice",
+        "access%5ftoken=alice",
+        "ACCESS_TOKEN=alice",
+        "Access_Token=alice",
+        "Access_token=alice",
+        "x=1;access_token=alice",
+        "access.token=alice",
+        "access+token=alice",
+        "access%20token=alice",
+        "access%5Btoken=alice",
+        "access_token[]=alice",
+        "access_token[x]=alice",
+        "access_token%5B%5D=alice",
+        "+access_token=alice",
+        "%20access_token=alice",
+        "access_token%00x=alice",
+        "acce%C5%BF%C5%BF_token=alice",
+        "ACCE%C5%BFS_TO%E2%84%AAEN=alice",
+        "access_to%E2%84%AAen=alice",
+        "access-token=alice",
+        "access__token=alice",
+        "access%255Ftoken=alice",
+        "access%25255Ftoken=alice",
+        "access%u005Ftoken=alice",
+        "%U0061ccess_token=alice",
+        "acce%u017Fs_token=alice",
+        "%uFF41ccess_token=alice",
+        "%EF%BC%A1ccess_token=alice",
+    ];
+    for query in refused {
+        for token in [None, Some("alice")] {
+            let answer = send(&h, get("orders.test", &format!("/?{query}"), token)?).await?;
+            assert_refused(
+                &answer,
+                "Bearer",
+                "a token in the query is not accepted\n",
+                &format!("{query} {token:?}"),
+            );
+        }
+    }
+    assert!(h.exchanger.calls().is_empty());
+    // Each refused query was sent once without an Authorization header.
+    assert_eq!(h.anonymous("orders", 401), u64::try_from(refused.len())?);
+    for query in [
+        "my_access_token=x",
+        "access_token_x=1",
+        "x=access_token",
+        "x=1;y=access_token",
+        "access%5token=x",
+        "access_tokens=x",
+        "xaccess_token=x",
+        "x=a%26access_token%3Dy",
+        "access%u5Ftoken=x",
+        "access%2525255Ftoken=x",
+    ] {
+        let answer = send(&h, get("orders.test", &format!("/?{query}"), None)?).await?;
+        assert_eq!(answer.status, StatusCode::OK, "{query}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_bearer_token_of_visible_ascii_is_exchanged() -> TestResult {
+    let h = harness().await?;
+    let tokens = [
+        "AZaz09-._~+/==",
+        "glpat:x%2Cy,z",
+        "al!ce=x",
+        "=alice",
+        "===",
+        r##"!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"##,
+    ];
+    for token in tokens {
+        let answer = send(&h, get("orders.test", "/", Some(token))?).await?;
+        assert_eq!(answer.status, StatusCode::OK, "{token}: {}", answer.body);
+    }
+    let exchanged: Vec<String> = h.exchanger.calls().into_iter().map(|(t, _)| t).collect();
+    assert_eq!(exchanged, tokens);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_bad_bearer_token_is_refused_not_passed_through() -> TestResult {
+    let h = harness().await?;
+    let answer = send(&h, get("orders.test", "/", Some("invalid"))?).await?;
+    assert_refused(
+        &answer,
+        r#"Bearer error="invalid_token""#,
+        "bad signature\n",
+        "invalid",
+    );
+    let answer = send(&h, get("orders.test", "/", Some("unscoped"))?).await?;
+    assert_eq!(answer.status, StatusCode::FORBIDDEN);
+    assert_eq!(answer.header("x-echo"), None);
+    assert_eq!(
+        (h.anonymous("orders", 401), h.anonymous("orders", 403)),
+        (0, 0)
+    );
     Ok(())
 }
 
 #[tokio::test]
 async fn the_bearer_scheme_is_case_insensitive() -> TestResult {
     let h = harness().await?;
-    let request = Request::get("/")
-        .header("host", "orders.test")
-        .header("authorization", "BEARER alice")
-        .body(Body::empty())?;
-    let answer = send(&h, from(CLIENT, request)?).await?;
-    assert_eq!(answer.status, StatusCode::OK);
+    for scheme in ["BEARER", "bearer", "bEaReR"] {
+        let answer = send(&h, authorized(&[&format!("{scheme} alice")])?).await?;
+        assert_eq!(answer.status, StatusCode::OK, "{scheme}");
+        assert_eq!(
+            answer.received_one("authorization")?,
+            format!("Bearer {}", minted("alice@orders.test", NOW + 900)?),
+            "{scheme}"
+        );
+    }
+    assert_eq!(h.exchanger.calls().len(), 1);
+    assert_eq!(h.metrics.cache_hits.get(), 2);
+    assert_eq!(h.anonymous("orders", 200), 0);
     Ok(())
 }
 
@@ -347,6 +543,26 @@ async fn clients_outside_the_allow_lists_are_refused() -> TestResult {
 }
 
 #[tokio::test]
+async fn the_allow_lists_refuse_anonymous_requests_too() -> TestResult {
+    let h = harness().await?;
+    for (peer, host, status) in [
+        ("192.0.2.1:1", "orders.test", StatusCode::FORBIDDEN),
+        ("10.2.0.1:1", "builds.test", StatusCode::FORBIDDEN),
+        ("10.1.0.1:1", "builds.test", StatusCode::OK),
+    ] {
+        let request = Request::get("/").header("host", host).body(Body::empty())?;
+        let answer = send(&h, from(peer, request)?).await?;
+        assert_eq!(answer.status, status, "{peer} {host}");
+    }
+    assert_eq!(h.anonymous("builds", 200), 1);
+    assert_eq!(
+        (h.anonymous("orders", 403), h.anonymous("builds", 403)),
+        (1, 1)
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_forged_forwarded_for_does_not_pass_the_allow_list() -> TestResult {
     let h = harness().await?;
     let request = Request::get("/")
@@ -374,11 +590,7 @@ async fn a_trusted_proxy_with_a_malformed_chain_is_a_400() -> TestResult {
 
 #[tokio::test]
 async fn an_unreachable_downstream_is_a_502() -> TestResult {
-    let closed = std::net::TcpListener::bind("127.0.0.1:0")?;
-    let address = closed.local_addr()?;
-    drop(closed);
-    let config = config_to(&format!("http://{address}"))?;
-    let h = harness_with(&config, Arc::new(FakeExchanger::default()), address)?;
+    let (_refusing, h) = refusing_harness()?;
     let answer = send(&h, get("orders.test", "/", Some("alice"))?).await?;
     assert_eq!(answer.status, StatusCode::BAD_GATEWAY);
     Ok(())
@@ -490,26 +702,29 @@ async fn requests_are_counted_by_route_and_status_and_timed() -> TestResult {
     let h = harness().await?;
     send(&h, get("orders.test", "/", Some("alice"))?).await?;
     send(&h, get("orders.test", "/", None)?).await?;
+    send(&h, get("orders.test", "/", Some("invalid"))?).await?;
     send(&h, get("nowhere.test", "/", Some("alice"))?).await?;
-    let count = |route: &str, status: u16| {
+    let count = |route: &str, status: u16, anonymous: bool| {
         h.metrics
             .requests
             .get_or_create(&RouteStatus {
                 route: route.into(),
                 status,
+                anonymous,
             })
             .get()
     };
-    assert_eq!(count("orders", 200), 1);
-    assert_eq!(count("orders", 401), 1);
-    assert_eq!(count("-", 404), 1);
+    assert_eq!(count("orders", 200, false), 1);
+    assert_eq!(count("orders", 200, true), 1);
+    assert_eq!(count("orders", 401, false), 1);
+    assert_eq!(count("-", 404, false), 1);
 
     let mut registry = Registry::default();
     registry.register("downstream", "timing", h.metrics.downstream_seconds.clone());
     let mut text = String::new();
     prometheus_client::encoding::text::encode(&mut text, &registry)?;
     assert!(
-        text.contains(r#"downstream_count{route="orders"} 1"#),
+        text.contains(r#"downstream_count{route="orders"} 2"#),
         "{text}"
     );
     h.metrics
@@ -518,5 +733,99 @@ async fn requests_are_counted_by_route_and_status_and_timed() -> TestResult {
             route: "orders".into(),
         })
         .observe(0.0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn each_default_credential_parameter_is_refused_in_the_query() -> TestResult {
+    let h = harness().await?;
+    for query in [
+        "access_token=x",
+        "private_token=x",
+        "PRIVATE_TOKEN=x",
+        "job_token=x",
+        "Job-Token=x",
+        "api_key=x",
+        "API.KEY=x",
+    ] {
+        for token in [None, Some("alice")] {
+            let answer = send(&h, get("orders.test", &format!("/?{query}"), token)?).await?;
+            assert_refused(
+                &answer,
+                "Bearer",
+                "a token in the query is not accepted\n",
+                &format!("{query} {token:?}"),
+            );
+        }
+    }
+    assert!(h.exchanger.calls().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn each_default_credential_header_is_refused_in_any_case() -> TestResult {
+    let h = harness().await?;
+    for (header, configured) in [
+        ("PRIVATE-TOKEN", "PRIVATE-TOKEN"),
+        ("private-token", "PRIVATE-TOKEN"),
+        ("JOB-TOKEN", "JOB-TOKEN"),
+        ("Job-Token", "JOB-TOKEN"),
+        ("X-API-Key", "X-API-Key"),
+        ("x-api-key", "X-API-Key"),
+        ("X_API_Key", "X-API-Key"),
+        ("x_api_key", "X-API-Key"),
+        ("X-Api_Key", "X-API-Key"),
+        ("private_token", "PRIVATE-TOKEN"),
+        ("PRIVATE_TOKEN", "PRIVATE-TOKEN"),
+    ] {
+        for token in [None, Some("alice")] {
+            let mut builder = Request::get("/")
+                .header("host", "orders.test")
+                .header(header, "glpat-secret");
+            if let Some(token) = token {
+                builder = builder.header("authorization", format!("Bearer {token}"));
+            }
+            let answer = send(&h, from(CLIENT, builder.body(Body::empty())?)?).await?;
+            assert_refused(
+                &answer,
+                "Bearer",
+                &format!("the {configured} header is not accepted\n"),
+                &format!("{header} {token:?}"),
+            );
+        }
+    }
+    assert!(h.exchanger.calls().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn configured_lists_replace_the_defaults_but_access_token_stays() -> TestResult {
+    let address = downstream().await?;
+    let mut config = config_to(&format!("http://{address}"))?;
+    config.gateway.refused_query_params = vec!["sig".into()];
+    config.gateway.refused_headers = vec!["X-Session".into()];
+    let h = harness_with(&config, Arc::new(FakeExchanger::default()), address)?;
+    let answer = send(&h, get("orders.test", "/?SIG=1", None)?).await?;
+    assert_eq!(answer.status, StatusCode::UNAUTHORIZED);
+    let session = Request::get("/")
+        .header("host", "orders.test")
+        .header("x-session", "s")
+        .body(Body::empty())?;
+    let answer = send(&h, from(CLIENT, session)?).await?;
+    assert_eq!(answer.body, "the X-Session header is not accepted\n");
+    let answer = send(&h, get("orders.test", "/?api_key=1", None)?).await?;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+    let answer = send(&h, get("orders.test", "/?Access-Token=1", None)?).await?;
+    assert_eq!(
+        answer.status,
+        StatusCode::UNAUTHORIZED,
+        "access_token is always refused"
+    );
+    let session = Request::get("/")
+        .header("host", "orders.test")
+        .header("x_session", "s")
+        .body(Body::empty())?;
+    let answer = send(&h, from(CLIENT, session)?).await?;
+    assert_eq!(answer.body, "the X-Session header is not accepted\n");
     Ok(())
 }

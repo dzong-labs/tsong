@@ -4,6 +4,7 @@
 
 pub mod admin;
 pub mod allow;
+pub mod audit;
 pub mod reload;
 pub mod state;
 pub mod telemetry;
@@ -19,14 +20,15 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tsong_clock::{Clock, SystemClock};
 use tsong_config::{
-    Bootstrap, BootstrapError, ConfigError, ConfigStore, FileStore, Source, Warnings,
+    AuditWriter, Bootstrap, BootstrapError, ConfigError, ConfigStore, FileStore, Source, Warnings,
 };
 use tsong_gateway::GatewayError;
 use tsong_keys::{KeyError, KeySet};
 use tsong_secrets::Secrets;
 use tsong_validate::{HttpFetcher, JwksFetcher};
 
-use crate::reload::{Audit, Lines, Reloader};
+use crate::audit::Queued;
+use crate::reload::{Audit, Reloader};
 use crate::state::State;
 use crate::telemetry::{Metrics, ObservedFetcher};
 
@@ -54,10 +56,13 @@ pub enum Error {
     Warnings(Warnings),
     #[error("serving: {0}")]
     Io(#[from] std::io::Error),
+    #[error("starting the audit writer: {0}")]
+    Audit(std::io::Error),
 }
 
 /// Runs the command for its arguments, without the program name, and
-/// returns what to print.
+/// returns what to print on stdout. `serve` returns nothing: its stdout
+/// carries only audit lines, and a stuck audit writer may still hold it.
 pub async fn run(args: impl IntoIterator<Item = String>) -> Result<String, Error> {
     let args: Vec<_> = args.into_iter().collect();
     match args.as_slice() {
@@ -67,7 +72,7 @@ pub async fn run(args: impl IntoIterator<Item = String>) -> Result<String, Error
         }
         [command, path] if command == "serve" => {
             serve_until(Path::new(path), shutdown_signal()).await?;
-            Ok("stopped".into())
+            Ok(String::new())
         }
         _ => Err(Error::Usage),
     }
@@ -103,9 +108,45 @@ pub async fn serve_until(
 ) -> Result<(), Error> {
     let bootstrap = Bootstrap::load(path)?;
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-    let store = store(&bootstrap.source);
     let metrics = Arc::new(Metrics::default());
-    let audit: Arc<dyn Audit> = Arc::new(Lines::new(std::io::stdout()));
+    let settings = bootstrap.audit.clone();
+    audited(&metrics, &settings, |audit| {
+        serve_with(bootstrap, clock, metrics.clone(), audit, shutdown)
+    })
+    .await
+}
+
+/// Runs `serve` with an audit writer on stdout, then closes the writer
+/// off the async workers, since closing waits on its thread.
+async fn audited<F: Future<Output = Result<(), Error>>>(
+    metrics: &Metrics,
+    settings: &AuditWriter,
+    serve: impl FnOnce(Arc<dyn Audit>) -> F,
+) -> Result<(), Error> {
+    let queued = Arc::new(
+        Queued::spawn(
+            std::io::stdout(),
+            settings.queue,
+            metrics.audit_dropped.clone(),
+            settings.shutdown,
+        )
+        .map_err(Error::Audit)?,
+    );
+    let served = serve(queued.clone()).await;
+    let _ = tokio::task::spawn_blocking(move || queued.close()).await;
+    served
+}
+
+/// Serves Tsong for `bootstrap` until `shutdown` completes, auditing to
+/// `audit`: the listeners and servers `serve_until` names.
+async fn serve_with(
+    bootstrap: Bootstrap,
+    clock: Arc<dyn Clock>,
+    metrics: Arc<Metrics>,
+    audit: Arc<dyn Audit>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), Error> {
+    let store = store(&bootstrap.source);
     let fetcher: Arc<dyn JwksFetcher> = Arc::new(ObservedFetcher::new(
         HttpFetcher::default(),
         metrics.jwks_failures.clone(),

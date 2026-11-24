@@ -242,9 +242,18 @@ async fn sigterm_stops_the_server() -> TestResult {
     assert!(killed.success());
     let output = tokio::time::timeout(Duration::from_secs(10), child.wait_with_output()).await??;
     assert!(output.status.success(), "{output:?}");
-    // Audit lines come first on stdout; the last line is the report.
+    // Stdout carries audit lines only: serve prints no report there.
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(stdout.lines().last(), Some("stopped"), "{stdout}");
+    let mut events = Vec::new();
+    for line in stdout.lines() {
+        let line: serde_json::Value = serde_json::from_str(line)?;
+        events.push(line.get("event").cloned());
+    }
+    // The first load is audited, so at least that line came through.
+    assert!(
+        events.contains(&Some(serde_json::json!("config_reload"))),
+        "{stdout}"
+    );
     Ok(())
 }
 

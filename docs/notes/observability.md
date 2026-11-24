@@ -40,7 +40,7 @@ The list is deployed in the bootstrap file, never loaded from the config, and ch
 | `tsong_cache_hits_total` | | Requests whose exchanged token came from the cache, or from an exchange another request had already started |
 | `tsong_cache_misses_total` | | Requests that exchanged their token |
 | `tsong_cache_entries` | | Exchanged tokens in the cache. A reload starts a new, empty cache |
-| `tsong_gateway_requests_total` | `route`, `status` | Gateway answers. `route` is `-` when no route matched |
+| `tsong_gateway_requests_total` | `route`, `status`, `anonymous` | Gateway answers. `route` is `-` when no route matched. `anonymous` is `"true"` for a request with no `Authorization` header, whether it was passed through or refused, such as by the allow lists, and `"false"` otherwise |
 | `tsong_downstream_seconds` | `route` | Time to a downstream's response headers, 1ms to about 16s |
 | `tsong_exchanges_total` | `outcome` | Token exchanges: `issued`, or the OAuth error code |
 | `tsong_jwks_fetch_failures_total` | `issuer` | Failed JWKS fetches, by the trusted issuer's `iss` |
@@ -49,12 +49,13 @@ The list is deployed in the bootstrap file, never loaded from the config, and ch
 | `tsong_config_last_fetch_timestamp_seconds` | | When the config store was last read, new revision or not. The config is read only at start until roadmap item 32, so the value stays fixed after start |
 | `tsong_config_revision_info` | `revision` | The revision being served, set to 1: the newest revision read whose config is in use. Across replicas, more than one `revision` means they haven't converged |
 | `tsong_config_tip_rejected` | | 1 while the newest config read was invalid or failed to build, so an older one is still served |
+| `tsong_audit_lines_dropped_total` | | Audit lines dropped: the queue was full, the write failed, or the writer was still stuck at shutdown |
 
-Labelling by route costs one series per route and status, and one histogram per route. That cost grows with the route count.
+Labelling by route costs one series per route, status and `anonymous` value, and one histogram per route. That cost grows with the route count.
 
 ## Audit
 
-Each token exchange writes one JSON line to stdout. That covers every cache miss in the gateway and every call to the token endpoint. A cache hit isn't an exchange, so it writes nothing, and the metrics count it instead. Collecting stdout belongs to the platform.
+Each token exchange writes one JSON line to stdout. That covers every cache miss in the gateway and every call to the token endpoint. A cache hit isn't an exchange, so it writes nothing, and the metrics count it instead. Collecting stdout belongs to the platform. A thread of its own writes the lines, one write per batch of whatever was queued, so a request never waits on stdout. Stdout carries audit lines only; `tsong serve` prints nothing else there. The queue holds up to `audit.queue` lines, set in the bootstrap file, counting the batch being written; past that a line is dropped and counted in `tsong_audit_lines_dropped_total`, and so is each line a failed write didn't finish, such as on a closed stdout or a full disk. A write cut off mid-line is followed by a newline, so a reader sees one broken line, never two run together. Lines keep the order they were recorded in. At shutdown Tsong closes the writer off the async workers and waits up to `audit.shutdown` for it, then leaves a stuck one behind, discarding the lines still queued and counting them as dropped. The batch a stuck writer holds isn't counted, since it may still appear; a batch a writer that died lost is counted. If the writer thread ends early, later lines are dropped and counted.
 
 ```json
 {"event":"token_exchange","at":1763251200,"outcome":"issued","request_id":"9f1c…","trace_id":"4bf92f35…",
@@ -63,6 +64,8 @@ Each token exchange writes one JSON line to stdout. That covers every cache miss
 ```
 
 `iss` and `sub` are the subject token's, which identify the caller together. A refusal carries the OAuth error code as its `outcome` and its `error_description`. `iss` and `sub` are null when the token never validated. Tokens are never written.
+
+The audit log is for exchanges. A gateway request with no `Authorization` header, passed through without a token ([roadmap](../../ROADMAP.md) item 33), writes no line; `tsong_gateway_requests_total` counts it with `anonymous="true"`, by route and the status in its response head. Nor does a request refused for its `Authorization` header, a refused query parameter or a refused header; the request metrics count it as a 401.
 
 The issuer reports each exchange to an `ExchangeObserver` (`crates/tsong-issuer/src/context.rs`). `ExchangeAudit` in `crates/tsong/src/telemetry.rs` writes the line and counts the exchange.
 

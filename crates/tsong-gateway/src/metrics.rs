@@ -14,11 +14,13 @@ pub struct RouteLabel {
     pub route: String,
 }
 
-/// A route and the status the gateway answered with.
+/// A route, the status the gateway answered with, and whether the request
+/// came without an `Authorization` header.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct RouteStatus {
     pub route: String,
     pub status: u16,
+    pub anonymous: bool,
 }
 
 /// What the gateway counts.
@@ -31,7 +33,8 @@ pub struct GatewayMetrics {
     pub cache_misses: Counter,
     /// Exchanged tokens held in the cache, as of the last request.
     pub cache_entries: Gauge,
-    /// Requests answered, by route and status.
+    /// Requests answered, by route, status, and whether they came without
+    /// an `Authorization` header.
     pub requests: Family<RouteStatus, Counter>,
     /// Seconds from sending a request downstream to receiving its response
     /// headers, by route.
@@ -74,7 +77,7 @@ impl GatewayMetrics {
         );
         registry.register(
             "tsong_gateway_requests",
-            "Gateway requests answered, by route and status",
+            "Gateway requests answered, by route, status and whether anonymous",
             metrics.requests.clone(),
         );
         registry.register(

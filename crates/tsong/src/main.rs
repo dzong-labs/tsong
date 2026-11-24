@@ -14,7 +14,9 @@ fn main() -> ExitCode {
     };
     match runtime.block_on(tsong::run(std::env::args().skip(1))) {
         Ok(report) => {
-            println!("{report}");
+            if !report.is_empty() {
+                println!("{report}");
+            }
             ExitCode::SUCCESS
         }
         Err(error) => {

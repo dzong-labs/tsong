@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 use tsong_clock::ManualClock;
 use tsong_config::Config;
-use tsong_gateway::{ExchangeFuture, Exchanger, Gateway, GatewayMetrics};
+use tsong_gateway::{ExchangeFuture, Exchanger, Gateway, GatewayMetrics, RouteStatus};
 use tsong_issuer::{ExchangeContext, ExchangeError, TokenResponse};
 
 /// What a test returns: nothing, or why it failed.
@@ -200,11 +200,38 @@ pub async fn downstream() -> TestResult<SocketAddr> {
     Ok(address)
 }
 
+/// The harness with every route forwarding to a socket that is bound but
+/// never listening, so every connection is refused. The socket holds its
+/// port while the caller keeps it, so no other test can take the port.
+pub fn refusing_harness() -> TestResult<(tokio::net::TcpSocket, Harness)> {
+    let refusing = tokio::net::TcpSocket::new_v4()?;
+    refusing.bind("127.0.0.1:0".parse()?)?;
+    let address = refusing.local_addr()?;
+    let config = config_to(&format!("http://{address}"))?;
+    let harness = harness_with(&config, Arc::new(FakeExchanger::default()), address)?;
+    Ok((refusing, harness))
+}
+
 pub struct Harness {
     pub router: Router,
     pub exchanger: Arc<FakeExchanger>,
     pub downstream: SocketAddr,
     pub metrics: Arc<GatewayMetrics>,
+}
+
+impl Harness {
+    /// Requests without an `Authorization` header counted for `route`
+    /// with `status`.
+    pub fn anonymous(&self, route: &str, status: u16) -> u64 {
+        self.metrics
+            .requests
+            .get_or_create(&RouteStatus {
+                route: route.into(),
+                status,
+                anonymous: true,
+            })
+            .get()
+    }
 }
 
 /// The config with every route forwarding to `downstream` over plain
@@ -246,6 +273,16 @@ pub fn get(host: &str, path: &str, token: Option<&str>) -> TestResult<Request> {
     let mut builder = Request::get(path).header("host", host);
     if let Some(token) = token {
         builder = builder.header("authorization", format!("Bearer {token}"));
+    }
+    from(CLIENT, builder.body(Body::empty())?)
+}
+
+/// A request to `orders.test` from `CLIENT` with these `Authorization`
+/// values.
+pub fn authorized(values: &[&str]) -> TestResult<Request> {
+    let mut builder = Request::get("/").header("host", "orders.test");
+    for value in values {
+        builder = builder.header("authorization", *value);
     }
     from(CLIENT, builder.body(Body::empty())?)
 }

@@ -154,10 +154,10 @@ impl Recorded {
 }
 
 impl Audit for Recorded {
-    fn record(&self, line: &str) {
+    fn record(&self, line: String) {
         self.0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .push(line.to_owned());
+            .push(line);
     }
 }

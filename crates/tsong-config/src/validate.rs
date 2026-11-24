@@ -20,6 +20,35 @@ pub const RESERVED_CLAIMS: [&str; 11] = [
 /// its `scope`, after the route's scope policy and narrowing.
 const SCOPE_CLAIMS: [&str; 2] = ["scope", "scp"];
 
+/// Whether the normalized header name `name` is one the gateway reads,
+/// sets or strips itself, so refusing it would refuse every request or
+/// clash with the gateway's own handling: `Authorization`,
+/// `Proxy-Authorization`, `Host`, the correlation headers, and the
+/// forwarding headers.
+fn is_gateway_header(name: &str) -> bool {
+    matches!(
+        name,
+        "authorization"
+            | "proxyauthorization"
+            | "host"
+            | "xrequestid"
+            | "traceparent"
+            | "tracestate"
+            | "forwarded"
+            | "xforwardedfor"
+            | "xforwardedhost"
+            | "xforwardedproto"
+    )
+}
+
+/// Whether `text` is an RFC 9110 token, as a header name must be.
+fn is_header_name(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
+}
+
 /// Whether `text` is an https URL.
 fn is_https(text: &str) -> bool {
     Url::parse(text).is_ok_and(|url| url.scheme() == "https")
@@ -62,10 +91,42 @@ impl Config {
         if self.gateway.cache.max_entries == 0 {
             problems.push("gateway.cache.max_entries must be above zero".into());
         }
+        self.check_refused(&mut problems);
         if problems.is_empty() {
             Ok(())
         } else {
             Err(Problems(problems))
+        }
+    }
+
+    fn check_refused(&self, problems: &mut Vec<String>) {
+        let gateway = &self.gateway;
+        for name in &gateway.refused_query_params {
+            if crate::normalize_name(name).is_empty() {
+                problems.push(format!(
+                    "gateway.refused_query_params has \"{name}\", which has no letters or digits"
+                ));
+            }
+        }
+        if gateway.refused_headers.is_empty() {
+            problems
+                .push("gateway.refused_headers is empty; leave it unset for the defaults".into());
+        }
+        for name in &gateway.refused_headers {
+            let normalized = crate::normalize_name(name);
+            if !is_header_name(name) {
+                problems.push(format!(
+                    "gateway.refused_headers has \"{name}\", which isn't a header name"
+                ));
+            } else if normalized.is_empty() {
+                problems.push(format!(
+                    "gateway.refused_headers has \"{name}\", which has no letters or digits"
+                ));
+            } else if is_gateway_header(&normalized) {
+                problems.push(format!(
+                    "gateway.refused_headers may not hold {name}, which the gateway reads, sets or strips itself"
+                ));
+            }
         }
     }
 

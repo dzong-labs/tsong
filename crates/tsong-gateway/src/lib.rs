@@ -1,22 +1,26 @@
 //! The reverse proxy. For each request it looks up the route by host,
 //! checks the client's address against the allow lists, exchanges the
 //! bearer token for one Tsong signs, and streams the request to the
-//! route's downstream with the exchanged token in its place. The upstream
-//! is the caller; the downstream is where the request goes.
+//! route's downstream with the exchanged token in its place. A request
+//! with no `Authorization` header goes without one. The upstream is the
+//! caller; the downstream is where the request goes.
 //!
-//! It fails closed: a request that can't be authenticated or exchanged is
-//! answered by the gateway and never forwarded, and the inbound token is
-//! never sent downstream.
+//! It fails closed: a request with a token that can't be authenticated or
+//! exchanged, or with any scheme other than `Bearer`, is answered by the
+//! gateway and never forwarded, and the inbound credential is never sent
+//! downstream.
 
 mod cache;
 mod correlate;
+mod credential;
 mod exchange;
 mod forward;
 mod metrics;
+mod query;
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -26,8 +30,13 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use ipnet::IpNet;
 use tsong_clock::Clock;
-use tsong_config::{Config, RouteTable, allowed, client_ip};
+use tsong_config::{
+    ACCESS_TOKEN, Config, Route, RouteTable, allowed, client_ip, fold_name_char, normalize_name,
+};
 use tsong_issuer::{ExchangeContext, ExchangeError};
+
+use credential::{Credential, credential};
+use query::has_refused_param;
 
 pub use cache::{ExchangeCache, lifetime};
 pub use correlate::correlate;
@@ -54,6 +63,12 @@ pub struct Gateway {
     /// One downstream client per read timeout in the config.
     clients: HashMap<Duration, reqwest::Client>,
     metrics: Arc<GatewayMetrics>,
+    /// The refused query parameter names, normalized: `access_token`, then
+    /// the config's.
+    refused_query_params: Vec<String>,
+    /// The refused header names, normalized, each with its name as the
+    /// config spells it.
+    refused_headers: Vec<(String, String)>,
 }
 
 impl Gateway {
@@ -74,6 +89,22 @@ impl Gateway {
                 entry.insert(client(timeout)?);
             }
         }
+        let refused_query_params = std::iter::once(ACCESS_TOKEN)
+            .chain(
+                config
+                    .gateway
+                    .refused_query_params
+                    .iter()
+                    .map(String::as_str),
+            )
+            .map(normalize_name)
+            .collect();
+        let refused_headers = config
+            .gateway
+            .refused_headers
+            .iter()
+            .map(|name| (normalize_name(name), name.clone()))
+            .collect();
         Ok(Self {
             routes: RouteTable::new(&config.routes),
             allow: config.gateway.allow.clone(),
@@ -88,11 +119,14 @@ impl Gateway {
             ),
             clients,
             metrics,
+            refused_query_params,
+            refused_headers,
         })
     }
 
     /// Answers `request`, with its request ID on the response, and counts
-    /// the answer by route and status.
+    /// the answer by route, status, and whether it came without an
+    /// `Authorization` header.
     async fn handle(&self, peer: SocketAddr, mut request: Request) -> Response {
         let Some(request_id) = correlate(request.headers_mut()) else {
             return refuse(
@@ -103,6 +137,7 @@ impl Gateway {
         let route = forward::request_host(&request)
             .and_then(|host| self.routes.get(&host))
             .map_or_else(|| "-".to_owned(), |route| route.name.clone());
+        let anonymous = !request.headers().contains_key(header::AUTHORIZATION);
         let mut response = self.route(peer, request).await;
         if let Ok(value) = HeaderValue::from_str(&request_id) {
             response
@@ -114,6 +149,7 @@ impl Gateway {
             .get_or_create(&RouteStatus {
                 route,
                 status: response.status().as_u16(),
+                anonymous,
             })
             .inc();
         response
@@ -138,14 +174,59 @@ impl Gateway {
         if !allowed(client, &self.allow, route.allow.as_deref()) {
             return refuse(StatusCode::FORBIDDEN, "client address not allowed");
         }
-        let Some(token) = bearer(request.headers()) else {
-            return unauthorized("a bearer token is required", None);
+        if has_refused_param(request.uri().query(), &self.refused_query_params) {
+            return unauthorized("a token in the query is not accepted", None);
+        }
+        if let Some(name) = self.refused_header(request.headers()) {
+            return unauthorized(&format!("the {name} header is not accepted"), None);
+        }
+        let minted = match credential(request.headers()) {
+            Credential::None => None,
+            Credential::Bearer(token) => {
+                let context = ExchangeContext::from_headers(request.headers());
+                match self.cache.token(token, &host, &context).await {
+                    Ok(minted) => Some(minted),
+                    Err(error) => return exchange_failure(&error),
+                }
+            }
+            Credential::Repeated => {
+                return unauthorized("more than one Authorization header", None);
+            }
+            Credential::Malformed => return unauthorized("a bearer token is required", None),
+            Credential::Unsupported => {
+                return unauthorized("only the Bearer scheme is accepted", None);
+            }
         };
-        let context = ExchangeContext::from_headers(request.headers());
-        let minted = match self.cache.token(token, &host, &context).await {
-            Ok(minted) => minted,
-            Err(error) => return exchange_failure(&error),
-        };
+        self.send_downstream(route, request, minted.as_deref(), peer)
+            .await
+    }
+
+    /// The configured name of the first refused header `headers` carries,
+    /// comparing normalized names, so `X_API_Key` is `X-API-Key`.
+    fn refused_header(&self, headers: &HeaderMap) -> Option<&str> {
+        headers.keys().find_map(|header| {
+            self.refused_headers
+                .iter()
+                .find(|(normalized, _)| {
+                    header
+                        .as_str()
+                        .chars()
+                        .flat_map(fold_name_char)
+                        .eq(normalized.chars())
+                })
+                .map(|(_, name)| name.as_str())
+        })
+    }
+
+    /// Streams `request` to `route`'s downstream with `minted` as its
+    /// bearer token, if any, and times the downstream.
+    async fn send_downstream(
+        &self,
+        route: &Route,
+        request: Request,
+        minted: Option<&str>,
+        peer: IpAddr,
+    ) -> Response {
         let timeout = route.read_timeout.unwrap_or(self.read_timeout);
         let Some(downstream) = self.clients.get(&timeout) else {
             return refuse(StatusCode::INTERNAL_SERVER_ERROR, "no downstream client");
@@ -153,7 +234,7 @@ impl Gateway {
         let trusted_peer = self.trusted_proxies.iter().any(|net| net.contains(&peer));
         let started = Instant::now();
         let response =
-            forward::forward(downstream, route, request, &minted, peer, trusted_peer).await;
+            forward::forward(downstream, route, request, minted, peer, trusted_peer).await;
         self.metrics
             .downstream_seconds
             .get_or_create(&RouteLabel {
@@ -187,19 +268,6 @@ async fn proxy(
     request: Request,
 ) -> Response {
     gateway.handle(peer, request).await
-}
-
-/// The token in the request's one `Authorization: Bearer` header.
-fn bearer(headers: &HeaderMap) -> Option<&str> {
-    let mut values = headers.get_all(header::AUTHORIZATION).iter();
-    let value = values.next()?;
-    if values.next().is_some() {
-        return None;
-    }
-    let (scheme, token) = value.to_str().ok()?.split_once(' ')?;
-    let token = token.trim();
-    (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty() && !token.contains(' '))
-        .then_some(token)
 }
 
 /// The response to an exchange that failed.

@@ -1,5 +1,5 @@
-//! The bootstrap file: where the config comes from, and the admin and health
-//! listeners.
+//! The bootstrap file: where the config comes from, the admin and health
+//! listeners, and the audit writer.
 //! It is deployed with Tsong, because the settings that say where the
 //! config lives can't live in that config.
 
@@ -23,6 +23,50 @@ pub struct Bootstrap {
     /// The liveness and readiness checks, on their own listener. Unset,
     /// there is none.
     pub health: Option<Health>,
+    /// The audit writer, which starts before the config loads and lives
+    /// for the process. Unset, the defaults apply.
+    #[serde(default)]
+    pub audit: AuditWriter,
+}
+
+/// The audit writer's queue and shutdown deadline.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuditWriter {
+    /// The audit lines held for the writer, queued or being written,
+    /// before new ones are dropped.
+    #[serde(default = "default_audit_queue")]
+    pub queue: usize,
+    /// How long shutdown waits for the writer before leaving it behind.
+    #[serde(default = "default_audit_shutdown", with = "duration")]
+    pub shutdown: Duration,
+}
+
+impl Default for AuditWriter {
+    fn default() -> Self {
+        Self {
+            queue: default_audit_queue(),
+            shutdown: default_audit_shutdown(),
+        }
+    }
+}
+
+/// The most lines `audit.queue` may hold, queued and being written
+/// together. Each line is a few hundred bytes, and the writer copies the
+/// batch it writes into one buffer, so a full queue stays within a few
+/// hundred megabytes.
+pub const MAX_AUDIT_QUEUE: usize = 1_048_576;
+
+/// The longest `audit.shutdown` may be, so a stuck writer can't hold up a
+/// stop past what a container runtime allows.
+pub const MAX_AUDIT_SHUTDOWN: Duration = Duration::from_secs(60);
+
+fn default_audit_queue() -> usize {
+    65_536
+}
+
+fn default_audit_shutdown() -> Duration {
+    Duration::from_secs(5)
 }
 
 /// The health-check listener, for the load balancer in front of Tsong.
@@ -103,6 +147,12 @@ impl Bootstrap {
             .is_some_and(|health| health.allow.is_empty())
         {
             problems.push("health.allow is empty, so no health check can arrive".into());
+        }
+        if !(1..=MAX_AUDIT_QUEUE).contains(&self.audit.queue) {
+            problems.push(format!("audit.queue must be 1 to {MAX_AUDIT_QUEUE} lines"));
+        }
+        if self.audit.shutdown.is_zero() || self.audit.shutdown > MAX_AUDIT_SHUTDOWN {
+            problems.push("audit.shutdown must be above zero and at most 00:01:00".into());
         }
         if problems.is_empty() {
             Ok(())
