@@ -75,7 +75,7 @@ fn lines_are_written_in_order_by_their_own_thread() -> TestResult {
     let dropped = Counter::<u64>::default();
     let queued = Queued::spawn(writer.clone(), 16, dropped.clone(), WAIT)?;
     for n in 0..10 {
-        queued.record(&format!("{n}"));
+        queued.record(format!("{n}"));
     }
     drop(queued);
     let expected: Vec<String> = (0..10).map(|n| n.to_string()).collect();
@@ -89,10 +89,10 @@ fn a_full_queue_drops_and_counts_without_blocking() -> TestResult {
     let (writer, entered) = Gated::new(false);
     let dropped = Counter::<u64>::default();
     let queued = Queued::spawn(writer.clone(), 2, dropped.clone(), WAIT)?;
-    queued.record("first");
+    queued.record("first".into());
     entered.recv_timeout(WAIT)?;
     for n in 0..5 {
-        queued.record(&format!("{n}"));
+        queued.record(format!("{n}"));
     }
     assert_eq!(dropped.get(), 3);
     writer.open();
@@ -111,15 +111,15 @@ fn shutdown_leaves_a_stuck_writer_behind_and_counts_what_it_never_wrote() -> Tes
         dropped.clone(),
         Duration::from_millis(50),
     )?;
-    queued.record("first");
+    queued.record("first".into());
     entered.recv_timeout(WAIT)?;
-    queued.record("second");
-    queued.record("third");
+    queued.record("second".into());
+    queued.record("third".into());
     let started = Instant::now();
     queued.close();
     assert!(started.elapsed() < WAIT, "shutdown waited too long");
     assert_eq!(dropped.get(), 2, "the queued lines, not the one mid-write");
-    queued.record("late");
+    queued.record("late".into());
     assert_eq!(dropped.get(), 3, "a line after closing is dropped");
 
     // Unstuck, the writer finishes its write but nothing counted as dropped.
@@ -152,9 +152,9 @@ impl Write for Broken {
 fn lines_whose_write_fails_are_counted_once() -> TestResult {
     let dropped = Counter::<u64>::default();
     let queued = Queued::spawn(Broken, 16, dropped.clone(), WAIT)?;
-    queued.record("one");
-    queued.record("two");
-    queued.record("three");
+    queued.record("one".into());
+    queued.record("two".into());
+    queued.record("three".into());
     queued.close();
     assert_eq!(dropped.get(), 3);
     Ok(())

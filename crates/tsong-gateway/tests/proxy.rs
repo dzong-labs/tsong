@@ -292,7 +292,7 @@ async fn an_anonymous_request_is_counted_with_the_status_it_got() -> TestResult 
 #[tokio::test]
 async fn an_access_token_in_the_query_is_refused_as_a_downstream_reads_it() -> TestResult {
     let h = harness().await?;
-    for query in [
+    let refused = [
         "access_token=alice",
         "page=2&access_token=alice",
         "access_token",
@@ -324,7 +324,8 @@ async fn an_access_token_in_the_query_is_refused_as_a_downstream_reads_it() -> T
         "access%u005Ftoken=alice",
         "%U0061ccess_token=alice",
         "acce%u017Fs_token=alice",
-    ] {
+    ];
+    for query in refused {
         for token in [None, Some("alice")] {
             let answer = send(&h, get("orders.test", &format!("/?{query}"), token)?).await?;
             assert_refused(
@@ -336,7 +337,8 @@ async fn an_access_token_in_the_query_is_refused_as_a_downstream_reads_it() -> T
         }
     }
     assert!(h.exchanger.calls().is_empty());
-    assert_eq!(h.anonymous("orders", 401), 0);
+    // Each refused query was sent once without an Authorization header.
+    assert_eq!(h.anonymous("orders", 401), u64::try_from(refused.len())?);
     for query in [
         "my_access_token=x",
         "access_token_x=1",
@@ -524,7 +526,7 @@ async fn the_allow_lists_refuse_anonymous_requests_too() -> TestResult {
     assert_eq!(h.anonymous("builds", 200), 1);
     assert_eq!(
         (h.anonymous("orders", 403), h.anonymous("builds", 403)),
-        (0, 0)
+        (1, 1)
     );
     Ok(())
 }
@@ -671,18 +673,20 @@ async fn requests_are_counted_by_route_and_status_and_timed() -> TestResult {
     send(&h, get("orders.test", "/", None)?).await?;
     send(&h, get("orders.test", "/", Some("invalid"))?).await?;
     send(&h, get("nowhere.test", "/", Some("alice"))?).await?;
-    let count = |route: &str, status: u16| {
+    let count = |route: &str, status: u16, anonymous: bool| {
         h.metrics
             .requests
             .get_or_create(&RouteStatus {
                 route: route.into(),
                 status,
+                anonymous,
             })
             .get()
     };
-    assert_eq!(count("orders", 200), 2);
-    assert_eq!(count("orders", 401), 1);
-    assert_eq!(count("-", 404), 1);
+    assert_eq!(count("orders", 200, false), 1);
+    assert_eq!(count("orders", 200, true), 1);
+    assert_eq!(count("orders", 401, false), 1);
+    assert_eq!(count("-", 404, false), 1);
 
     let mut registry = Registry::default();
     registry.register("downstream", "timing", h.metrics.downstream_seconds.clone());

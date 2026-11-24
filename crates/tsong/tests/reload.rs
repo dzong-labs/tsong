@@ -310,8 +310,8 @@ fn lines_are_written_one_to_a_line() {
     use tsong::reload::{Audit, Lines};
 
     let lines = Lines::new(Vec::new());
-    lines.record(r#"{"a":1}"#);
-    lines.record(r#"{"b":2}"#);
+    lines.record(r#"{"a":1}"#.into());
+    lines.record(r#"{"b":2}"#.into());
     assert_eq!(lines.into_inner(), b"{\"a\":1}\n{\"b\":2}\n");
 }
 

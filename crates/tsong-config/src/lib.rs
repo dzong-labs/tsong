@@ -26,7 +26,10 @@ use serde::Deserialize;
 use serde::de::IgnoredAny;
 use url::Url;
 
-pub use bootstrap::{Admin, Bootstrap, BootstrapError, Health, Source};
+pub use bootstrap::{
+    Admin, AuditWriter, Bootstrap, BootstrapError, Health, MAX_AUDIT_QUEUE, MAX_AUDIT_SHUTDOWN,
+    Source,
+};
 pub use lint::Warnings;
 pub use network::{allowed, client_ip};
 pub use parse::ParseError;

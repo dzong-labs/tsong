@@ -99,7 +99,8 @@ impl Gateway {
     }
 
     /// Answers `request`, with its request ID on the response, and counts
-    /// the answer by route and status.
+    /// the answer by route, status, and whether it came without an
+    /// `Authorization` header.
     async fn handle(&self, peer: SocketAddr, mut request: Request) -> Response {
         let Some(request_id) = correlate(request.headers_mut()) else {
             return refuse(
@@ -110,6 +111,7 @@ impl Gateway {
         let route = forward::request_host(&request)
             .and_then(|host| self.routes.get(&host))
             .map_or_else(|| "-".to_owned(), |route| route.name.clone());
+        let anonymous = !request.headers().contains_key(header::AUTHORIZATION);
         let mut response = self.route(peer, request).await;
         if let Ok(value) = HeaderValue::from_str(&request_id) {
             response
@@ -121,6 +123,7 @@ impl Gateway {
             .get_or_create(&RouteStatus {
                 route,
                 status: response.status().as_u16(),
+                anonymous,
             })
             .inc();
         response
@@ -165,14 +168,8 @@ impl Gateway {
                 return unauthorized("only the Bearer scheme is accepted", None);
             }
         };
-        let response = self
-            .send_downstream(route, request, minted.as_deref(), peer)
-            .await;
-        if minted.is_none() {
-            self.metrics
-                .record_anonymous(&route.name, response.status());
-        }
-        response
+        self.send_downstream(route, request, minted.as_deref(), peer)
+            .await
     }
 
     /// Streams `request` to `route`'s downstream with `minted` as its

@@ -36,6 +36,7 @@ What Tsong has built and what comes next. The open items are the plan for the ne
 32. Config stores: an optional `poll` on a file source, so a config file a pipeline publishes reloads without a restart. Stores such as Git, S3 or an HTTPS URL live in their own repositories and implement the `ConfigStore` trait (`crates/tsong-config/src/store.rs`). For that, the bootstrap file's source must be open to stores Tsong doesn't name, and the trait needs an optional change notification beside `load`.
 33. Anonymous pass-through: a request with no `Authorization` header is passed through without a token to the route's downstream, and the IP allow lists still apply. A token that fails, any other scheme and an `access_token` in the query are refused, never passed through, as [gateway-plan](docs/notes/gateway-plan.md) sets out. Release note: a bearer request whose URL carries `access_token` used to be forwarded and is now refused with a 401. Deciding what an anonymous caller may see is the downstream's job (done).
 34. Header control: a config-based `strip` list of identity headers a caller could spoof, such as `X-User`, `X-Remote-User` and `X-Authenticated-*`, removed from every request, with a default list. A route's `set` fills headers from the validated claims after a successful exchange, always overwriting the caller's. Related to item 18.
+35. Per-route metric handles: build each route's metric handles, or `Arc<str>` labels, when the route table loads, so a request doesn't allocate a label or look up a `Family`.
 
 ## On request
 

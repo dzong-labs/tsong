@@ -20,7 +20,7 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tsong_clock::{Clock, SystemClock};
 use tsong_config::{
-    Bootstrap, BootstrapError, ConfigError, ConfigStore, FileStore, Source, Warnings,
+    AuditWriter, Bootstrap, BootstrapError, ConfigError, ConfigStore, FileStore, Source, Warnings,
 };
 use tsong_gateway::GatewayError;
 use tsong_keys::{KeyError, KeySet};
@@ -35,14 +35,6 @@ use crate::telemetry::{Metrics, ObservedFetcher};
 /// How to run the command.
 pub const USAGE: &str =
     "usage: tsong check [--deny-warnings] <config.toml> | tsong serve <bootstrap.toml>";
-
-/// The audit lines held for the writer thread before new ones are
-/// dropped.
-const AUDIT_QUEUE: usize = 65_536;
-
-/// How long shutdown waits for the audit writer to finish before leaving
-/// it behind.
-const AUDIT_SHUTDOWN: Duration = Duration::from_secs(5);
 
 /// The flag that makes `check` fail on warnings.
 pub const DENY_WARNINGS: &str = "--deny-warnings";
@@ -114,7 +106,8 @@ pub async fn serve_until(
     let bootstrap = Bootstrap::load(path)?;
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let metrics = Arc::new(Metrics::default());
-    audited(&metrics, |audit| {
+    let settings = bootstrap.audit.clone();
+    audited(&metrics, &settings, |audit| {
         serve_with(bootstrap, clock, metrics.clone(), audit, shutdown)
     })
     .await
@@ -124,13 +117,14 @@ pub async fn serve_until(
 /// off the async workers, since closing waits on its thread.
 async fn audited<F: Future<Output = Result<(), Error>>>(
     metrics: &Metrics,
+    settings: &AuditWriter,
     serve: impl FnOnce(Arc<dyn Audit>) -> F,
 ) -> Result<(), Error> {
     let queued = Arc::new(Queued::spawn(
         std::io::stdout(),
-        AUDIT_QUEUE,
+        settings.queue,
         metrics.audit_dropped.clone(),
-        AUDIT_SHUTDOWN,
+        settings.shutdown,
     )?);
     let served = serve(queued.clone()).await;
     let _ = tokio::task::spawn_blocking(move || queued.close()).await;

@@ -173,7 +173,7 @@ impl ExchangeObserver for ExchangeAudit {
             "error_description": event.error_description,
             "duration_ms": event.duration.as_secs_f64() * 1000.0,
         });
-        self.audit.record(&line.to_string());
+        self.audit.record(line.to_string());
     }
 }
 
@@ -225,7 +225,7 @@ impl<F> ObservedFetcher<F> {
             "issuer": issuer,
             "error": error,
         });
-        self.audit.record(&line.to_string());
+        self.audit.record(line.to_string());
     }
 }
 

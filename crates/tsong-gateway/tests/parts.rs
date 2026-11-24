@@ -168,13 +168,15 @@ fn the_gateway_metrics_register_under_their_names() -> TestResult {
         .get_or_create(&RouteStatus {
             route: route(),
             status: 200,
+            anonymous: false,
         })
         .inc();
     metrics
-        .anonymous_requests
+        .requests
         .get_or_create(&RouteStatus {
             route: route(),
             status: 502,
+            anonymous: true,
         })
         .inc();
     metrics
@@ -187,8 +189,8 @@ fn the_gateway_metrics_register_under_their_names() -> TestResult {
         "tsong_cache_hits_total 1",
         "tsong_cache_misses_total 1",
         "tsong_cache_entries 3",
-        r#"tsong_gateway_requests_total{route="orders",status="200"} 1"#,
-        r#"tsong_anonymous_requests_total{route="orders",status="502"} 1"#,
+        r#"tsong_gateway_requests_total{route="orders",status="200",anonymous="false"} 1"#,
+        r#"tsong_gateway_requests_total{route="orders",status="502",anonymous="true"} 1"#,
         r#"tsong_downstream_seconds_count{route="orders"} 1"#,
         r#"tsong_downstream_seconds_bucket{le="0.001",route="orders"} 0"#,
     ] {

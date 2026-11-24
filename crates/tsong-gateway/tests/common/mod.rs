@@ -220,13 +220,15 @@ pub struct Harness {
 }
 
 impl Harness {
-    /// Anonymous requests counted for `route` with `status`.
+    /// Requests without an `Authorization` header counted for `route`
+    /// with `status`.
     pub fn anonymous(&self, route: &str, status: u16) -> u64 {
         self.metrics
-            .anonymous_requests
+            .requests
             .get_or_create(&RouteStatus {
                 route: route.into(),
                 status,
+                anonymous: true,
             })
             .get()
     }

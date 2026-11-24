@@ -23,9 +23,13 @@ path = "tsong.toml"                       # relative to this file
 
 [admin]
 listen = "0.0.0.0:8445"                   # GET /status and GET /metrics
+
+[audit]                                   # optional; these are the defaults
+queue = 65536                             # audit lines held, 1 to 1048576
+shutdown = "00:00:05"                     # how long a stop waits for the writer, above zero, up to 00:01:00
 ```
 
-A relative `path` is taken from the bootstrap file's directory. Unknown fields, tables and stores are errors.
+A relative `path` is taken from the bootstrap file's directory. Unknown fields, tables and stores are errors. `[audit]` sets the audit writer ([[observability]]), which starts before the config loads and lives for the process, so it belongs here rather than in the config. A queue of zero or above 1,048,576 lines, and a deadline of zero or above a minute, are errors.
 
 ## Fetching
 

@@ -265,14 +265,7 @@ fn the_metrics_encode_as_prometheus_text() -> TestResult {
         .get_or_create(&tsong_gateway::RouteStatus {
             route: route(),
             status: 200,
-        })
-        .inc();
-    metrics
-        .gateway
-        .anonymous_requests
-        .get_or_create(&tsong_gateway::RouteStatus {
-            route: route(),
-            status: 200,
+            anonymous: true,
         })
         .inc();
     metrics.audit_dropped.inc();
@@ -302,8 +295,7 @@ fn the_metrics_encode_as_prometheus_text() -> TestResult {
         "tsong_cache_hits_total 1",
         "# TYPE tsong_cache_misses counter",
         "# TYPE tsong_cache_entries gauge",
-        r#"tsong_gateway_requests_total{route="orders",status="200"} 1"#,
-        r#"tsong_anonymous_requests_total{route="orders",status="200"} 1"#,
+        r#"tsong_gateway_requests_total{route="orders",status="200",anonymous="true"} 1"#,
         r#"tsong_downstream_seconds_count{route="orders"} 1"#,
         r#"tsong_exchanges_total{outcome="issued"} 1"#,
         "tsong_audit_lines_dropped_total 1",

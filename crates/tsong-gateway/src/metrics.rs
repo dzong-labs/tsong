@@ -1,7 +1,6 @@
 //! The gateway's Prometheus metrics. They outlive any one config, so a
 //! reload keeps counting into the same series.
 
-use axum::http::StatusCode;
 use prometheus_client::encoding::EncodeLabelSet;
 use prometheus_client::metrics::counter::Counter;
 use prometheus_client::metrics::family::Family;
@@ -15,11 +14,13 @@ pub struct RouteLabel {
     pub route: String,
 }
 
-/// A route and the status the gateway answered with.
+/// A route, the status the gateway answered with, and whether the request
+/// came without an `Authorization` header.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct RouteStatus {
     pub route: String,
     pub status: u16,
+    pub anonymous: bool,
 }
 
 /// What the gateway counts.
@@ -32,13 +33,9 @@ pub struct GatewayMetrics {
     pub cache_misses: Counter,
     /// Exchanged tokens held in the cache, as of the last request.
     pub cache_entries: Gauge,
-    /// Requests answered, by route and status.
+    /// Requests answered, by route, status, and whether they came without
+    /// an `Authorization` header.
     pub requests: Family<RouteStatus, Counter>,
-    /// Requests with no `Authorization` header passed through without a
-    /// token, by route and the status they were answered with. Requests
-    /// refused before that, by the allow lists or the `access_token`
-    /// query check, aren't counted here.
-    pub anonymous_requests: Family<RouteStatus, Counter>,
     /// Seconds from sending a request downstream to receiving its response
     /// headers, by route.
     pub downstream_seconds: Family<RouteLabel, Histogram>,
@@ -51,7 +48,6 @@ impl Default for GatewayMetrics {
             cache_misses: Counter::default(),
             cache_entries: Gauge::default(),
             requests: Family::default(),
-            anonymous_requests: Family::default(),
             // 1ms to about 16s.
             downstream_seconds: Family::new_with_constructor(|| {
                 Histogram::new(exponential_buckets(0.001, 2.0, 15))
@@ -61,17 +57,6 @@ impl Default for GatewayMetrics {
 }
 
 impl GatewayMetrics {
-    /// Counts a request passed through without a token to `route`,
-    /// answered with `status`.
-    pub fn record_anonymous(&self, route: &str, status: StatusCode) {
-        self.anonymous_requests
-            .get_or_create(&RouteStatus {
-                route: route.to_owned(),
-                status: status.as_u16(),
-            })
-            .inc();
-    }
-
     /// New metrics, registered in `registry` under `tsong_`.
     pub fn register(registry: &mut Registry) -> Self {
         let metrics = Self::default();
@@ -92,13 +77,8 @@ impl GatewayMetrics {
         );
         registry.register(
             "tsong_gateway_requests",
-            "Gateway requests answered, by route and status",
+            "Gateway requests answered, by route, status and whether anonymous",
             metrics.requests.clone(),
-        );
-        registry.register(
-            "tsong_anonymous_requests",
-            "Requests passed through without a token, by route and status",
-            metrics.anonymous_requests.clone(),
         );
         registry.register(
             "tsong_downstream_seconds",

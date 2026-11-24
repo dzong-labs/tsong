@@ -100,7 +100,7 @@ impl Reloader {
             reloads: 1,
             ..Status::default()
         };
-        audit.record(&applied(None, &first, &status));
+        audit.record(applied(None, &first, &status));
         let (state, _) = watch::channel(Arc::new(first));
         Self {
             store,
@@ -210,7 +210,7 @@ impl Reloader {
             self.count(APPLIED);
             applied(Some(&current.config), &next, &status)
         };
-        self.audit.record(&line);
+        self.audit.record(line);
         self.state.send_replace(Arc::new(next));
         Outcome::Applied
     }
@@ -240,7 +240,7 @@ impl Reloader {
             "serving": current.revision,
             "error": error,
         });
-        self.audit.record(&line.to_string());
+        self.audit.record(line.to_string());
         Outcome::Rejected(error)
     }
 

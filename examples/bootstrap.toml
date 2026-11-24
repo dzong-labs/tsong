@@ -25,3 +25,10 @@ listen = "0.0.0.0:8447"
 allow = ["10.20.0.0/16"]                  # the load balancer's subnets
 drain = "00:00:05"                        # on shutdown, readiness fails this long before the listeners close;
                                           # see docs/notes/shutdown-and-draining.md
+
+# Audit writer
+# Audit lines go to stdout from a thread of their own. Optional; these are
+# the defaults. See docs/notes/observability.md.
+[audit]
+queue = 65536                             # lines held before new ones are dropped, 1 to 1048576
+shutdown = "00:00:05"                     # how long a stop waits for the writer, up to 00:01:00

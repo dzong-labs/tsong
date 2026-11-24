@@ -11,9 +11,10 @@ use std::time::Duration;
 
 use prometheus_client::metrics::counter::Counter;
 
-/// Where audit lines go.
+/// Where audit lines go. A line is taken whole, so a queue keeps it
+/// without copying it.
 pub trait Audit: Send + Sync {
-    fn record(&self, line: &str);
+    fn record(&self, line: String);
 }
 
 /// Writes each audit line, and a newline, to a writer as it is recorded.
@@ -34,7 +35,7 @@ impl<W> Lines<W> {
 }
 
 impl<W: Write + Send> Audit for Lines<W> {
-    fn record(&self, line: &str) {
+    fn record(&self, line: String) {
         let mut writer = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         let _ = writeln!(writer, "{line}").and_then(|()| writer.flush());
     }
@@ -185,7 +186,7 @@ fn write_lines<W: Write>(shared: &Shared, writer: W, dropped: &Counter) {
 }
 
 impl Audit for Queued {
-    fn record(&self, line: &str) {
+    fn record(&self, line: String) {
         let mut queue = self.shared.queue();
         if queue.closed || queue.lines.len() >= self.capacity {
             drop(queue);
@@ -193,7 +194,7 @@ impl Audit for Queued {
             return;
         }
         let was_empty = queue.lines.is_empty();
-        queue.lines.push_back(line.to_owned());
+        queue.lines.push_back(line);
         drop(queue);
         if was_empty {
             self.shared.ready.notify_one();
