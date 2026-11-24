@@ -15,8 +15,8 @@ use serde_json::json;
 use std::time::Duration;
 use tsong_clock::Clock;
 use tsong_config::TrustedIssuer;
-use tsong_gateway::{GatewayMetrics, RequestObserver};
-use tsong_issuer::{ExchangeContext, ExchangeEvent, ExchangeObserver, Issuer};
+use tsong_gateway::{AnonymousRequest, GatewayMetrics, RequestObserver};
+use tsong_issuer::{ExchangeEvent, ExchangeObserver, Issuer};
 use tsong_validate::{FetchFuture, JwksFetcher};
 
 use crate::reload::Audit;
@@ -46,7 +46,8 @@ pub struct Metrics {
     pub gateway: Arc<GatewayMetrics>,
     /// Token exchanges, by outcome.
     pub exchanges: Family<OutcomeLabel, Counter>,
-    /// Gateway requests forwarded without an `Authorization` header.
+    /// Gateway requests with no `Authorization` header answered after the
+    /// allow lists, whatever the status.
     pub anonymous_requests: Counter,
     /// Failed JWKS fetches, by trusted issuer.
     pub jwks_failures: Family<IssuerLabel, Counter>,
@@ -99,7 +100,7 @@ impl Default for Metrics {
         let anonymous_requests = Counter::default();
         registry.register(
             "tsong_anonymous_requests",
-            "Gateway requests forwarded without an Authorization header",
+            "Gateway requests received with no Authorization header",
             anonymous_requests.clone(),
         );
         let config_fetched = Gauge::default();
@@ -180,14 +181,16 @@ impl ExchangeObserver for ExchangeAudit {
 }
 
 impl RequestObserver for ExchangeAudit {
-    fn passed_anonymous(&self, audience: &str, context: &ExchangeContext) {
+    fn passed_anonymous(&self, request: &AnonymousRequest<'_>) {
         self.anonymous_requests.inc();
         let line = json!({
             "event": "anonymous_request",
             "at": self.clock.unix_seconds(),
-            "request_id": context.request_id,
-            "trace_id": context.trace_id,
-            "audience": audience,
+            "request_id": request.context.request_id,
+            "trace_id": request.context.trace_id,
+            "audience": request.audience,
+            "client": request.client.to_string(),
+            "status": request.status,
         });
         self.audit.record(&line.to_string());
     }

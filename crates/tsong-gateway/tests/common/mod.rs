@@ -18,7 +18,9 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 use tsong_clock::ManualClock;
 use tsong_config::Config;
-use tsong_gateway::{ExchangeFuture, Exchanger, Gateway, GatewayMetrics, RequestObserver};
+use tsong_gateway::{
+    AnonymousRequest, ExchangeFuture, Exchanger, Gateway, GatewayMetrics, RequestObserver,
+};
 use tsong_issuer::{ExchangeContext, ExchangeError, TokenResponse};
 
 /// What a test returns: nothing, or why it failed.
@@ -153,13 +155,21 @@ impl Exchanger for FakeExchanger {
     }
 }
 
-/// An observer that records each anonymous request: its audience and
-/// context.
+/// An anonymous request as the observer saw it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Passed {
+    pub audience: String,
+    pub client: std::net::IpAddr,
+    pub status: u16,
+    pub context: ExchangeContext,
+}
+
+/// An observer that records each anonymous request.
 #[derive(Default)]
-pub struct Anonymous(Mutex<Vec<(String, ExchangeContext)>>);
+pub struct Anonymous(Mutex<Vec<Passed>>);
 
 impl Anonymous {
-    pub fn passed(&self) -> Vec<(String, ExchangeContext)> {
+    pub fn passed(&self) -> Vec<Passed> {
         self.0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -168,11 +178,16 @@ impl Anonymous {
 }
 
 impl RequestObserver for Anonymous {
-    fn passed_anonymous(&self, audience: &str, context: &ExchangeContext) {
+    fn passed_anonymous(&self, request: &AnonymousRequest<'_>) {
         self.0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .push((audience.into(), context.clone()));
+            .push(Passed {
+                audience: request.audience.into(),
+                client: request.client,
+                status: request.status,
+                context: request.context.clone(),
+            });
     }
 }
 

@@ -19,7 +19,7 @@ mod observe;
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -29,14 +29,14 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use ipnet::IpNet;
 use tsong_clock::Clock;
-use tsong_config::{Config, RouteTable, allowed, client_ip};
+use tsong_config::{Config, Route, RouteTable, allowed, client_ip};
 use tsong_issuer::{ExchangeContext, ExchangeError};
 
 pub use cache::{ExchangeCache, lifetime};
 pub use correlate::correlate;
 pub use exchange::{ExchangeFuture, Exchanger};
 pub use metrics::{GatewayMetrics, RouteLabel, RouteStatus};
-pub use observe::RequestObserver;
+pub use observe::{AnonymousRequest, RequestObserver};
 
 /// How long the gateway waits to connect to a downstream.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -145,16 +145,15 @@ impl Gateway {
         if !allowed(client, &self.allow, route.allow.as_deref()) {
             return refuse(StatusCode::FORBIDDEN, "client address not allowed");
         }
-        let minted = match credential(request.headers()) {
-            Credential::None => {
-                let context = ExchangeContext::from_headers(request.headers());
-                self.observer.passed_anonymous(&host, &context);
-                None
-            }
+        if has_access_token(request.uri().query()) {
+            return unauthorized("a token in the query is not accepted", None);
+        }
+        let (minted, anonymous) = match credential(request.headers()) {
+            Credential::None => (None, Some(ExchangeContext::from_headers(request.headers()))),
             Credential::Bearer(token) => {
                 let context = ExchangeContext::from_headers(request.headers());
                 match self.cache.token(token, &host, &context).await {
-                    Ok(minted) => Some(minted),
+                    Ok(minted) => (Some(minted), None),
                     Err(error) => return exchange_failure(&error),
                 }
             }
@@ -163,21 +162,37 @@ impl Gateway {
                 return unauthorized("only the Bearer scheme is accepted", None);
             }
         };
+        let response = self
+            .send_downstream(route, request, minted.as_deref(), peer)
+            .await;
+        if let Some(context) = &anonymous {
+            self.observer.passed_anonymous(&AnonymousRequest {
+                audience: &host,
+                client,
+                status: response.status().as_u16(),
+                context,
+            });
+        }
+        response
+    }
+
+    /// Streams `request` to `route`'s downstream with `minted` as its
+    /// bearer token, if any, and times the downstream.
+    async fn send_downstream(
+        &self,
+        route: &Route,
+        request: Request,
+        minted: Option<&str>,
+        peer: IpAddr,
+    ) -> Response {
         let timeout = route.read_timeout.unwrap_or(self.read_timeout);
         let Some(downstream) = self.clients.get(&timeout) else {
             return refuse(StatusCode::INTERNAL_SERVER_ERROR, "no downstream client");
         };
         let trusted_peer = self.trusted_proxies.iter().any(|net| net.contains(&peer));
         let started = Instant::now();
-        let response = forward::forward(
-            downstream,
-            route,
-            request,
-            minted.as_deref(),
-            peer,
-            trusted_peer,
-        )
-        .await;
+        let response =
+            forward::forward(downstream, route, request, minted, peer, trusted_peer).await;
         self.metrics
             .downstream_seconds
             .get_or_create(&RouteLabel {
@@ -249,10 +264,59 @@ fn credential(headers: &HeaderMap) -> Credential<'_> {
     if !scheme.eq_ignore_ascii_case("bearer") {
         return Credential::Unsupported;
     }
-    match token.trim() {
-        token if token.is_empty() || token.contains(' ') => Credential::Malformed,
-        token => Credential::Bearer(token),
+    match token.trim_matches(' ') {
+        token if is_b64token(token) => Credential::Bearer(token),
+        _ => Credential::Malformed,
     }
+}
+
+/// Whether `text` is an RFC 6750 `b64token`: one or more of ALPHA, DIGIT,
+/// `-`, `.`, `_`, `~`, `+` and `/`, then any number of `=`.
+fn is_b64token(text: &str) -> bool {
+    let body = text.trim_end_matches('=');
+    !body.is_empty()
+        && body
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-._~+/".contains(&byte))
+}
+
+/// Whether `query` has an `access_token` parameter (RFC 6750 section
+/// 2.3), its name compared after percent-decoding.
+fn has_access_token(query: Option<&str>) -> bool {
+    query.is_some_and(|query| {
+        query.split('&').any(|pair| {
+            let name = pair.split_once('=').map_or(pair, |(name, _)| name);
+            percent_decoded(name) == b"access_token"
+        })
+    })
+}
+
+/// `text` with each `%XX` escape decoded and `+` read as a space, as
+/// `application/x-www-form-urlencoded` reads a name. A malformed escape is
+/// kept as it is.
+fn percent_decoded(text: &str) -> Vec<u8> {
+    let bytes = text.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while let Some(&byte) = bytes.get(index) {
+        let escaped = (byte == b'%')
+            .then(|| bytes.get(index + 1..index + 3))
+            .flatten()
+            .filter(|hex| hex.iter().all(u8::is_ascii_hexdigit))
+            .and_then(|hex| std::str::from_utf8(hex).ok())
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        match escaped {
+            Some(value) => {
+                decoded.push(value);
+                index += 3;
+            }
+            None => {
+                decoded.push(if byte == b'+' { b' ' } else { byte });
+                index += 1;
+            }
+        }
+    }
+    decoded
 }
 
 /// Whether `text` is an RFC 9110 token, as an auth scheme must be.

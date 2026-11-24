@@ -229,6 +229,12 @@ async fn malformed_headers_and_other_schemes_are_refused() -> TestResult {
         (&["Bearer a b"], MALFORMED),
         (&[" Bearer alice"], MALFORMED),
         (&["Bearer\talice"], MALFORMED),
+        (&["Bearer al\tice"], MALFORMED),
+        (&["Bearer alice\t"], MALFORMED),
+        (&["Bearer al!ce"], MALFORMED),
+        (&["Bearer =alice"], MALFORMED),
+        (&["Bearer alice=x"], MALFORMED),
+        (&["Bearer ==="], MALFORMED),
         (&["Bearer alice", "Bearer bob"], MALFORMED),
         (&["Bearer alice", "Basic YWxpY2U="], MALFORMED),
         (&["Basic YWxpY2U6c2VjcmV0"], UNSUPPORTED),
@@ -274,9 +280,75 @@ async fn a_request_without_a_token_passes_through_unexchanged() -> TestResult {
     );
     let passed = h.anonymous.passed();
     assert_eq!(passed.len(), 1);
-    let (audience, context) = passed.first().ok_or("nothing passed")?;
-    assert_eq!(audience, "orders.test");
-    assert_eq!(context.request_id.as_deref(), Some("r-anon"));
+    let passed = passed.first().ok_or("nothing passed")?;
+    assert_eq!(passed.audience, "orders.test");
+    assert_eq!(passed.client, "10.1.2.3".parse::<std::net::IpAddr>()?);
+    assert_eq!(passed.status, 200);
+    assert_eq!(passed.context.request_id.as_deref(), Some("r-anon"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_anonymous_request_is_observed_with_the_status_it_got() -> TestResult {
+    let closed = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let address = closed.local_addr()?;
+    drop(closed);
+    let config = config_to(&format!("http://{address}"))?;
+    let h = harness_with(&config, Arc::new(FakeExchanger::default()), address)?;
+    let answer = send(&h, get("orders.test", "/", None)?).await?;
+    assert_eq!(answer.status, StatusCode::BAD_GATEWAY);
+    let statuses: Vec<u16> = h.anonymous.passed().iter().map(|p| p.status).collect();
+    assert_eq!(statuses, [502]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_access_token_in_the_query_is_refused() -> TestResult {
+    let h = harness().await?;
+    for query in [
+        "access_token=alice",
+        "page=2&access_token=alice",
+        "access_token",
+        "access_token=",
+        "%61ccess_token=alice",
+        "access%5Ftoken=alice",
+        "access%5ftoken=alice",
+    ] {
+        for token in [None, Some("alice")] {
+            let answer = send(&h, get("orders.test", &format!("/?{query}"), token)?).await?;
+            assert_refused(
+                &answer,
+                "Bearer",
+                "a token in the query is not accepted\n",
+                &format!("{query} {token:?}"),
+            );
+        }
+    }
+    assert!(h.exchanger.calls().is_empty());
+    assert!(h.anonymous.passed().is_empty());
+    for query in [
+        "my_access_token=x",
+        "access_token_x=1",
+        "x=access_token",
+        "Access_token=x",
+        "access%5token=x",
+    ] {
+        let answer = send(&h, get("orders.test", &format!("/?{query}"), None)?).await?;
+        assert_eq!(answer.status, StatusCode::OK, "{query}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_bearer_token_with_every_b64token_character_is_exchanged() -> TestResult {
+    let h = harness().await?;
+    let token = "AZaz09-._~+/==";
+    let answer = send(&h, get("orders.test", "/", Some(token))?).await?;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+    assert_eq!(
+        h.exchanger.calls(),
+        [(token.to_owned(), "orders.test".to_owned())]
+    );
     Ok(())
 }
 
@@ -428,7 +500,7 @@ async fn the_allow_lists_refuse_anonymous_requests_too() -> TestResult {
         .anonymous
         .passed()
         .into_iter()
-        .map(|(audience, _)| audience)
+        .map(|passed| passed.audience)
         .collect();
     assert_eq!(passed, ["builds.test"]);
     Ok(())

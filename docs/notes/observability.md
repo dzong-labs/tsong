@@ -43,7 +43,7 @@ The list is deployed in the bootstrap file, never loaded from the config, and ch
 | `tsong_gateway_requests_total` | `route`, `status` | Gateway answers. `route` is `-` when no route matched |
 | `tsong_downstream_seconds` | `route` | Time to a downstream's response headers, 1ms to about 16s |
 | `tsong_exchanges_total` | `outcome` | Token exchanges: `issued`, or the OAuth error code |
-| `tsong_anonymous_requests_total` | | Gateway requests with no `Authorization` header, passed through without a token. They aren't exchanges |
+| `tsong_anonymous_requests_total` | | Gateway requests with no `Authorization` header, passed through without a token, whatever the status. They aren't exchanges |
 | `tsong_jwks_fetch_failures_total` | `issuer` | Failed JWKS fetches, by the trusted issuer's `iss` |
 | `tsong_jwks_age_seconds` | `issuer` | Seconds since the trusted issuer's keys were fetched, for the config being served. Past its `jwks_max_age`, its tokens are refused. An issuer whose keys were never fetched has no series |
 | `tsong_config_reloads_total` | `outcome` | Reloads that found a new revision: `applied`, `fetch_failed`, `invalid_config` or `build_failed` |
@@ -65,10 +65,10 @@ Each token exchange writes one JSON line to stdout. That covers every cache miss
 
 `iss` and `sub` are the subject token's, which identify the caller together. A refusal carries the OAuth error code as its `outcome` and its `error_description`. `iss` and `sub` are null when the token never validated. Tokens are never written.
 
-A gateway request with no `Authorization` header is passed through without a token ([roadmap](../../ROADMAP.md) item 33). It isn't an exchange, so it writes a line of its own, with the route's host as its `audience`:
+A gateway request with no `Authorization` header is passed through without a token ([roadmap](../../ROADMAP.md) item 33). It isn't an exchange, so it writes a line of its own once it is answered, with the route's host as its `audience`, the client address the allow lists admitted, which is the only identity an anonymous caller has, and the status: the downstream's, or the gateway's own when forwarding failed.
 
 ```json
-{"event":"anonymous_request","at":1763251200,"request_id":"9f1c…","trace_id":"4bf92f35…","audience":"orders.example.com"}
+{"event":"anonymous_request","at":1763251200,"request_id":"9f1c…","trace_id":"4bf92f35…","audience":"orders.example.com","client":"10.20.1.7","status":200}
 ```
 
 A request refused for its `Authorization` header writes no line; the request metrics count it as a 401.

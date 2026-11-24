@@ -3,7 +3,7 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16914/badge)](https://www.bestpractices.dev/projects/16914)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/dzong-labs/tsong/badge)](https://scorecard.dev/viewer/?uri=github.com/dzong-labs/tsong)
 
-Tsong is an API gateway and RFC 8693 token exchange issuer that centralizes access-token validation. It validates each caller's bearer token against the identity providers you trust, such as Entra, Okta or GitLab, enforcing each route's audience, scope and IP policy from a single config file, and replaces the token with one Tsong signs and scopes to that route. A request with no `Authorization` header is passed through without a token, and the service treats it as anonymous. Services then trust one issuer and one JWKS instead of many, and never see the caller's original token. Every check is mandatory: config sets the values, never turns a check off. Tsong reads the config from a file at start, and validates it in full before serving it.
+Tsong is an API gateway and RFC 8693 token exchange issuer that centralizes access-token validation. It validates each caller's bearer token against the identity providers you trust, such as Entra, Okta or GitLab, enforcing each route's audience, scope and IP policy from a single config file, and replaces the token with one Tsong signs and scopes to that route. A request with no `Authorization` header is passed through without a token, and the service treats it as anonymous. Services then trust one issuer and one JWKS instead of many, and never see the caller's original bearer token. Every check is mandatory: config sets the values, never turns a check off. Tsong reads the config from a file at start, and validates it in full before serving it.
 
 ## Request flow
 
@@ -13,7 +13,7 @@ Tsong is an API gateway and RFC 8693 token exchange issuer that centralizes acce
 4. Tsong exchanges the token for a new one signed by Tsong. The new token's subject names the issuer, such as `entra:<id>`, so subjects from different providers never collide.
 5. Tsong forwards the request to the route's service with the new token in place of the original. The original token never reaches the service.
 
-A request with no `Authorization` header skips steps 3 and 4: once the IP allow lists pass, Tsong passes it through without a token and writes an `anonymous_request` audit line. A token that fails is refused, never passed through as anonymous, and any scheme other than `Bearer` is refused with a 401.
+A request with no `Authorization` header skips steps 3 and 4: once the IP allow lists pass, Tsong passes it through without a token and writes an `anonymous_request` audit line. A token that fails is refused, never passed through as anonymous, and any scheme other than `Bearer` is refused with a 401. So is a request with an `access_token` query parameter. Tsong doesn't inspect bodies or cookies, so a service must not accept a token from either.
 
 Tsong caches the new token until shortly before it expires, so a repeat request with the same token skips steps 3 and 4.
 

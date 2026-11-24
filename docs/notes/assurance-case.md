@@ -13,7 +13,7 @@ Tsong's assurance case sets out what Tsong guarantees, the threats it guards aga
 ## Security requirements
 
 1. A request reaches a downstream only from an address the allow lists admit, and either with a token minted for its route, from a caller whose token a trusted issuer signed and whose audiences and scopes the route accepts, or with no `Authorization` header at all, as an anonymous request.
-2. The caller's own credential never reaches a downstream: a bearer token is replaced, and any other scheme is refused.
+2. No caller token in the `Authorization` header or the `access_token` query parameter reaches a downstream: a bearer token is replaced, any other scheme is refused, and a request with an `access_token` query parameter is refused. Tokens a caller puts in a body or a cookie are not inspected, and a downstream must not accept them.
 3. A minted token carries only the scopes the route allows and doesn't deny, the caller held and the request asked for, and always the scopes the route requires; it carries no claim the config doesn't map.
 4. One trusted issuer can never mint a subject that belongs to another.
 5. No check can be turned off by config, and a config that fails validation never replaces the one being served.

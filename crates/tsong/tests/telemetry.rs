@@ -18,7 +18,7 @@ use tsong::telemetry::{
 };
 use tsong_clock::ManualClock;
 use tsong_config::{Config, ConfigError, TrustedIssuer};
-use tsong_gateway::RequestObserver;
+use tsong_gateway::{AnonymousRequest, RequestObserver};
 use tsong_issuer::{ExchangeContext, ExchangeEvent, ExchangeObserver};
 use tsong_validate::JwksFetcher;
 use tsong_validate::testkit::FakeFetcher;
@@ -99,7 +99,12 @@ fn an_anonymous_request_writes_an_audit_line_and_is_counted() -> TestResult {
         anonymous_requests: metrics.anonymous_requests.clone(),
         clock: Arc::new(ManualClock::at(NOW)),
     };
-    audit.passed_anonymous("orders.test", &event(None).context);
+    audit.passed_anonymous(&AnonymousRequest {
+        audience: "orders.test",
+        client: "10.1.2.3".parse()?,
+        status: 502,
+        context: &event(None).context,
+    });
     assert_eq!(
         lines.parsed()?,
         [json!({
@@ -108,6 +113,8 @@ fn an_anonymous_request_writes_an_audit_line_and_is_counted() -> TestResult {
             "request_id": "r-1",
             "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
             "audience": "orders.test",
+            "client": "10.1.2.3",
+            "status": 502,
         })]
     );
     assert_eq!(metrics.anonymous_requests.get(), 1);
