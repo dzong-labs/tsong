@@ -43,7 +43,8 @@ async fn gateway() -> TestResult<(axum::Router, TestKey)> {
         clock.clone(),
     );
     let metrics = Arc::new(tsong_gateway::GatewayMetrics::default());
-    let gateway = Gateway::new(&config, Arc::new(issuer), clock, metrics)?;
+    let observer = Arc::new(Anonymous::default());
+    let gateway = Gateway::new(&config, Arc::new(issuer), clock, metrics, observer)?;
     let router = tsong_gateway::router(Arc::new(gateway));
     Ok((router, inbound))
 }

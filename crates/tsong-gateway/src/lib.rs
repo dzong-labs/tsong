@@ -2,8 +2,8 @@
 //! checks the client's address against the allow lists, exchanges the
 //! bearer token for one Tsong signs, and streams the request to the
 //! route's downstream with the exchanged token in its place. A request
-//! with no `Authorization` header is passed through without an exchange.
-//! The upstream is the caller; the downstream is where the request goes.
+//! with no `Authorization` header goes without one. The upstream is the
+//! caller; the downstream is where the request goes.
 //!
 //! It fails closed: a request with a token that can't be authenticated or
 //! exchanged, or with any scheme other than `Bearer`, is answered by the
@@ -15,6 +15,7 @@ mod correlate;
 mod exchange;
 mod forward;
 mod metrics;
+mod observe;
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -29,12 +30,13 @@ use axum::response::{IntoResponse, Response};
 use ipnet::IpNet;
 use tsong_clock::Clock;
 use tsong_config::{Config, RouteTable, allowed, client_ip};
-use tsong_issuer::{ExchangeContext, ExchangeError, ExchangeObserver};
+use tsong_issuer::{ExchangeContext, ExchangeError};
 
 pub use cache::{ExchangeCache, lifetime};
 pub use correlate::correlate;
 pub use exchange::{ExchangeFuture, Exchanger};
 pub use metrics::{GatewayMetrics, RouteLabel, RouteStatus};
+pub use observe::RequestObserver;
 
 /// How long the gateway waits to connect to a downstream.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -56,7 +58,7 @@ pub struct Gateway {
     /// One downstream client per read timeout in the config.
     clients: HashMap<Duration, reqwest::Client>,
     metrics: Arc<GatewayMetrics>,
-    observer: Option<Arc<dyn ExchangeObserver>>,
+    observer: Arc<dyn RequestObserver>,
 }
 
 impl Gateway {
@@ -65,6 +67,7 @@ impl Gateway {
         exchanger: Arc<dyn Exchanger>,
         clock: Arc<dyn Clock>,
         metrics: Arc<GatewayMetrics>,
+        observer: Arc<dyn RequestObserver>,
     ) -> Result<Self, GatewayError> {
         let mut clients = HashMap::new();
         let timeouts = config
@@ -91,15 +94,8 @@ impl Gateway {
             ),
             clients,
             metrics,
-            observer: None,
+            observer,
         })
-    }
-
-    /// This gateway, reporting each request it passes through without a
-    /// token to `observer`.
-    pub fn with_observer(mut self, observer: Arc<dyn ExchangeObserver>) -> Self {
-        self.observer = Some(observer);
-        self
     }
 
     /// Answers `request`, with its request ID on the response, and counts
@@ -149,18 +145,19 @@ impl Gateway {
         if !allowed(client, &self.allow, route.allow.as_deref()) {
             return refuse(StatusCode::FORBIDDEN, "client address not allowed");
         }
-        let context = ExchangeContext::from_headers(request.headers());
         let minted = match credential(request.headers()) {
             Credential::None => {
-                if let Some(observer) = &self.observer {
-                    observer.passed_anonymous(&host, &context);
-                }
+                let context = ExchangeContext::from_headers(request.headers());
+                self.observer.passed_anonymous(&host, &context);
                 None
             }
-            Credential::Bearer(token) => match self.cache.token(token, &host, &context).await {
-                Ok(minted) => Some(minted),
-                Err(error) => return exchange_failure(&error),
-            },
+            Credential::Bearer(token) => {
+                let context = ExchangeContext::from_headers(request.headers());
+                match self.cache.token(token, &host, &context).await {
+                    Ok(minted) => Some(minted),
+                    Err(error) => return exchange_failure(&error),
+                }
+            }
             Credential::Malformed => return unauthorized("a bearer token is required", None),
             Credential::Unsupported => {
                 return unauthorized("only the Bearer scheme is accepted", None);
@@ -219,12 +216,13 @@ async fn proxy(
 /// What a request's `Authorization` header carries.
 #[derive(Debug, PartialEq, Eq)]
 enum Credential<'a> {
-    /// No `Authorization` header: the request passes through anonymous.
+    /// No `Authorization` header.
     None,
     /// The token in the request's one `Authorization: Bearer` header.
     Bearer(&'a str),
-    /// An empty or unreadable header, a `Bearer` header without exactly
-    /// one token, or more than one header.
+    /// An empty or unreadable header, a scheme that isn't an RFC 9110
+    /// token, a `Bearer` header without exactly one token, or more than
+    /// one header.
     Malformed,
     /// One header with a scheme other than `Bearer`, which Tsong can't
     /// vouch for and never forwards.
@@ -245,17 +243,24 @@ fn credential(headers: &HeaderMap) -> Credential<'_> {
         return Credential::Malformed;
     };
     let (scheme, token) = value.split_once(' ').unwrap_or((value, ""));
-    if scheme.is_empty() {
+    if !is_token(scheme) {
         return Credential::Malformed;
     }
     if !scheme.eq_ignore_ascii_case("bearer") {
         return Credential::Unsupported;
     }
-    let token = token.trim();
-    if token.is_empty() || token.contains(' ') {
-        return Credential::Malformed;
+    match token.trim() {
+        token if token.is_empty() || token.contains(' ') => Credential::Malformed,
+        token => Credential::Bearer(token),
     }
-    Credential::Bearer(token)
+}
+
+/// Whether `text` is an RFC 9110 token, as an auth scheme must be.
+fn is_token(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
 }
 
 /// The response to an exchange that failed.

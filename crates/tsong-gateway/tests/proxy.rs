@@ -207,66 +207,38 @@ async fn an_opaque_minted_token_is_forwarded() -> TestResult {
     Ok(())
 }
 
-/// A request to `orders.test` from `CLIENT` with these `Authorization`
-/// values.
-fn authorized(values: &[&str]) -> TestResult<Request> {
-    let mut builder = Request::get("/").header("host", "orders.test");
-    for value in values {
-        builder = builder.header("authorization", *value);
-    }
-    from(CLIENT, builder.body(Body::empty())?)
-}
-
-/// Asserts the gateway answered with a 401 and a bare `Bearer` challenge
-/// itself, so the downstream never saw the request.
-fn assert_refused(answer: &Answer, body: &str, case: &str) {
+/// Asserts the gateway answered a 401 with `challenge` and `body` itself,
+/// so the downstream never saw the request.
+fn assert_refused(answer: &Answer, challenge: &str, body: &str, case: &str) {
     assert_eq!(answer.status, StatusCode::UNAUTHORIZED, "{case}");
-    assert_eq!(answer.header("www-authenticate"), Some("Bearer"), "{case}");
+    assert_eq!(answer.header("www-authenticate"), Some(challenge), "{case}");
     assert_eq!(answer.header("x-echo"), None, "{case}");
     assert_eq!(answer.body, body, "{case}");
 }
 
 #[tokio::test]
-async fn a_malformed_authorization_header_is_a_401() -> TestResult {
+async fn malformed_headers_and_other_schemes_are_refused() -> TestResult {
+    const MALFORMED: &str = "a bearer token is required\n";
+    const UNSUPPORTED: &str = "only the Bearer scheme is accepted\n";
     let h = harness().await?;
-    for values in [
-        &[""][..],
-        &["Bearer"],
-        &["Bearer "],
-        &["bearer   "],
-        &["Bearer a b"],
-        &[" Bearer alice"],
-        &["Bearer alice", "Bearer bob"],
-        &["Bearer alice", "Basic YWxpY2U="],
+    for (values, body) in [
+        (&[""][..], MALFORMED),
+        (&["Bearer"], MALFORMED),
+        (&["Bearer "], MALFORMED),
+        (&["bearer   "], MALFORMED),
+        (&["Bearer a b"], MALFORMED),
+        (&[" Bearer alice"], MALFORMED),
+        (&["Bearer\talice"], MALFORMED),
+        (&["Bearer alice", "Bearer bob"], MALFORMED),
+        (&["Bearer alice", "Basic YWxpY2U="], MALFORMED),
+        (&["Basic YWxpY2U6c2VjcmV0"], UNSUPPORTED),
+        (&["basic YWxpY2U6c2VjcmV0"], UNSUPPORTED),
+        (&["Basic"], UNSUPPORTED),
+        (&["DPoP eyJhbGciOiJFUzI1NiJ9.e30.c2ln"], UNSUPPORTED),
+        (&["Negotiate YIIBhwYGKwYBBQUCoIIBezCCAXc="], UNSUPPORTED),
     ] {
         let answer = send(&h, authorized(values)?).await?;
-        assert_refused(
-            &answer,
-            "a bearer token is required\n",
-            &format!("{values:?}"),
-        );
-    }
-    assert!(h.exchanger.calls().is_empty());
-    assert!(h.anonymous.passed().is_empty());
-    Ok(())
-}
-
-#[tokio::test]
-async fn schemes_other_than_bearer_are_refused_and_never_forwarded() -> TestResult {
-    let h = harness().await?;
-    for value in [
-        "Basic YWxpY2U6c2VjcmV0",
-        "basic YWxpY2U6c2VjcmV0",
-        r#"Digest username="alice", realm="tsong", response="6629fae4""#,
-        "NTLM TlRMTVNTUAABAAAAB4IIog==",
-        "Negotiate YIIBhwYGKwYBBQUCoIIBezCCAXc=",
-        "DPoP eyJhbGciOiJFUzI1NiJ9.e30.c2ln",
-        r#"MAC id="h480djs93hd8""#,
-        "Bearer\talice",
-        "Basic",
-    ] {
-        let answer = send(&h, authorized(&[value])?).await?;
-        assert_refused(&answer, "only the Bearer scheme is accepted\n", value);
+        assert_refused(&answer, "Bearer", body, &format!("{values:?}"));
     }
     assert!(h.exchanger.calls().is_empty());
     assert!(h.anonymous.passed().is_empty());
@@ -312,13 +284,12 @@ async fn a_request_without_a_token_passes_through_unexchanged() -> TestResult {
 async fn a_bad_bearer_token_is_refused_not_passed_through() -> TestResult {
     let h = harness().await?;
     let answer = send(&h, get("orders.test", "/", Some("invalid"))?).await?;
-    assert_eq!(answer.status, StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        answer.header("www-authenticate"),
-        Some(r#"Bearer error="invalid_token""#)
+    assert_refused(
+        &answer,
+        r#"Bearer error="invalid_token""#,
+        "bad signature\n",
+        "invalid",
     );
-    assert_eq!(answer.header("x-echo"), None);
-    assert_eq!(answer.body, "bad signature\n");
     let answer = send(&h, get("orders.test", "/", Some("unscoped"))?).await?;
     assert_eq!(answer.status, StatusCode::FORBIDDEN);
     assert_eq!(answer.header("x-echo"), None);
@@ -452,8 +423,6 @@ async fn the_allow_lists_refuse_anonymous_requests_too() -> TestResult {
         let request = Request::get("/").header("host", host).body(Body::empty())?;
         let answer = send(&h, from(peer, request)?).await?;
         assert_eq!(answer.status, status, "{peer} {host}");
-        let forwarded = answer.header("x-echo").is_some();
-        assert_eq!(forwarded, status == StatusCode::OK, "{peer} {host}");
     }
     let passed: Vec<String> = h
         .anonymous

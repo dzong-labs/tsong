@@ -1,7 +1,7 @@
 ---
 title: The gateway exchanges each bearer token once and forwards by host
 type: note
-summary: The gateway looks up a route by host, exchanges the bearer token through a read-through cache, swaps it in, and streams the request to the route's downstream. A request without a token passes through unexchanged.
+summary: The gateway looks up a route by host, exchanges the bearer token through a read-through cache, swaps it in, and streams the request to the route's downstream. A request with no `Authorization` header is passed through without a token.
 status: evolving
 created: 2026-11-15
 ---
@@ -16,7 +16,7 @@ The gateway authenticates callers. Downstreams own authorization. A request flow
 4. Get the exchanged token from the cache, exchanging on a miss.
 5. Replace the bearer token and stream the request to the route's downstream.
 
-A request with no `Authorization` header skips steps 3 to 5 and is streamed to the downstream with no token, unexchanged, as roadmap item 33 describes. Deciding what an anonymous caller may see is the downstream's job.
+A request with no `Authorization` header skips steps 3 to 5 and is passed through without a token, as roadmap item 33 describes. Deciding what an anonymous caller may see is the downstream's job.
 
 The gateway is item 5 of the [roadmap](../../ROADMAP.md), and its exchange cache is item 6.
 
@@ -91,7 +91,7 @@ The cache is read-through. A miss exchanges the token and stores the result, and
 - The client IP is the TCP peer, unless the peer is in `gateway.trusted_proxies`. In that case the gateway walks `X-Forwarded-For` from the right and stops at the first address outside `trusted_proxies`. A caller can forge `X-Forwarded-For`, so only trusted proxies are believed.
 - The gateway-wide `allow` list applies first, then the route's `allow`.
 - The token comes from `Authorization: Bearer`. The scheme name compares without regard to case (RFC 9110 section 11.1).
-- A request with no `Authorization` header is anonymous. It is forwarded without one, never exchanged and never cached, and its audit line and `tsong_exchanges_total` count record the outcome `anonymous`.
+- A request with no `Authorization` header is anonymous. It is passed through without a token, never exchanged and never cached. It writes an `anonymous_request` audit line and counts in `tsong_anonymous_requests_total`.
 - A bearer token that fails is refused, never downgraded to anonymous. Any other scheme, such as `Basic`, `Digest`, `NTLM`, `Negotiate` or `DPoP`, is refused, so no credential Tsong hasn't vouched for reaches a downstream.
 - The `Authorization` header is replaced with the minted token. The inbound token is never forwarded.
 - Hop-by-hop headers are stripped, as RFC 9110 section 7.6.1 requires of an intermediary.

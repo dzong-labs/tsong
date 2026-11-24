@@ -1,7 +1,7 @@
 ---
 title: Tsong reports health, metrics and an audit line per exchange
 type: note
-summary: Liveness and readiness on their own listener, Prometheus metrics on the admin listener, one JSON audit line per token exchange or anonymous request, and every request correlated by X-Request-Id and W3C traceparent.
+summary: Liveness and readiness on their own listener, Prometheus metrics on the admin listener, one JSON audit line per token exchange or request passed through without a token, and every request correlated by X-Request-Id and W3C traceparent.
 status: evolving
 created: 2026-11-16
 ---
@@ -12,7 +12,7 @@ Tsong reports four things about itself:
 
 - whether it is alive and ready
 - Prometheus metrics
-- one audit line per token exchange or anonymous request
+- one audit line per token exchange or request passed through without a token
 - a request ID and trace context on every gateway request
 
 This is item 9 of the [roadmap](../../ROADMAP.md); config loads are audited as described in [[config-source]].
@@ -42,7 +42,8 @@ The list is deployed in the bootstrap file, never loaded from the config, and ch
 | `tsong_cache_entries` | | Exchanged tokens in the cache. A reload starts a new, empty cache |
 | `tsong_gateway_requests_total` | `route`, `status` | Gateway answers. `route` is `-` when no route matched |
 | `tsong_downstream_seconds` | `route` | Time to a downstream's response headers, 1ms to about 16s |
-| `tsong_exchanges_total` | `outcome` | Token exchanges: `issued`, or the OAuth error code. `anonymous` counts requests passed through without a token |
+| `tsong_exchanges_total` | `outcome` | Token exchanges: `issued`, or the OAuth error code |
+| `tsong_anonymous_requests_total` | | Gateway requests with no `Authorization` header, passed through without a token. They aren't exchanges |
 | `tsong_jwks_fetch_failures_total` | `issuer` | Failed JWKS fetches, by the trusted issuer's `iss` |
 | `tsong_jwks_age_seconds` | `issuer` | Seconds since the trusted issuer's keys were fetched, for the config being served. Past its `jwks_max_age`, its tokens are refused. An issuer whose keys were never fetched has no series |
 | `tsong_config_reloads_total` | `outcome` | Reloads that found a new revision: `applied`, `fetch_failed`, `invalid_config` or `build_failed` |
@@ -64,9 +65,15 @@ Each token exchange writes one JSON line to stdout. That covers every cache miss
 
 `iss` and `sub` are the subject token's, which identify the caller together. A refusal carries the OAuth error code as its `outcome` and its `error_description`. `iss` and `sub` are null when the token never validated. Tokens are never written.
 
-A gateway request with no `Authorization` header is passed through without an exchange ([roadmap](../../ROADMAP.md) item 33) and writes the same line with the outcome `anonymous`. Its `audience` is the route's host, and its `trusted_issuer`, `iss`, `sub`, `scope` and `error_description` are null, with `duration_ms` 0. A request refused for its `Authorization` header writes no line; the request metrics count it as a 401.
+A gateway request with no `Authorization` header is passed through without a token ([roadmap](../../ROADMAP.md) item 33). It isn't an exchange, so it writes a line of its own, with the route's host as its `audience`:
 
-The issuer reports each exchange to an `ExchangeObserver` (`crates/tsong-issuer/src/context.rs`), and the gateway reports each anonymous request to the same observer. `ExchangeAudit` in `crates/tsong/src/telemetry.rs` writes the line and counts the exchange.
+```json
+{"event":"anonymous_request","at":1763251200,"request_id":"9f1c…","trace_id":"4bf92f35…","audience":"orders.example.com"}
+```
+
+A request refused for its `Authorization` header writes no line; the request metrics count it as a 401.
+
+The issuer reports each exchange to an `ExchangeObserver` (`crates/tsong-issuer/src/context.rs`), and the gateway reports each anonymous request to a `RequestObserver` (`crates/tsong-gateway/src/observe.rs`). `ExchangeAudit` in `crates/tsong/src/telemetry.rs` implements both: it writes each line and counts it.
 
 Each failed JWKS fetch writes a line, and so does the first fetch that succeeds after a failure. While an issuer is down, a line appears every `jwks_retry`.
 

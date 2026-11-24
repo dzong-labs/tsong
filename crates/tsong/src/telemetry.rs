@@ -1,7 +1,7 @@
 //! What Tsong reports about itself: Prometheus metrics, kept for the life
-//! of the process, the audit line written for each token exchange and each
-//! request passed through without a token, and the audit lines for JWKS
-//! fetches that fail and for the fetch that recovers.
+//! of the process, the audit lines written for each token exchange and
+//! each anonymous request, and the audit lines for JWKS fetches that fail
+//! and for the fetch that recovers.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -15,15 +15,14 @@ use serde_json::json;
 use std::time::Duration;
 use tsong_clock::Clock;
 use tsong_config::TrustedIssuer;
-use tsong_gateway::GatewayMetrics;
+use tsong_gateway::{GatewayMetrics, RequestObserver};
 use tsong_issuer::{ExchangeContext, ExchangeEvent, ExchangeObserver, Issuer};
 use tsong_validate::{FetchFuture, JwksFetcher};
 
 use crate::reload::Audit;
 
 /// An outcome, as a label: `issued` or an OAuth error code for an
-/// exchange, `anonymous` for a request passed through without a token,
-/// `applied` or a reason for a reload.
+/// exchange, `applied` or a reason for a reload.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct OutcomeLabel {
     pub outcome: String,
@@ -45,9 +44,10 @@ pub struct IssuerLabel {
 pub struct Metrics {
     pub registry: Registry,
     pub gateway: Arc<GatewayMetrics>,
-    /// Token exchanges, and requests passed through without a token, by
-    /// outcome.
+    /// Token exchanges, by outcome.
     pub exchanges: Family<OutcomeLabel, Counter>,
+    /// Gateway requests forwarded without an `Authorization` header.
+    pub anonymous_requests: Counter,
     /// Failed JWKS fetches, by trusted issuer.
     pub jwks_failures: Family<IssuerLabel, Counter>,
     /// Seconds since each trusted issuer's keys were fetched, for the
@@ -78,7 +78,7 @@ impl Default for Metrics {
         let reloads = Family::<OutcomeLabel, Counter>::default();
         registry.register(
             "tsong_exchanges",
-            "Token exchanges, and requests passed through without a token, by outcome",
+            "Token exchanges, by outcome",
             exchanges.clone(),
         );
         registry.register(
@@ -95,6 +95,12 @@ impl Default for Metrics {
             "tsong_config_reloads",
             "Config reloads that found a new revision, by outcome",
             reloads.clone(),
+        );
+        let anonymous_requests = Counter::default();
+        registry.register(
+            "tsong_anonymous_requests",
+            "Gateway requests forwarded without an Authorization header",
+            anonymous_requests.clone(),
         );
         let config_fetched = Gauge::default();
         registry.register(
@@ -118,6 +124,7 @@ impl Default for Metrics {
             registry,
             gateway,
             exchanges,
+            anonymous_requests,
             jwks_failures,
             jwks_age,
             reloads,
@@ -137,19 +144,18 @@ impl Metrics {
     }
 }
 
-/// Writes one audit line per token exchange, and per request passed
-/// through without a token, and counts it by outcome.
+/// Writes one audit line per token exchange and per anonymous request,
+/// and counts each.
 pub struct ExchangeAudit {
     pub audit: Arc<dyn Audit>,
     pub exchanges: Family<OutcomeLabel, Counter>,
+    pub anonymous_requests: Counter,
     pub clock: Arc<dyn Clock>,
 }
 
-/// The outcome of a request passed through without a token.
-pub const ANONYMOUS: &str = "anonymous";
-
-impl ExchangeAudit {
-    fn record(&self, outcome: &str, event: &ExchangeEvent) {
+impl ExchangeObserver for ExchangeAudit {
+    fn exchanged(&self, event: &ExchangeEvent) {
+        let outcome = event.error.unwrap_or("issued");
         self.exchanges
             .get_or_create(&OutcomeLabel {
                 outcome: outcome.to_owned(),
@@ -173,24 +179,17 @@ impl ExchangeAudit {
     }
 }
 
-impl ExchangeObserver for ExchangeAudit {
-    fn exchanged(&self, event: &ExchangeEvent) {
-        self.record(event.error.unwrap_or("issued"), event);
-    }
-
+impl RequestObserver for ExchangeAudit {
     fn passed_anonymous(&self, audience: &str, context: &ExchangeContext) {
-        let event = ExchangeEvent {
-            context: context.clone(),
-            audience: Some(audience.to_owned()),
-            trusted_issuer: None,
-            iss: None,
-            sub: None,
-            scope: None,
-            error: None,
-            error_description: None,
-            duration: Duration::ZERO,
-        };
-        self.record(ANONYMOUS, &event);
+        self.anonymous_requests.inc();
+        let line = json!({
+            "event": "anonymous_request",
+            "at": self.clock.unix_seconds(),
+            "request_id": context.request_id,
+            "trace_id": context.trace_id,
+            "audience": audience,
+        });
+        self.audit.record(&line.to_string());
     }
 }
 

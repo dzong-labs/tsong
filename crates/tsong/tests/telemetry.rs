@@ -18,6 +18,7 @@ use tsong::telemetry::{
 };
 use tsong_clock::ManualClock;
 use tsong_config::{Config, ConfigError, TrustedIssuer};
+use tsong_gateway::RequestObserver;
 use tsong_issuer::{ExchangeContext, ExchangeEvent, ExchangeObserver};
 use tsong_validate::JwksFetcher;
 use tsong_validate::testkit::FakeFetcher;
@@ -46,6 +47,7 @@ fn each_exchange_writes_one_audit_line_and_is_counted() -> TestResult {
     let audit = ExchangeAudit {
         audit: lines.clone(),
         exchanges: metrics.exchanges.clone(),
+        anonymous_requests: metrics.anonymous_requests.clone(),
         clock: Arc::new(ManualClock::at(NOW)),
     };
     audit.exchanged(&event(None));
@@ -94,42 +96,24 @@ fn an_anonymous_request_writes_an_audit_line_and_is_counted() -> TestResult {
     let audit = ExchangeAudit {
         audit: lines.clone(),
         exchanges: metrics.exchanges.clone(),
+        anonymous_requests: metrics.anonymous_requests.clone(),
         clock: Arc::new(ManualClock::at(NOW)),
     };
     audit.passed_anonymous("orders.test", &event(None).context);
-    audit.exchanged(&event(None));
-    let parsed = lines.parsed()?;
     assert_eq!(
-        parsed.first(),
-        Some(&json!({
-            "event": "token_exchange",
+        lines.parsed()?,
+        [json!({
+            "event": "anonymous_request",
             "at": NOW,
-            "outcome": "anonymous",
             "request_id": "r-1",
             "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
             "audience": "orders.test",
-            "trusted_issuer": null,
-            "iss": null,
-            "sub": null,
-            "scope": null,
-            "error_description": null,
-            "duration_ms": 0.0,
-        }))
+        })]
     );
-    let count = |outcome: &str| {
-        metrics
-            .exchanges
-            .get_or_create(&OutcomeLabel {
-                outcome: outcome.into(),
-            })
-            .get()
-    };
-    assert_eq!((count("anonymous"), count("issued")), (1, 1));
+    assert_eq!(metrics.anonymous_requests.get(), 1);
     let text = metrics.encode()?;
-    assert!(
-        text.contains(r#"tsong_exchanges_total{outcome="anonymous"} 1"#),
-        "{text}"
-    );
+    assert!(text.contains("tsong_anonymous_requests_total 1"), "{text}");
+    assert!(!text.contains("tsong_exchanges_total{"), "{text}");
     Ok(())
 }
 

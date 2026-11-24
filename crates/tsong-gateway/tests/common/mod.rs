@@ -18,10 +18,8 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 use tsong_clock::ManualClock;
 use tsong_config::Config;
-use tsong_gateway::{ExchangeFuture, Exchanger, Gateway, GatewayMetrics};
-use tsong_issuer::{
-    ExchangeContext, ExchangeError, ExchangeEvent, ExchangeObserver, TokenResponse,
-};
+use tsong_gateway::{ExchangeFuture, Exchanger, Gateway, GatewayMetrics, RequestObserver};
+use tsong_issuer::{ExchangeContext, ExchangeError, TokenResponse};
 
 /// What a test returns: nothing, or why it failed.
 pub type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
@@ -155,8 +153,8 @@ impl Exchanger for FakeExchanger {
     }
 }
 
-/// An observer that records each request passed through without a token:
-/// its audience and context.
+/// An observer that records each anonymous request: its audience and
+/// context.
 #[derive(Default)]
 pub struct Anonymous(Mutex<Vec<(String, ExchangeContext)>>);
 
@@ -169,10 +167,7 @@ impl Anonymous {
     }
 }
 
-impl ExchangeObserver for Anonymous {
-    /// The fake exchanger reports no exchanges.
-    fn exchanged(&self, _: &ExchangeEvent) {}
-
+impl RequestObserver for Anonymous {
     fn passed_anonymous(&self, audience: &str, context: &ExchangeContext) {
         self.0
             .lock()
@@ -261,8 +256,13 @@ pub fn harness_with(
     let clock = Arc::new(ManualClock::at(NOW));
     let metrics = Arc::new(GatewayMetrics::default());
     let anonymous = Arc::new(Anonymous::default());
-    let gateway = Gateway::new(config, exchanger.clone(), clock, metrics.clone())?
-        .with_observer(anonymous.clone());
+    let gateway = Gateway::new(
+        config,
+        exchanger.clone(),
+        clock,
+        metrics.clone(),
+        anonymous.clone(),
+    )?;
     Ok(Harness {
         router: tsong_gateway::router(Arc::new(gateway)),
         exchanger,
@@ -278,6 +278,16 @@ pub fn get(host: &str, path: &str, token: Option<&str>) -> TestResult<Request> {
     let mut builder = Request::get(path).header("host", host);
     if let Some(token) = token {
         builder = builder.header("authorization", format!("Bearer {token}"));
+    }
+    from(CLIENT, builder.body(Body::empty())?)
+}
+
+/// A request to `orders.test` from `CLIENT` with these `Authorization`
+/// values.
+pub fn authorized(values: &[&str]) -> TestResult<Request> {
+    let mut builder = Request::get("/").header("host", "orders.test");
+    for value in values {
+        builder = builder.header("authorization", *value);
     }
     from(CLIENT, builder.body(Body::empty())?)
 }

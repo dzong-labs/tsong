@@ -89,6 +89,7 @@ impl State {
         let observer = ExchangeAudit {
             audit,
             exchanges: metrics.exchanges.clone(),
+            anonymous_requests: metrics.anonymous_requests.clone(),
             clock: clock.clone(),
         };
         let observer = Arc::new(observer);
@@ -98,8 +99,13 @@ impl State {
         let refresher = refresh
             .then(|| Refresher::spawn(issuer.clone(), metrics.jwks_age.clone(), REFRESH_TICK))
             .flatten();
-        let gateway = Gateway::new(&config, issuer.clone(), clock, metrics.gateway.clone())?
-            .with_observer(observer);
+        let gateway = Gateway::new(
+            &config,
+            issuer.clone(),
+            clock,
+            metrics.gateway.clone(),
+            observer,
+        )?;
         let gateway = Arc::new(gateway);
         Ok(Self {
             revision: snapshot.revision,
