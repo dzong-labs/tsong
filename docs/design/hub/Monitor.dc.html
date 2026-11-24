@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tsong hub</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;600&amp;display=swap">
+<style>
+@font-face{font-family:'Selawik';font-weight:300;font-display:swap;src:url(/_blob/d81226ad7c78c84ccb3f998c75f9a7d7) format('truetype')}
+@font-face{font-family:'Selawik';font-weight:400;font-display:swap;src:url(/_blob/a3da87f847b156031919d650163f7617) format('truetype')}
+@font-face{font-family:'Selawik';font-weight:600 700;font-display:swap;src:url(/_blob/1f81253b6a28b91b4cd108ba48d8cbde) format('truetype')}
+@font-face{font-family:'Cascadia Mono Web';font-weight:400;font-display:swap;src:url(/_blob/a0fe85ab1c4359da7e4ffeb9a50108fa) format('woff2')}
+@font-face{font-family:'Cascadia Mono Web';font-weight:600;font-display:swap;src:url(/_blob/5ab9541533be0d33718bc58d8636170d) format('woff2')}
+body{margin:0}
+.route-row:hover,.route-row:focus-visible{background:#282828;color:#D4D4D4}
+.memo{box-sizing:border-box;width:100%;padding:12px;background:rgba(0,0,0,0.2);color:#D4D4D4;caret-color:#D4D4D4;border:0;outline:none;box-shadow:none;font-family:'Cascadia Mono Web','Cascadia Mono',monospace;font-size:14px;line-height:1.6;resize:vertical}
+input.memo{width:240px;min-height:44px;padding:0 12px;font-family:inherit;font-size:16px}
+.events>li:nth-child(odd){background:#282828}
+a,button,summary,select,label[for],[role="tab"],input[type="checkbox"],input[type="radio"]{cursor:pointer}button:disabled{cursor:default}
+a{color:#D4D4D4;text-decoration-thickness:1px;text-underline-offset:3px}a:visited{color:#D4D4D4}a:hover{color:#9D9D9D}
+.mono{font-family:'Cascadia Mono Web','Cascadia Mono',monospace}
+select,textarea,input{color-scheme:dark}::placeholder{color:#9D9D9D;opacity:1}
+</style>
+</helmet>
+<div style="width: 12320px; height: {{stripHeight}}px; display: flex; background: #1E1E1E; color: #D4D4D4; font-family: {{sans}}; font-size: 16px; line-height: 1.5">
+
+<section id="start" aria-label="start" style="flex: 0 0 1120px; box-sizing: border-box; padding: 40px 96px 64px 64px; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 48px">
+<h2 style="margin: 0; font-size: 87px; font-weight: 300; line-height: 1; letter-spacing: -0.03em">start</h2>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px 40px">
+<a href="#status" onClick="{{goSignals}}" style="text-decoration: none; display: flex; flex-direction: column; gap: 4px; color: #D4D4D4; min-width: 0"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">4,820</span><span>exchanges per minute</span><span style="font-size: 14px; color: #9D9D9D">usually about 4,500 at this hour</span></a>
+<a href="#watch" onClick="{{goWatch}}" style="text-decoration: none; display: flex; flex-direction: column; gap: 4px; color: #D4D4D4; min-width: 0"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">3.0%</span><span>exchanges refused</span><span style="font-size: 14px; color: #9D9D9D">usually 0.9%</span></a>
+<a href="#status" onClick="{{goObjectives}}" style="text-decoration: none; display: flex; flex-direction: column; gap: 4px; color: #D4D4D4; min-width: 0"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">31 ms</span><span>exchange latency (p99)</span><span style="font-size: 14px; color: #9D9D9D">objective: 50 ms</span></a>
+<a href="#status" onClick="{{goSignals}}" style="text-decoration: none; display: flex; flex-direction: column; gap: 4px; color: #D4D4D4; min-width: 0"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">87%</span><span>exchange cache hit rate</span><span style="font-size: 14px; color: #9D9D9D">usually 85 to 90%</span></a>
+<a href="#trust" onClick="{{goTrust}}" style="text-decoration: none; display: flex; flex-direction: column; gap: 4px; color: #D4D4D4; min-width: 0"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">2 h</span><span>soonest key expiry</span><span style="font-size: 14px; color: #9D9D9D">okta's cached JWKS · signing keys: 6 days</span></a>
+<a href="#config" onClick="{{goConfig}}" style="text-decoration: none; display: flex; flex-direction: column; gap: 4px; color: #D4D4D4; min-width: 0"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">3 of 4</span><span>replicas on the same revision</span><span style="font-size: 14px; color: #9D9D9D">usually 4 of 4</span></a>
+</div>
+<div style="display: flex; gap: 48px; align-items: flex-start">
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 40px">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300"><a href="#alerts" onClick="{{goAlerts}}" style="color: #D4D4D4; text-decoration: none">alerts</a></h3>
+<div style="display: grid; grid-template-columns: 17px minmax(0, 1fr); align-items: center; gap: 2px 16px"><svg width="17" height="17" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5L13.5 3.5V8C13.5 11 11 13.25 8 14.5C5 13.25 2.5 11 2.5 8V3.5Z" fill="none" stroke="#E5322D" stroke-width="1.5" stroke-linejoin="round"></path><path d="M8 5V9" stroke="#E5322D" stroke-width="1.5" stroke-linecap="round"></path><circle cx="8" cy="11.3" r="0.9" fill="#E5322D"></circle></svg><span style="font-weight: 600">okta's JWKS refresh is failing</span><span></span><span>Its cached keys expire in 2 h. After that, every okta token is refused.</span></div>
+<div style="display: grid; grid-template-columns: 17px minmax(0, 1fr); align-items: center; gap: 2px 16px"><svg width="17" height="17" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5L13.5 3.5V8C13.5 11 11 13.25 8 14.5C5 13.25 2.5 11 2.5 8V3.5Z" fill="none" stroke="#E5322D" stroke-width="1.5" stroke-linejoin="round"></path><path d="M8 5V9" stroke="#E5322D" stroke-width="1.5" stroke-linecap="round"></path><circle cx="8" cy="11.3" r="0.9" fill="#E5322D"></circle></svg><span style="font-weight: 600">Config c71a5e9 won't load</span><span></span><span>Every replica rejected it. They keep serving what they had.</span></div>
+<div style="display: grid; grid-template-columns: 17px minmax(0, 1fr); align-items: center; gap: 2px 16px"><svg width="17" height="17" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5L13.5 3.5V8C13.5 11 11 13.25 8 14.5C5 13.25 2.5 11 2.5 8V3.5Z" fill="none" stroke="#E5322D" stroke-width="1.5" stroke-linejoin="round"></path><path d="M8 5V9" stroke="#E5322D" stroke-width="1.5" stroke-linecap="round"></path><circle cx="8" cy="11.3" r="0.9" fill="#E5322D"></circle></svg><span style="font-weight: 600">Replicas serve different revisions</span><span></span><span>replica-d is still on 3f9c2a1, without the orders.read requirement.</span></div>
+<a href="#alerts" onClick="{{goAlerts}}" style="align-self: flex-start; margin-left: 33px; min-height: 44px; display: inline-flex; align-items: center; color: #9D9D9D">see all {{openCount}} open</a>
+</div>
+<div style="display: flex; flex-direction: column; gap: 16px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300"><a href="#status" onClick="{{goStatus}}" style="color: #D4D4D4; text-decoration: none">status</a></h3>
+<div style="display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 16px"><svg width="12" height="12" viewBox="0 0 12 12" style="margin-top: 6px" aria-hidden="true"><path d="M6 0l6 12H0z" fill="#F2C200"></path></svg><span style="font-weight: 600">JWKS fetch is degraded</span><span></span><span>Fetches from okta have timed out since 08:27. Exchanges for entra tokens are not affected.</span></div>
+<div style="display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 16px"><svg width="12" height="12" viewBox="0 0 12 12" style="margin-top: 6px" aria-hidden="true"><rect x="1" y="1" width="10" height="10" fill="none" stroke="#D4D4D4" stroke-width="1.5"></rect></svg><span style="font-weight: 600">Scheduled maintenance</span><span></span><span>The admin listener restarts on [DATE]. Exchanges go on.</span></div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px"><h3 style="margin: 0; font-size: 29px; font-weight: 300">latest events</h3><span style="color: #9D9D9D">from watch, newest first</span></div>
+<div style="display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 0 16px"><span class="mono" style="font-size: 14px; line-height: 22px; color: #9D9D9D">12:10:04</span><span><span style="font-weight: 600">minted</span> for <span class="mono">entra:svc-checkout</span> on orders.test <span style="color: #9D9D9D">· cached</span></span></div>
+<div style="display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 0 16px"><span class="mono" style="font-size: 14px; line-height: 22px; color: #9D9D9D">12:10:04</span><span><span style="font-weight: 600">refused 401</span> on reports.test <span style="color: #9D9D9D">· typ JWT not accepted</span></span></div>
+<div style="display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 0 16px"><span class="mono" style="font-size: 14px; line-height: 22px; color: #9D9D9D">12:10:03</span><span><span style="font-weight: 600">minted</span> for <span class="mono">entra:svc-stock</span> on inventory.test <span style="color: #9D9D9D">· fresh</span></span></div>
+<div style="display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 0 16px"><span class="mono" style="font-size: 14px; line-height: 22px; color: #9D9D9D">12:10:03</span><span><span style="font-weight: 600">refused 403</span> for <span class="mono">okta:jdoe</span> on orders.test <span style="color: #9D9D9D">· scope orders.delete not in allow</span></span></div>
+<a href="#watch" onClick="{{goWatch}}" style="align-self: flex-start; margin-left: 88px; min-height: 44px; display: inline-flex; align-items: center; color: #9D9D9D">see all in watch</a>
+</div>
+</div>
+<div style="flex: 0 0 280px; margin-left: auto; min-width: 0; display: flex; flex-direction: column; gap: 40px">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<h3 style="margin: 0 0 10px; font-size: 29px; font-weight: 300">you</h3>
+<span style="font-weight: 600">[YOUR NAME]</span>
+<span style="color: #9D9D9D">Gateway operator</span>
+<span class="mono" style="font-size: 14px; color: #9D9D9D">entra:[YOUR ID]</span>
+<a href="#" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center">view your profile</a>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h3 style="margin: 0 0 6px; font-size: 29px; font-weight: 300">worth a look</h3>
+<a href="#callers" onClick="{{goCallers}}" style="text-decoration: none; display: flex; flex-direction: column; gap: 2px; padding: 8px 0; min-height: 44px; box-sizing: border-box; color: #D4D4D4"><span style="font-weight: 600">okta:svc-crawler</span><span style="color: #9D9D9D">tried 38 of 42 routes in 10 minutes; usually calls 2</span></a>
+<a href="#callers" onClick="{{goCallers}}" style="text-decoration: none; display: flex; flex-direction: column; gap: 2px; padding: 8px 0; min-height: 44px; box-sizing: border-box; color: #D4D4D4"><span style="font-weight: 600">[CLIENT ADDRESS]</span><span style="color: #9D9D9D">2,400 tokens with typ JWT in the last hour; usually about 10</span></a>
+<a href="#routes" onClick="{{goRoutes}}" style="text-decoration: none; display: flex; flex-direction: column; gap: 2px; padding: 8px 0; min-height: 44px; box-sizing: border-box; color: #D4D4D4"><span style="font-weight: 600">reports.test</span><span style="color: #9D9D9D">refusing 1.9% today; usually 0.6%</span></a>
+<a href="#keys" onClick="{{goKeys}}" style="text-decoration: none; display: flex; flex-direction: column; gap: 2px; padding: 8px 0; min-height: 44px; box-sizing: border-box; color: #D4D4D4"><span style="font-weight: 600">RS256 signing key</span><span style="color: #9D9D9D">expires 2026-11-29; payments.test and legacy.test sign with it</span></a>
+</div>
+</div>
+</div>
+</section>
+
+<section id="alerts" aria-label="alerts" style="flex: 0 0 1120px; box-sizing: border-box; padding: 40px 0 0 64px; overflow: hidden; min-height: 0; display: flex; flex-direction: column; gap: 40px">
+<h2 style="margin: 0; font-size: 87px; font-weight: 300; line-height: 1; letter-spacing: -0.03em">alerts</h2>
+<div role="tablist" aria-label="Alert views" style="display: flex; gap: 32px; padding-right: 96px"><button type="button" role="tab" aria-selected="{{aOpen.sel}}" onClick="{{aOpen.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 29px; font-weight: 300; color: {{aOpen.color}}">{{aOpen.label}}</button><button type="button" role="tab" aria-selected="{{aReviewed.sel}}" onClick="{{aReviewed.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 29px; font-weight: 300; color: {{aReviewed.color}}">{{aReviewed.label}}</button><button type="button" role="tab" aria-selected="{{aAll.sel}}" onClick="{{aAll.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 29px; font-weight: 300; color: {{aAll.color}}">{{aAll.label}}</button></div>
+<div style="flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 96px 64px 0">
+<div role="tabpanel" aria-label="{{alertTab}}" style="display: flex; flex-direction: column; gap: 24px; max-width: 760px">
+<ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 32px">
+<sc-for list="{{alertList}}" as="alert" hint-placeholder-count="5">
+<li style="display: grid; grid-template-columns: 17px minmax(0, 1fr); gap: 4px 16px; align-items: start">
+<span style="display: flex; justify-content: center; padding-top: 7px">
+<sc-if value="{{alert.serious}}" hint-placeholder-val="{{ true }}"><svg width="17" height="17" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5L13.5 3.5V8C13.5 11 11 13.25 8 14.5C5 13.25 2.5 11 2.5 8V3.5Z" fill="none" stroke="#E5322D" stroke-width="1.5" stroke-linejoin="round"></path><path d="M8 5V9" stroke="#E5322D" stroke-width="1.5" stroke-linecap="round"></path><circle cx="8" cy="11.3" r="0.9" fill="#E5322D"></circle></svg></sc-if>
+<sc-if value="{{alert.notice}}" hint-placeholder-val="{{ false }}"><svg width="12" height="12" viewBox="0 0 12 12" style="margin-top: 2px" aria-hidden="true"><rect x="1" y="1" width="10" height="10" fill="none" stroke="#D4D4D4" stroke-width="1.5"></rect></svg></sc-if>
+</span>
+<span style="font-size: 21px; font-weight: 600">{{alert.title}}</span>
+<span></span>
+<span>{{alert.body}}</span>
+<span></span>
+<span style="color: #9D9D9D">{{alert.meta}}</span>
+<span></span>
+<span style="display: flex; flex-wrap: wrap; gap: 0 24px"><a href="{{alert.href}}" onClick="{{alert.go}}" style="min-height: 44px; display: inline-flex; align-items: center">{{alert.action}}</a><button type="button" onClick="{{alert.toggle}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; text-decoration: underline; text-underline-offset: 3px; color: #9D9D9D">{{alert.toggleLabel}}</button></span>
+</li>
+</sc-for>
+</ol>
+<sc-if value="{{alertsEmpty}}" hint-placeholder-val="{{ false }}"><p style="margin: 0; color: #9D9D9D">Nothing here.</p></sc-if>
+</div>
+</div>
+</section>
+
+<section id="watch" aria-label="watch" style="flex: 0 0 1120px; box-sizing: border-box; padding: 40px 0 0 64px; overflow: hidden; min-height: 0; display: flex; flex-direction: column; gap: 40px">
+<h2 style="margin: 0; padding-right: 96px; font-size: 87px; font-weight: 300; line-height: 1; letter-spacing: -0.03em">watch</h2>
+<p style="margin: 0; color: #9D9D9D; max-width: 720px; padding-right: 96px">The audit stream, one line per exchange, newest first. Refusal reasons are shown only here and in the audit log. Callers get a bare 401 <span class="mono">invalid_token</span> or 403.</p>
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 32px; padding-right: 96px">
+<div role="tablist" aria-label="Time range" style="display: flex; gap: 28px"><button type="button" role="tab" aria-selected="{{wLive.sel}}" onClick="{{wLive.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 21px; font-weight: 300; color: {{wLive.color}}">live</button><button type="button" role="tab" aria-selected="{{w15.sel}}" onClick="{{w15.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 21px; font-weight: 300; color: {{w15.color}}">15 minutes</button><button type="button" role="tab" aria-selected="{{w1h.sel}}" onClick="{{w1h.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 21px; font-weight: 300; color: {{w1h.color}}">1 hour</button><button type="button" role="tab" aria-selected="{{w24h.sel}}" onClick="{{w24h.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 21px; font-weight: 300; color: {{w24h.color}}">24 hours</button><button type="button" role="tab" aria-selected="{{w7d.sel}}" onClick="{{w7d.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 21px; font-weight: 300; color: {{w7d.color}}">7 days</button></div>
+<button type="button" onClick="{{openFilter}}" aria-haspopup="dialog" aria-expanded="{{filterOpenAttr}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; color: #D4D4D4; display: inline-flex; align-items: center; gap: 10px"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M2.5 3.5H15.5L10.5 9.5V14.5L7.5 13V9.5Z" fill="none" stroke="#D4D4D4" stroke-width="1.5" stroke-linejoin="round"></path></svg>filter</button>
+</div>
+<sc-if value="{{hasFilter}}" hint-placeholder-val="{{ false }}"><div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding-right: 96px"><span style="color: #9D9D9D">showing only</span><span class="mono" style="font-size: 14px">{{activeFilter}}</span><button type="button" onClick="{{clearFilter}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; color: #D4D4D4; text-decoration: underline; text-underline-offset: 3px">clear</button></div></sc-if>
+<sc-if value="{{filterOpen}}" hint-placeholder-val="{{ false }}">
+<div role="dialog" aria-labelledby="filter-title" ref="{{filterRef}}" style="margin: 0 0 0 -64px; padding: 32px 96px 32px 64px; background: #2B2B2B; display: flex; flex-direction: column; gap: 16px">
+<h3 id="filter-title" style="margin: 0; font-size: 29px; font-weight: 300">filter events</h3>
+<label for="watch-query" style="color: #9D9D9D">Compare a field with <span class="mono">=</span> or <span class="mono">!=</span>, where <span class="mono">*</span> in a value matches any text. Join comparisons with <span class="mono">and</span>, <span class="mono">or</span> and <span class="mono">not</span>, and group them with parentheses.</label>
+<textarea id="watch-query" ref="{{queryRef}}" rows="3" spellcheck="false" class="memo">outcome = refused and route = orders.* and issuer = </textarea>
+<div style="display: flex; gap: 48px; align-items: flex-start">
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 4px"><span style="color: #9D9D9D">values of <span class="mono">issuer</span> in the last 24 hours</span>
+<ul role="listbox" aria-label="Suggested values for issuer" style="margin: 0; padding: 0; list-style: none; background: #1E1E1E"><li role="option" aria-selected="true" style="display: flex; justify-content: space-between; gap: 16px; min-height: 36px; align-items: center; padding: 0 12px; background: #3A3A3A;"><span class="mono" style="font-size: 14px">okta</span><span style="color: #9D9D9D; font-variant-numeric: tabular-nums">1.24 M</span></li><li role="option" aria-selected="false" style="display: flex; justify-content: space-between; gap: 16px; min-height: 36px; align-items: center; padding: 0 12px; "><span class="mono" style="font-size: 14px">entra</span><span style="color: #9D9D9D; font-variant-numeric: tabular-nums">5.16 M</span></li></ul>
+<span style="color: #9D9D9D; font-size: 14px">up and down arrows to choose, tab to insert</span></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><span style="color: #9D9D9D">your recent filters</span>
+<ul aria-label="Recent filters" style="margin: 0; padding: 0; list-style: none"><li style="min-height: 36px; display: flex; align-items: center; padding: 0 12px"><span class="mono" style="font-size: 14px; color: #9D9D9D">sub = okta:svc-crawler</span></li><li style="min-height: 36px; display: flex; align-items: center; padding: 0 12px"><span class="mono" style="font-size: 14px; color: #9D9D9D">outcome = 401 and reason = *typ* and client = [CLIENT ADDRESS]</span></li><li style="min-height: 36px; display: flex; align-items: center; padding: 0 12px"><span class="mono" style="font-size: 14px; color: #9D9D9D">route = reports.test and outcome = refused</span></li></ul></div>
+</div>
+<div style="flex: 0 0 380px; min-width: 0; display: flex; flex-direction: column; gap: 4px"><span style="color: #9D9D9D">fields</span>
+<dl style="margin: 0; display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 4px 16px; color: #9D9D9D"><dt class="mono" style="font-size: 14px">route</dt><dd style="margin: 0">a route host, such as <span class="mono">orders.test</span> or <span class="mono">pay*</span></dd><dt class="mono" style="font-size: 14px">issuer</dt><dd style="margin: 0">a trusted issuer's name</dd><dt class="mono" style="font-size: 14px">sub</dt><dd style="margin: 0">a subject, <span class="mono">sub_prefix:sub</span></dd><dt class="mono" style="font-size: 14px">outcome</dt><dd style="margin: 0"><span class="mono">minted</span>, <span class="mono">refused</span>, <span class="mono">401</span> or <span class="mono">403</span></dd><dt class="mono" style="font-size: 14px">reason</dt><dd style="margin: 0">the refusal reason, such as <span class="mono">*typ*</span></dd><dt class="mono" style="font-size: 14px">client</dt><dd style="margin: 0">a client address or range</dd></dl>
+</div>
+</div>
+<div style="display: flex; gap: 24px; align-items: center; justify-content: flex-end; margin-top: 8px"><button type="button" onClick="{{closeFilter}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; color: #D4D4D4; text-decoration: underline; text-underline-offset: 3px">cancel</button><button type="button" onClick="{{applyFilter}}" style="min-height: 44px; padding: 0 20px; background: #D4D4D4; color: #1E1E1E; border: 0; font: inherit; font-weight: 600">apply filter</button></div>
+</div>
+</sc-if>
+<div style="flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 96px 64px 0; display: flex; flex-direction: column; gap: 40px">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div aria-hidden="true" style="display: grid; grid-template-columns: 80px 300px 120px 56px minmax(0, 1fr) 56px; gap: 0 16px; padding: 0 12px 8px; color: #9D9D9D; position: sticky; top: 0; background: #1E1E1E"><span>time</span><span>outcome</span><span>route</span><span>issuer</span><span>subject</span><span>cache</span></div>
+<ol aria-label="Events" class="events" style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column">
+<sc-for list="{{events}}" as="ev" hint-placeholder-count="12">
+<li style="display: grid; grid-template-columns: 80px 300px 120px 56px minmax(0, 1fr) 56px; gap: 0 16px; align-items: baseline; padding: 10px 12px">
+<span class="mono" style="font-size: 14px; color: #9D9D9D">{{ev.time}}</span>
+<span style="display: flex; flex-direction: column">
+<span style="display: inline-flex; align-items: center; gap: 8px">
+<sc-if value="{{ev.minted}}" hint-placeholder-val="{{ true }}"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7.5L5.5 11L12 3.5" fill="none" stroke="#D4D4D4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></sc-if>
+<sc-if value="{{ev.refused}}" hint-placeholder-val="{{ false }}"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.75" fill="none" stroke="#E5322D" stroke-width="1.5"></circle><path d="M3 11L11 3" stroke="#E5322D" stroke-width="1.5"></path></svg></sc-if>
+<span style="font-weight: 600">{{ev.outcome}}</span>
+</span>
+<sc-if value="{{ev.refused}}" hint-placeholder-val="{{ false }}"><span class="mono" style="font-size: 14px; margin-left: 22px">{{ev.reason}}</span></sc-if>
+</span>
+<span>{{ev.route}}</span>
+<span>{{ev.issuer}}</span>
+<span class="mono" style="font-size: 14px; overflow-wrap: anywhere">{{ev.subject}}</span>
+<span style="color: #9D9D9D">{{ev.cache}}</span>
+</li>
+</sc-for>
+</ol>
+</div>
+<span style="display: flex; flex-wrap: wrap; gap: 0 24px"><button type="button" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; text-decoration: underline; text-underline-offset: 3px; color: #9D9D9D">show older events</button><a href="#explain" onClick="{{goExplain}}" style="min-height: 44px; display: inline-flex; align-items: center; color: #9D9D9D">replay a refused token in explain</a></span>
+</div>
+</section>
+
+<section id="routes" aria-label="routes" style="flex: 0 0 1120px; box-sizing: border-box; padding: 40px 0 0 64px; overflow: hidden; min-height: 0; display: flex; flex-direction: column; gap: 40px">
+<div style="padding-right: 96px; display: flex; flex-direction: column; gap: 40px">
+<h2 style="margin: 0; font-size: 87px; font-weight: 300; line-height: 1; letter-spacing: -0.03em">routes</h2>
+<div style="display: flex; flex-wrap: wrap; gap: 24px 56px">
+<span style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 40px; font-weight: 300; line-height: 1">42</span><span>routes in 8b0e6d4</span></span>
+<span style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 40px; font-weight: 300; line-height: 1">6.4 M</span><span>exchanges in 24 hours</span></span>
+<span style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 40px; font-weight: 300; line-height: 1">1.1%</span><span>refused in 24 hours</span></span>
+<span style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 40px; font-weight: 300; line-height: 1">2</span><span>sign with RS256</span></span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 32px">
+<div role="tablist" aria-label="Sort routes" style="display: flex; gap: 28px"><button type="button" role="tab" aria-selected="{{rBusiest.sel}}" onClick="{{rBusiest.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 21px; font-weight: 300; color: {{rBusiest.color}}">busiest</button><button type="button" role="tab" aria-selected="{{rRefused.sel}}" onClick="{{rRefused.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 21px; font-weight: 300; color: {{rRefused.color}}">most refused</button><button type="button" role="tab" aria-selected="{{rChanged.sel}}" onClick="{{rChanged.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 21px; font-weight: 300; color: {{rChanged.color}}">recently changed</button><button type="button" role="tab" aria-selected="{{rName.sel}}" onClick="{{rName.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 21px; font-weight: 300; color: {{rName.color}}">name</button></div>
+<button type="button" onClick="{{openRouteFilter}}" aria-haspopup="dialog" aria-expanded="{{routeFilterOpenAttr}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; color: #D4D4D4; display: inline-flex; align-items: center; gap: 10px"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M2.5 3.5H15.5L10.5 9.5V14.5L7.5 13V9.5Z" fill="none" stroke="#D4D4D4" stroke-width="1.5" stroke-linejoin="round"></path></svg>filter</button>
+</div>
+<sc-if value="{{hasRouteFilter}}" hint-placeholder-val="{{ false }}"><div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px"><span style="color: #9D9D9D">showing only</span><span class="mono" style="font-size: 14px">{{activeRouteFilter}}</span><button type="button" onClick="{{clearRouteFilter}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; color: #D4D4D4; text-decoration: underline; text-underline-offset: 3px">clear</button></div></sc-if>
+<sc-if value="{{routeFilterOpen}}" hint-placeholder-val="{{ false }}">
+<div role="dialog" aria-labelledby="route-filter-title" ref="{{routeFilterRef}}" style="margin: 0 -96px 0 -64px; padding: 32px 96px 32px 64px; background: #2B2B2B; display: flex; flex-direction: column; gap: 16px">
+<h3 id="route-filter-title" style="margin: 0; font-size: 29px; font-weight: 300">filter routes</h3>
+<label for="route-query" style="color: #9D9D9D">Compare a field with <span class="mono">=</span> or <span class="mono">!=</span>, where <span class="mono">*</span> in a value matches any text. Join comparisons with <span class="mono">and</span>, <span class="mono">or</span> and <span class="mono">not</span>, and group them with parentheses.</label>
+<textarea id="route-query" ref="{{routeQueryRef}}" rows="3" spellcheck="false" class="memo">scope = orders.* and alg = </textarea>
+<div style="display: flex; gap: 48px; align-items: flex-start">
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 4px"><span style="color: #9D9D9D">values of <span class="mono">alg</span> across 42 routes</span>
+<ul role="listbox" aria-label="Suggested values for alg" style="margin: 0; padding: 0; list-style: none; background: #1E1E1E"><li role="option" aria-selected="true" style="display: flex; justify-content: space-between; gap: 16px; min-height: 36px; align-items: center; padding: 0 12px; background: #3A3A3A;"><span class="mono" style="font-size: 14px">RS256</span><span style="color: #9D9D9D; font-variant-numeric: tabular-nums">2 routes</span></li><li role="option" aria-selected="false" style="display: flex; justify-content: space-between; gap: 16px; min-height: 36px; align-items: center; padding: 0 12px; "><span class="mono" style="font-size: 14px">ES256</span><span style="color: #9D9D9D; font-variant-numeric: tabular-nums">40 routes</span></li></ul>
+<span style="color: #9D9D9D; font-size: 14px">up and down arrows to choose, tab to insert</span></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><span style="color: #9D9D9D">your recent filters</span>
+<ul aria-label="Recent filters" style="margin: 0; padding: 0; list-style: none"><li style="min-height: 36px; display: flex; align-items: center; padding: 0 12px"><span class="mono" style="font-size: 14px; color: #9D9D9D">downstream = *payments*</span></li><li style="min-height: 36px; display: flex; align-items: center; padding: 0 12px"><span class="mono" style="font-size: 14px; color: #9D9D9D">client != any</span></li><li style="min-height: 36px; display: flex; align-items: center; padding: 0 12px"><span class="mono" style="font-size: 14px; color: #9D9D9D">audience = api://orders and scope != orders.read</span></li></ul></div>
+</div>
+<div style="flex: 0 0 380px; min-width: 0; display: flex; flex-direction: column; gap: 4px"><span style="color: #9D9D9D">fields</span>
+<dl style="margin: 0; display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 4px 16px; color: #9D9D9D"><dt class="mono" style="font-size: 14px">host</dt><dd style="margin: 0">a route host, such as <span class="mono">orders.test</span> or <span class="mono">pay*</span></dd><dt class="mono" style="font-size: 14px">downstream</dt><dd style="margin: 0">the downstream URL</dd><dt class="mono" style="font-size: 14px">audience</dt><dd style="margin: 0">an audience the route allows, requires or denies</dd><dt class="mono" style="font-size: 14px">scope</dt><dd style="margin: 0">a scope the route allows, requires or denies</dd><dt class="mono" style="font-size: 14px">alg</dt><dd style="margin: 0">the signing algorithm, such as <span class="mono">ES256</span></dd><dt class="mono" style="font-size: 14px">client</dt><dd style="margin: 0">a client address or range in its allow list, or <span class="mono">any</span></dd></dl>
+</div>
+</div>
+<div style="display: flex; gap: 24px; align-items: center; justify-content: flex-end; margin-top: 8px"><button type="button" onClick="{{closeRouteFilter}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; color: #D4D4D4; text-decoration: underline; text-underline-offset: 3px">cancel</button><button type="button" onClick="{{applyRouteFilter}}" style="min-height: 44px; padding: 0 20px; background: #D4D4D4; color: #1E1E1E; border: 0; font: inherit; font-weight: 600">apply filter</button></div>
+</div>
+</sc-if>
+<span style="color: #9D9D9D">The 6 busiest of 42, by exchanges in the last 24 hours</span>
+</div>
+</div>
+<div style="flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 96px 64px 0; display: flex; flex-direction: column; gap: 40px">
+<ol aria-label="Busiest routes" style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 16px">
+<li><a href="Route.dc.html" class="route-row" aria-label="orders.test" style="display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 0 24px; align-items: baseline; padding: 16px; margin: 0 -16px; color: #D4D4D4; text-decoration: none"><div style="display: flex; flex-direction: column; gap: 12px; min-width: 0"><h3 style="margin: 0; display: flex; flex-direction: column"><span style="font-size: 21px; font-weight: 600">orders.test</span><span class="mono" style="font-size: 14px; font-weight: 400; color: #9D9D9D">→ https://orders.internal:8443</span></h3><div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">2.14 M</span><span style="color: #9D9D9D">exchanges in 24 hours, 0.7% refused</span></div></div>
+<dl style="margin: 0; display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 16px">
+<dt style="color: #9D9D9D">audience</dt><dd style="margin: 0">require <span class="mono">tsong</span> · allow <span class="mono">api://orders</span></dd>
+<dt style="color: #9D9D9D">scope</dt><dd style="margin: 0">require <span class="mono">orders.read</span> · allow <span class="mono">orders.read</span>, <span class="mono">orders.write</span></dd>
+<dt style="color: #9D9D9D">signs with</dt><dd style="margin: 0">ES256</dd>
+<dt style="color: #9D9D9D">client IPs</dt><dd style="margin: 0">any</dd>
+
+</dl></a></li>
+<li><a href="Route.dc.html" class="route-row" aria-label="inventory.test" style="display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 0 24px; align-items: baseline; padding: 16px; margin: 0 -16px; color: #D4D4D4; text-decoration: none"><div style="display: flex; flex-direction: column; gap: 12px; min-width: 0"><h3 style="margin: 0; display: flex; flex-direction: column"><span style="font-size: 21px; font-weight: 600">inventory.test</span><span class="mono" style="font-size: 14px; font-weight: 400; color: #9D9D9D">→ http://inventory.internal:8080</span></h3><div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">1.31 M</span><span style="color: #9D9D9D">exchanges in 24 hours, 0.3% refused</span></div></div>
+<dl style="margin: 0; display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 16px">
+<dt style="color: #9D9D9D">audience</dt><dd style="margin: 0">require <span class="mono">tsong</span></dd>
+<dt style="color: #9D9D9D">scope</dt><dd style="margin: 0">allow <span class="mono">inventory.read</span>, <span class="mono">inventory.write</span></dd>
+<dt style="color: #9D9D9D">signs with</dt><dd style="margin: 0">ES256</dd>
+<dt style="color: #9D9D9D">client IPs</dt><dd style="margin: 0">any</dd>
+
+</dl></a></li>
+<li><a href="Route.dc.html" class="route-row" aria-label="search.test" style="display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 0 24px; align-items: baseline; padding: 16px; margin: 0 -16px; color: #D4D4D4; text-decoration: none"><div style="display: flex; flex-direction: column; gap: 12px; min-width: 0"><h3 style="margin: 0; display: flex; flex-direction: column"><span style="font-size: 21px; font-weight: 600">search.test</span><span class="mono" style="font-size: 14px; font-weight: 400; color: #9D9D9D">→ https://search.internal</span></h3><div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">960 k</span><span style="color: #9D9D9D">exchanges in 24 hours, 0.4% refused</span></div></div>
+<dl style="margin: 0; display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 16px">
+<dt style="color: #9D9D9D">audience</dt><dd style="margin: 0">require <span class="mono">tsong</span></dd>
+<dt style="color: #9D9D9D">scope</dt><dd style="margin: 0">require <span class="mono">search.query</span></dd>
+<dt style="color: #9D9D9D">signs with</dt><dd style="margin: 0">ES256</dd>
+<dt style="color: #9D9D9D">client IPs</dt><dd style="margin: 0">any</dd>
+
+</dl></a></li>
+<li><a href="Route.dc.html" class="route-row" aria-label="reports.test" style="display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 0 24px; align-items: baseline; padding: 16px; margin: 0 -16px; color: #D4D4D4; text-decoration: none"><div style="display: flex; flex-direction: column; gap: 12px; min-width: 0"><h3 style="margin: 0; display: flex; flex-direction: column"><span style="font-size: 21px; font-weight: 600">reports.test</span><span class="mono" style="font-size: 14px; font-weight: 400; color: #9D9D9D">→ https://reports.internal</span></h3><div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">840 k</span><span style="color: #9D9D9D">exchanges in 24 hours, 1.9% refused, usually 0.6%</span></div></div>
+<dl style="margin: 0; display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 16px">
+<dt style="color: #9D9D9D">audience</dt><dd style="margin: 0">require <span class="mono">tsong</span> · allow <span class="mono">api://reports</span></dd>
+<dt style="color: #9D9D9D">scope</dt><dd style="margin: 0">require <span class="mono">reports.read</span> · deny <span class="mono">reports.admin</span></dd>
+<dt style="color: #9D9D9D">signs with</dt><dd style="margin: 0">ES256</dd>
+<dt style="color: #9D9D9D">client IPs</dt><dd style="margin: 0">[CLIENT RANGE 2]</dd>
+
+</dl></a></li>
+<li><a href="Route.dc.html" class="route-row" aria-label="payments.test" style="display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 0 24px; align-items: baseline; padding: 16px; margin: 0 -16px; color: #D4D4D4; text-decoration: none"><div style="display: flex; flex-direction: column; gap: 12px; min-width: 0"><h3 style="margin: 0; display: flex; flex-direction: column"><span style="font-size: 21px; font-weight: 600">payments.test</span><span class="mono" style="font-size: 14px; font-weight: 400; color: #9D9D9D">→ https://payments.internal</span></h3><div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">410 k</span><span style="color: #9D9D9D">exchanges in 24 hours, 0.2% refused</span></div></div>
+<dl style="margin: 0; display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 16px">
+<dt style="color: #9D9D9D">audience</dt><dd style="margin: 0">require <span class="mono">tsong</span>, <span class="mono">api://payments</span></dd>
+<dt style="color: #9D9D9D">scope</dt><dd style="margin: 0">require <span class="mono">payments.write</span> · deny <span class="mono">payments.refund</span></dd>
+<dt style="color: #9D9D9D">signs with</dt><dd style="margin: 0">RS256, the downstream checks nothing else</dd>
+<dt style="color: #9D9D9D">client IPs</dt><dd style="margin: 0">[CLIENT RANGE 1]</dd>
+
+</dl></a></li>
+<li><a href="Route.dc.html" class="route-row" aria-label="legacy.test" style="display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 0 24px; align-items: baseline; padding: 16px; margin: 0 -16px; color: #D4D4D4; text-decoration: none"><div style="display: flex; flex-direction: column; gap: 12px; min-width: 0"><h3 style="margin: 0; display: flex; flex-direction: column"><span style="font-size: 21px; font-weight: 600">legacy.test</span><span class="mono" style="font-size: 14px; font-weight: 400; color: #9D9D9D">→ http://legacy.internal:8080</span></h3><div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 40px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums">120 k</span><span style="color: #9D9D9D">exchanges in 24 hours, 4.6% refused, usually 4%</span></div></div>
+<dl style="margin: 0; display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 16px">
+<dt style="color: #9D9D9D">audience</dt><dd style="margin: 0">require <span class="mono">tsong</span> · deny <span class="mono">api://payments</span></dd>
+<dt style="color: #9D9D9D">scope</dt><dd style="margin: 0">require <span class="mono">legacy.read</span></dd>
+<dt style="color: #9D9D9D">signs with</dt><dd style="margin: 0">RS256</dd>
+<dt style="color: #9D9D9D">client IPs</dt><dd style="margin: 0">[CLIENT RANGE 3]</dd>
+
+</dl></a></li>
+</ol>
+
+<div style="display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 16px; max-width: 760px"><svg width="12" height="12" viewBox="0 0 12 12" style="margin-top: 6px" aria-hidden="true"><rect x="1" y="1" width="10" height="10" fill="none" stroke="#D4D4D4" stroke-width="1.5"></rect></svg><span style="font-weight: 600">billing.test is not live</span><span></span><span>It arrives with c71a5e9, which no replica has loaded. It asks for ES384, and there is no active ES384 key.</span><span></span><a href="#config" onClick="{{goConfig}}" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; color: #9D9D9D">see config</a></div>
+</div>
+</section>
+
+<section id="trust" aria-label="trust" style="flex: 0 0 1120px; box-sizing: border-box; padding: 40px 96px 64px 64px; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 40px">
+<h2 style="margin: 0; font-size: 87px; font-weight: 300; line-height: 1; letter-spacing: -0.03em">trust</h2>
+<p style="margin: 0; color: #9D9D9D; max-width: 720px">2 trusted issuers. A token from any other issuer is refused 401 at the gateway. Each issuer's JWKS refreshes in the background every 15 minutes and expires after <span class="mono">jwks_max_age</span>, 6 h, without a good fetch.</p>
+<div style="display: flex; flex-direction: column; gap: 32px">
+<div role="tablist" aria-label="Trusted issuers" style="display: flex; gap: 32px"><button type="button" role="tab" aria-selected="{{trustEntra.sel}}" onClick="{{trustEntra.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 29px; font-weight: 300; color: {{trustEntra.color}}">entra</button><button type="button" role="tab" aria-selected="{{trustOkta.sel}}" onClick="{{trustOkta.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 29px; font-weight: 300; color: {{trustOkta.color}}; display: inline-flex; align-items: center; gap: 10px">okta<svg width="14" height="14" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 0l6 12H0z" fill="#F2C200"></path></svg><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">, 2 warnings</span></button></div>
+<sc-if value="{{trustEntra.on}}" hint-placeholder-val="{{ true }}"><div role="tabpanel" aria-label="entra" style="display: flex; gap: 64px; align-items: flex-start">
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 28px">
+<div style="display: flex; flex-direction: column; gap: 2px"><span class="mono" style="font-size: 14px; color: #9D9D9D">https://login.example.com/v2.0</span><span style="color: #9D9D9D">Entra ID</span></div>
+<dl style="margin: 0; display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 4px 16px">
+<dt style="color: #9D9D9D">validation mode</dt><dd style="margin: 0"><span class="mono">jwt</span>, signature checked locally</dd>
+<dt style="color: #9D9D9D">algorithms</dt><dd style="margin: 0">RS256</dd>
+<dt style="color: #9D9D9D" class="mono">token_types</dt><dd style="margin: 0" class="mono">at+jwt</dd>
+<dt style="color: #9D9D9D" class="mono">require_token_type</dt><dd style="margin: 0" class="mono">true</dd>
+</dl>
+</div>
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 28px"><div style="display: flex; flex-direction: column; gap: 8px">
+<h4 style="margin: 0; font-size: 21px; font-weight: 300">jwks</h4>
+<span>last fetch 12:02, 8 minutes ago</span>
+<div style="display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 4px 16px"><span style="color: #9D9D9D">kid</span><span style="color: #9D9D9D">cached until</span><span class="mono">entra-k1</span><span>18:02 today</span><span class="mono">entra-k2</span><span>18:02 today</span></div>
+<span style="color: #9D9D9D">last failure: none in 30 days</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<h4 style="margin: 0; font-size: 21px; font-weight: 300">refusals, 24 hours</h4>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 72px; gap: 4px 16px"><span class="mono">typ JWT not accepted</span><span style="text-align: right">2,610</span><span class="mono">token expired</span><span style="text-align: right">410</span><span class="mono">audience missing tsong</span><span style="text-align: right">380</span><span class="mono">kid not in JWKS</span><span style="text-align: right">12</span></div>
+<a href="#callers" onClick="{{goCallers}}" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; color: #9D9D9D">2,410 of the typ refusals came from [CLIENT ADDRESS]</a>
+</div>
+</div>
+</div></sc-if>
+<sc-if value="{{trustOkta.on}}" hint-placeholder-val="{{ false }}"><div role="tabpanel" aria-label="okta" style="display: flex; gap: 64px; align-items: flex-start">
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 28px">
+<div style="display: flex; flex-direction: column; gap: 2px"><span class="mono" style="font-size: 14px; color: #9D9D9D">https://idp.example.org/oauth2/default</span><span style="color: #9D9D9D">Okta · added in 3f9c2a1</span></div>
+<dl style="margin: 0; display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 4px 16px">
+<dt style="color: #9D9D9D">validation mode</dt><dd style="margin: 0"><span class="mono">jwt</span>, signature checked locally</dd>
+<dt style="color: #9D9D9D">algorithms</dt><dd style="margin: 0">RS256</dd>
+<dt style="color: #9D9D9D" class="mono">token_types</dt><dd style="margin: 0" class="mono">at+jwt</dd>
+<dt style="color: #9D9D9D" class="mono">require_token_type</dt><dd style="margin: 0"><span class="mono">false</span> · loosened</dd>
+</dl>
+<div style="display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 16px"><svg width="12" height="12" viewBox="0 0 12 12" style="margin-top: 6px" aria-hidden="true"><path d="M6 0l6 12H0z" fill="#F2C200"></path></svg><span style="font-weight: 600">loosened</span><span></span><span>okta sends no <span class="mono">typ</span>, so a token without one is accepted. That gives up explicit typing: an ID token signed by the same keys could pass as an access token.</span></div>
+</div>
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 28px"><div style="display: flex; flex-direction: column; gap: 8px">
+<h4 style="margin: 0; font-size: 21px; font-weight: 300">jwks</h4>
+<span>last good fetch 08:12, 4 hours ago</span>
+<div style="display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 4px 16px"><span style="color: #9D9D9D">kid</span><span style="color: #9D9D9D">cached until</span><span class="mono">okta-a1</span><span style="display: inline-flex; align-items: center; gap: 8px"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 0l6 12H0z" fill="#F2C200"></path></svg>14:12 today, in 2 h</span><span class="mono">okta-a2</span><span style="display: inline-flex; align-items: center; gap: 8px"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 0l6 12H0z" fill="#F2C200"></path></svg>14:12 today, in 2 h</span></div>
+<span>last failure 12:00: connection timed out after 5 s, 15 in a row since 08:27</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<h4 style="margin: 0; font-size: 21px; font-weight: 300">refusals, 24 hours</h4>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 72px; gap: 4px 16px"><span class="mono">scope not in allow, or required</span><span style="text-align: right">1,240</span><span class="mono">token expired</span><span style="text-align: right">96</span><span class="mono">audience missing tsong</span><span style="text-align: right">64</span><span class="mono">bad signature</span><span style="text-align: right">4</span></div>
+<a href="#callers" onClick="{{goCallers}}" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; color: #9D9D9D">1,160 of the scope refusals came from okta:svc-crawler</a>
+</div>
+</div>
+</div></sc-if>
+</div>
+</section>
+
+<section id="keys" aria-label="keys" style="flex: 0 0 1120px; box-sizing: border-box; padding: 40px 96px 64px 64px; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 40px">
+<h2 style="margin: 0; font-size: 87px; font-weight: 300; line-height: 1; letter-spacing: -0.03em">keys</h2>
+<p style="margin: 0; color: #9D9D9D; max-width: 720px">Tsong signs every token it mints with the active key for the route's algorithm. There is one active key per algorithm. ES256 is the default.</p>
+<div style="overflow-x: auto">
+<table style="min-width: 760px; border-collapse: collapse">
+<thead><tr><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">algorithm</th><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">kid</th><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">created</th><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">expires</th><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">state</th></tr></thead>
+<tbody>
+<tr><th scope="row" style="padding: 10px 32px 10px 0; vertical-align: baseline; text-align: left; font-weight: 600">ES256</th><td style="padding: 10px 32px 10px 0; vertical-align: baseline" class="mono">es256-2026-11</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">2026-11-02</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">2027-02-02</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">active · default</td></tr>
+<tr><th scope="row" style="padding: 10px 32px 10px 0; vertical-align: baseline; text-align: left; font-weight: 600">RS256</th><td style="padding: 10px 32px 10px 0; vertical-align: baseline" class="mono">rs256-2026-05</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">2026-05-29</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: inline-flex; align-items: center; gap: 8px"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 0l6 12H0z" fill="#F2C200"></path></svg>2026-11-29, in 6 days</span></td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">active · no successor yet</td></tr>
+<tr><th scope="row" style="padding: 10px 32px 10px 0; vertical-align: baseline; text-align: left; font-weight: 400; color: #9D9D9D">ES256</th><td style="padding: 10px 32px 10px 0; vertical-align: baseline; color: #9D9D9D" class="mono">es256-2026-08</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline; color: #9D9D9D">2026-08-03</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline; color: #9D9D9D">2026-11-30</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline; color: #9D9D9D">retired 2026-11-02 · published, not used to sign</td></tr>
+</tbody>
+</table>
+</div>
+<div style="display: flex; gap: 64px; align-items: flex-start">
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+<h3 style="margin: 0 0 4px; font-size: 29px; font-weight: 300">jwks, served now</h3>
+<span class="mono" style="font-size: 14px; color: #9D9D9D">GET /.well-known/jwks.json</span>
+<div style="display: grid; grid-template-columns: 136px 64px minmax(0, 1fr); gap: 4px 16px"><span class="mono">es256-2026-11</span><span>ES256</span><span>signs now</span><span class="mono">rs256-2026-05</span><span>RS256</span><span>signs now</span><span class="mono">es256-2026-08</span><span>ES256</span><span style="color: #9D9D9D">verify only, until 2026-11-30</span></div>
+</div>
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+<h3 style="margin: 0 0 4px; font-size: 29px; font-weight: 300">discovery, served now</h3>
+<span class="mono" style="font-size: 14px; color: #9D9D9D">GET /.well-known/oauth-authorization-server</span>
+<pre class="mono" style="margin: 0; font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere">issuer          https://tsong.example.com
+token_endpoint  https://tsong.example.com/token
+jwks_uri        https://tsong.example.com/.well-known/jwks.json
+grant_types     urn:ietf:params:oauth:grant-type:token-exchange</pre>
+</div>
+</div>
+<section aria-label="Rotation timeline" style="display: flex; flex-direction: column; gap: 12px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300">rotation timeline</h3>
+<div style="display: grid; grid-template-columns: 152px minmax(0, 1fr); gap: 0 16px; align-items: end; font-size: 14px; color: #9D9D9D">
+<span></span>
+<span style="position: relative; height: 22px; display: block"><span style="position: absolute; left: 0%">Aug</span><span style="position: absolute; left: 14.6%">Sep</span><span style="position: absolute; left: 28.8%">Oct</span><span style="position: absolute; left: 43.4%">Nov</span><span style="position: absolute; left: 57.5%">Dec</span><span style="position: absolute; left: 72.2%">Jan</span><span style="position: absolute; left: 86.8%">Feb</span></span>
+</div>
+<div role="img" aria-label="es256-2026-08 signed from August 3 to November 2, then verify only until November 30" style="display: grid; grid-template-columns: 152px minmax(0, 1fr); gap: 0 16px; align-items: center; min-height: 36px"><span class="mono" style="font-size: 14px">es256-2026-08</span><span style="position: relative; height: 36px; display: block"><span style="position: absolute; left: 0.9%; width: 43%; top: 12px; height: 12px; background: #D4D4D4"></span><span style="position: absolute; left: 43.9%; width: 13.2%; top: 12px; height: 12px; background: #6B6B6B"></span><span style="position: absolute; left: 53.8%; top: 0; bottom: 0; width: 1px; background: #9D9D9D"></span></span></div>
+<div role="img" aria-label="es256-2026-11 signs from November 2 until February 2" style="display: grid; grid-template-columns: 152px minmax(0, 1fr); gap: 0 16px; align-items: center; min-height: 36px"><span class="mono" style="font-size: 14px">es256-2026-11</span><span style="position: relative; height: 36px; display: block"><span style="position: absolute; left: 43.9%; width: 43.4%; top: 12px; height: 12px; background: #D4D4D4"></span><span style="position: absolute; left: 53.8%; top: 0; bottom: 0; width: 1px; background: #9D9D9D"></span></span></div>
+<div role="img" aria-label="rs256-2026-05 signs until November 29, 6 days from today" style="display: grid; grid-template-columns: 152px minmax(0, 1fr); gap: 0 16px; align-items: center; min-height: 36px"><span class="mono" style="font-size: 14px">rs256-2026-05</span><span style="position: relative; height: 36px; display: block"><span style="position: absolute; left: 0%; width: 53.8%; top: 12px; height: 12px; background: #D4D4D4"></span><span style="position: absolute; left: 53.8%; width: 2.8%; top: 12px; height: 12px; background: #F2C200"></span><span style="position: absolute; left: 53.8%; top: 0; bottom: 0; width: 1px; background: #9D9D9D"></span></span></div>
+<div role="img" aria-label="no RS256 successor created yet" style="display: grid; grid-template-columns: 152px minmax(0, 1fr); gap: 0 16px; align-items: center; min-height: 36px"><span style="font-size: 14px; color: #9D9D9D">next RS256</span><span style="position: relative; height: 36px; display: block"><span style="position: absolute; left: 56.6%; width: 30%; top: 8px; height: 18px; box-sizing: border-box; border: 1px dashed #9D9D9D"></span><span style="position: absolute; left: 58%; top: 7px; font-size: 14px; color: #9D9D9D">not created yet</span><span style="position: absolute; left: 53.8%; top: 0; bottom: 0; width: 1px; background: #9D9D9D"></span></span></div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px 28px; margin-left: 168px; font-size: 14px; color: #9D9D9D">
+<span style="display: inline-flex; align-items: center; gap: 8px"><svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true"><rect x="0" y="0" width="20" height="12" fill="#D4D4D4"></rect></svg>signs</span>
+<span style="display: inline-flex; align-items: center; gap: 8px"><svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true"><rect x="0" y="0" width="20" height="12" fill="#6B6B6B"></rect></svg>verify only</span>
+<span style="display: inline-flex; align-items: center; gap: 8px"><svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true"><rect x="0" y="0" width="20" height="12" fill="#F2C200"></rect></svg>last 6 days</span>
+<span style="display: inline-flex; align-items: center; gap: 8px"><svg width="2" height="14" viewBox="0 0 2 14" aria-hidden="true"><rect x="0" y="0" width="1" height="14" fill="#9D9D9D"></rect></svg>today, 2026-11-23</span>
+</div>
+<a href="#help" onClick="{{goHelp}}" style="align-self: flex-start; margin-left: 168px; min-height: 44px; display: inline-flex; align-items: center; color: #9D9D9D">how to rotate a signing key</a>
+</section>
+</section>
+
+<section id="explain" aria-label="explain" style="flex: 0 0 1120px; box-sizing: border-box; padding: 40px 96px 64px 64px; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 40px">
+<h2 style="margin: 0; font-size: 87px; font-weight: 300; line-height: 1; letter-spacing: -0.03em">explain</h2>
+<p style="margin: 0; color: #9D9D9D; max-width: 720px">Paste a token and pick a route to see each check Tsong would run, in order, and the token it would mint. Explain runs on the admin listener against the revision this replica serves, 8b0e6d4. It never forwards the token.</p>
+<form aria-label="Explain a token" style="display: flex; flex-direction: column; gap: 20px; max-width: 760px">
+<label for="explain-token" style="display: flex; flex-direction: column; gap: 4px; color: #9D9D9D">token
+<textarea id="explain-token" rows="5" placeholder="paste a bearer token" class="memo"></textarea></label>
+<div style="display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: flex-end">
+<label for="explain-route" style="display: flex; flex-direction: column; gap: 4px; color: #9D9D9D">route<input id="explain-route" type="text" value="orders.test" spellcheck="false" autocomplete="off" class="memo" style="min-height: 44px;"></label>
+<button type="button" style="min-height: 44px; padding: 0 20px; background: #D4D4D4; color: #1E1E1E; border: 0; font: inherit; font-weight: 600">explain</button>
+</div>
+</form>
+<section aria-label="Example walk" style="display: flex; flex-direction: column; gap: 16px; max-width: 860px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300">example: <span class="mono">okta:jdoe</span> on orders.test</h3>
+<ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px">
+<li style="display: grid; grid-template-columns: 14px 132px 64px minmax(0, 1fr); gap: 0 16px; align-items: baseline"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7.5L5.5 11L12 3.5" fill="none" stroke="#D4D4D4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="font-weight: 600">header</span><span style="color: #9D9D9D">passed</span><span><span class="mono">alg</span> RS256 is pinned for okta · no <span class="mono">typ</span>, allowed because <span class="mono">require_token_type</span> is false · <span class="mono">kid</span> okta-a1 found</span></li>
+<li style="display: grid; grid-template-columns: 14px 132px 64px minmax(0, 1fr); gap: 0 16px; align-items: baseline"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7.5L5.5 11L12 3.5" fill="none" stroke="#D4D4D4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="font-weight: 600">signature</span><span style="color: #9D9D9D">passed</span><span>RS256 with okta-a1 from the cached JWKS, which expires at 14:12</span></li>
+<li style="display: grid; grid-template-columns: 14px 132px 64px minmax(0, 1fr); gap: 0 16px; align-items: baseline"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7.5L5.5 11L12 3.5" fill="none" stroke="#D4D4D4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="font-weight: 600">iss, exp, nbf</span><span style="color: #9D9D9D">passed</span><span><span class="mono">iss</span> is okta's · expires in 41 minutes · valid since 11:51</span></li>
+<li style="display: grid; grid-template-columns: 14px 132px 64px minmax(0, 1fr); gap: 0 16px; align-items: baseline"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7.5L5.5 11L12 3.5" fill="none" stroke="#D4D4D4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="font-weight: 600">audiences</span><span style="color: #9D9D9D">passed</span><span><span class="mono">aud</span> has <span class="mono">tsong</span>, required · <span class="mono">api://orders</span> allowed · nothing denied</span></li>
+<li style="display: grid; grid-template-columns: 14px 132px 64px minmax(0, 1fr); gap: 0 16px; align-items: baseline"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7.5L5.5 11L12 3.5" fill="none" stroke="#D4D4D4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="font-weight: 600">scopes</span><span style="color: #9D9D9D">passed</span><span><span class="mono">scp</span> is well formed · <span class="mono">orders.read</span> required, present · <span class="mono">orders.write</span> allowed</span></li>
+<li style="display: grid; grid-template-columns: 14px 132px 64px minmax(0, 1fr); gap: 0 16px; align-items: baseline"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7H11" stroke="#9D9D9D" stroke-width="1.5" stroke-linecap="round"></path></svg><span style="font-weight: 600">rules</span><span style="color: #9D9D9D">not run</span><span style="color: #9D9D9D">after CEL lands</span></li>
+</ol>
+<p style="margin: 0; color: #9D9D9D">When a check fails, the walk stops there and shows what the caller would get: 401 <span class="mono">invalid_token</span>, or 403.</p>
+</section>
+<section aria-label="Token that would be minted" style="display: flex; flex-direction: column; gap: 12px; max-width: 860px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300">the token it would mint</h3>
+<dl style="margin: 0; display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 16px">
+<dt class="mono" style="color: #9D9D9D">aud</dt><dd class="mono" style="margin: 0">https://orders.internal</dd>
+<dt class="mono" style="color: #9D9D9D">scope</dt><dd class="mono" style="margin: 0">orders.read orders.write</dd>
+<dt class="mono" style="color: #9D9D9D">sub</dt><dd class="mono" style="margin: 0">okta:jdoe</dd>
+<dt class="mono" style="color: #9D9D9D">exp</dt><dd style="margin: 0">12:15:04, 5 minutes after minting</dd>
+</dl>
+<span style="color: #9D9D9D">Signed ES256 with es256-2026-11, <span class="mono">typ</span> at+jwt. A cached copy would be reused until a minute before it expires.</span>
+</section>
+</section>
+
+<section id="callers" aria-label="callers" style="flex: 0 0 1120px; box-sizing: border-box; padding: 40px 96px 64px 64px; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 40px">
+<h2 style="margin: 0; font-size: 87px; font-weight: 300; line-height: 1; letter-spacing: -0.03em">callers</h2>
+<div style="display: flex; gap: 48px; align-items: flex-start">
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 40px">
+<section aria-label="By subject" style="display: flex; flex-direction: column; gap: 12px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300">by issuer and subject</h3>
+<span style="color: #9D9D9D">the last 24 hours, most exchanges first</span>
+<div style="overflow-x: auto">
+<table style="min-width: 560px; border-collapse: collapse">
+<thead><tr><th scope="col" style="padding: 0 28px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">subject</th><th scope="col" style="padding: 0 28px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">exchanges</th><th scope="col" style="padding: 0 28px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">refused</th><th scope="col" style="padding: 0 28px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">usual</th><th scope="col" style="padding: 0 0 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">routes</th></tr></thead>
+<tbody>
+<tr><th scope="row" class="mono" style="padding: 10px 28px 10px 0; vertical-align: baseline; text-align: left; font-weight: 400">entra:svc-checkout</th><td style="padding: 10px 28px 10px 0; vertical-align: baseline">1.62 M</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">0.2%</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">0.2%</td><td style="padding: 10px 0; vertical-align: baseline">2</td></tr>
+<tr><th scope="row" class="mono" style="padding: 10px 28px 10px 0; vertical-align: baseline; text-align: left; font-weight: 400">entra:svc-stock</th><td style="padding: 10px 28px 10px 0; vertical-align: baseline">1.18 M</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">0.1%</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">0.1%</td><td style="padding: 10px 0; vertical-align: baseline">1</td></tr>
+<tr><th scope="row" class="mono" style="padding: 10px 28px 10px 0; vertical-align: baseline; text-align: left; font-weight: 400">okta:svc-reporting</th><td style="padding: 10px 28px 10px 0; vertical-align: baseline">610 k</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">0.9%</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">0.8%</td><td style="padding: 10px 0; vertical-align: baseline">2</td></tr>
+<tr><th scope="row" class="mono" style="padding: 10px 28px 10px 0; vertical-align: baseline; text-align: left; font-weight: 400">entra:svc-search</th><td style="padding: 10px 28px 10px 0; vertical-align: baseline">540 k</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">0.3%</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">0.3%</td><td style="padding: 10px 0; vertical-align: baseline">1</td></tr>
+<tr><th scope="row" class="mono" style="padding: 10px 28px 10px 0; vertical-align: baseline; text-align: left; font-weight: 400">okta:jdoe</th><td style="padding: 10px 28px 10px 0; vertical-align: baseline">2,140</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">3.8%</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">3%</td><td style="padding: 10px 0; vertical-align: baseline">3</td></tr>
+<tr><th scope="row" class="mono" style="padding: 10px 28px 10px 0; vertical-align: baseline; text-align: left; font-weight: 600">okta:svc-crawler</th><td style="padding: 10px 28px 10px 0; vertical-align: baseline">1,640</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline"><span style="display: inline-flex; align-items: center; gap: 8px"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 0l6 12H0z" fill="#F2C200"></path></svg>71%</span></td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">1%</td><td style="padding: 10px 0; vertical-align: baseline">38, usually 2</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+<section aria-label="By client address" style="display: flex; flex-direction: column; gap: 12px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300">by client address</h3>
+<div style="overflow-x: auto">
+<table style="min-width: 560px; border-collapse: collapse">
+<thead><tr><th scope="col" style="padding: 0 28px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">address</th><th scope="col" style="padding: 0 28px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">exchanges</th><th scope="col" style="padding: 0 28px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">refused</th><th scope="col" style="padding: 0 28px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">usual</th><th scope="col" style="padding: 0 0 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">the last 24 hours</th></tr></thead>
+<tbody>
+<tr><th scope="row" style="padding: 10px 28px 10px 0; vertical-align: baseline; text-align: left; font-weight: 400">[CLIENT RANGE 1]</th><td style="padding: 10px 28px 10px 0; vertical-align: baseline">3.9 M</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">0.2%</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">0.2%</td><td style="padding: 10px 0; vertical-align: baseline"><svg width="120" height="24" viewBox="0 0 120 24" aria-hidden="true"><polyline points="0,20 20,21 40,20 60,21 80,20 100,21 120,20" fill="none" stroke="#9D9D9D" stroke-width="1.5"></polyline></svg></td></tr>
+<tr><th scope="row" style="padding: 10px 28px 10px 0; vertical-align: baseline; text-align: left; font-weight: 400">[CLIENT RANGE 2]</th><td style="padding: 10px 28px 10px 0; vertical-align: baseline">1.4 M</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">0.8%</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">0.7%</td><td style="padding: 10px 0; vertical-align: baseline"><svg width="120" height="24" viewBox="0 0 120 24" aria-hidden="true"><polyline points="0,20 20,20 40,21 60,20 80,20 100,20 120,19" fill="none" stroke="#9D9D9D" stroke-width="1.5"></polyline></svg></td></tr>
+<tr><th scope="row" style="padding: 10px 28px 10px 0; vertical-align: baseline; text-align: left; font-weight: 600">[CLIENT ADDRESS]</th><td style="padding: 10px 28px 10px 0; vertical-align: baseline">2,460</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline"><span style="display: inline-flex; align-items: center; gap: 8px"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 0l6 12H0z" fill="#F2C200"></path></svg>98%</span></td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">1%</td><td style="padding: 10px 0; vertical-align: baseline"><svg width="120" height="24" viewBox="0 0 120 24" aria-hidden="true"><polyline points="0,22 20,22 40,22 60,22 80,22 100,21 110,4 120,2" fill="none" stroke="#F2C200" stroke-width="1.5"></polyline></svg></td></tr>
+<tr><th scope="row" style="padding: 10px 28px 10px 0; vertical-align: baseline; text-align: left; font-weight: 600">[CLIENT ADDRESS 2]</th><td style="padding: 10px 28px 10px 0; vertical-align: baseline">1,640</td><td style="padding: 10px 28px 10px 0; vertical-align: baseline"><span style="display: inline-flex; align-items: center; gap: 8px"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 0l6 12H0z" fill="#F2C200"></path></svg>71%</span></td><td style="padding: 10px 28px 10px 0; vertical-align: baseline">1%</td><td style="padding: 10px 0; vertical-align: baseline"><svg width="120" height="24" viewBox="0 0 120 24" aria-hidden="true"><polyline points="0,21 20,21 40,22 60,21 80,21 96,20 104,6 112,10 120,18" fill="none" stroke="#F2C200" stroke-width="1.5"></polyline></svg></td></tr>
+</tbody>
+</table>
+</div>
+</section>
+</div>
+<section aria-label="Flagged patterns" style="flex: 0 0 300px; min-width: 0; display: flex; flex-direction: column; gap: 24px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300">flagged</h3>
+<div style="display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 16px"><svg width="12" height="12" viewBox="0 0 12 12" style="margin-top: 6px" aria-hidden="true"><rect x="1" y="1" width="10" height="10" fill="none" stroke="#D4D4D4" stroke-width="1.5"></rect></svg><span style="font-weight: 600">Sweeping routes</span><span></span><span><span class="mono">okta:svc-crawler</span>, from [CLIENT ADDRESS 2], tried 38 of 42 route hosts in 10 minutes at 11:52. It usually calls 2. Most were refused for scope.</span><span></span><a href="#watch" onClick="{{goWatch}}" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; color: #9D9D9D">see events</a></div>
+<div style="display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 16px"><svg width="12" height="12" viewBox="0 0 12 12" style="margin-top: 6px" aria-hidden="true"><rect x="1" y="1" width="10" height="10" fill="none" stroke="#D4D4D4" stroke-width="1.5"></rect></svg><span style="font-weight: 600">Probing typ</span><span></span><span>[CLIENT ADDRESS] sent 2,400 tokens with <span class="mono">typ</span> JWT to entra routes in the last hour, usually about 10. A client built for the wrong token type, or probing.</span><span></span><a href="#watch" onClick="{{goWatch}}" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; color: #9D9D9D">see events</a></div>
+<div style="display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 16px"><svg width="14" height="14" viewBox="0 0 14 14" style="margin-top: 5px" aria-hidden="true"><path d="M2 7.5L5.5 11L12 3.5" fill="none" stroke="#D4D4D4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="font-weight: 600">No alg probing</span><span></span><span>No tokens with <span class="mono">alg</span> none or an algorithm an issuer doesn't pin in 24 hours.</span></div>
+</section>
+</div>
+</section>
+
+<section id="config" aria-label="config" style="flex: 0 0 1120px; box-sizing: border-box; padding: 40px 96px 64px 64px; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 40px">
+<h2 style="margin: 0; font-size: 87px; font-weight: 300; line-height: 1; letter-spacing: -0.03em">config</h2>
+<p style="margin: 0; color: #9D9D9D; max-width: 720px">One file, published by the pipeline after <span class="mono">tsong check</span> passes. Each replica fetches the newest revision and loads it only if it validates. Otherwise it keeps serving what it has.</p>
+<div style="display: flex; flex-wrap: wrap; gap: 24px 56px">
+<span style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 40px; font-weight: 300; line-height: 1">3 of 4</span><span>replicas on 8b0e6d4</span></span>
+<span style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 40px; font-weight: 300; line-height: 1"><span class="mono">c71a5e9</span></span><span>tip, rejected</span></span>
+<span style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 40px; font-weight: 300; line-height: 1">2 h 50 min</span><span>replica-d without a fetch</span></span>
+</div>
+<section aria-label="Replicas" style="display: flex; flex-direction: column; gap: 12px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300">replicas</h3>
+<div style="overflow-x: auto">
+<table style="min-width: 760px; border-collapse: collapse">
+<thead><tr><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">replica</th><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">serves</th><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">last fetch</th><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">tip</th></tr></thead>
+<tbody>
+<tr><th scope="row" class="mono" style="padding: 10px 32px 10px 0; vertical-align: baseline; text-align: left; font-weight: 400">replica-a</th><td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span class="mono">8b0e6d4</span></td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">12:09</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">c71a5e9 rejected</td></tr>
+<tr><th scope="row" class="mono" style="padding: 10px 32px 10px 0; vertical-align: baseline; text-align: left; font-weight: 400">replica-b</th><td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span class="mono">8b0e6d4</span></td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">12:09</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">c71a5e9 rejected</td></tr>
+<tr><th scope="row" class="mono" style="padding: 10px 32px 10px 0; vertical-align: baseline; text-align: left; font-weight: 400">replica-c</th><td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span class="mono">8b0e6d4</span></td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">12:08</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">c71a5e9 rejected</td></tr>
+<tr><th scope="row" class="mono" style="padding: 10px 32px 10px 0; vertical-align: baseline; text-align: left; font-weight: 600">replica-d</th><td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: inline-flex; align-items: center; gap: 8px"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 0l6 12H0z" fill="#F2C200"></path></svg>3f9c2a1</span></td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">09:20, failing since: config store timed out</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">not fetched</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+<section aria-label="Revision history" style="display: flex; flex-direction: column; gap: 16px; max-width: 860px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300">revisions</h3>
+<ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 22px">
+<li style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 16px"><span style="font-size: 21px; font-weight: 300; line-height: 1.2; color: #9D9D9D"><span class="mono">c71a5e9</span></span><span style="display: flex; flex-direction: column; gap: 2px"><span><span style="font-weight: 600">rejected by every replica</span> <span style="color: #9D9D9D">today, 11:40 · tsong check passed</span></span><span>route <span class="mono">billing.test</span> added, signing with ES384 · reports.test now denies <span class="mono">reports.export</span></span><span style="color: #9D9D9D">Rejected: billing.test asks for ES384, and there is no active ES384 key.</span></span></li>
+<li style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 16px"><span style="font-size: 21px; font-weight: 300; line-height: 1.2; color: #9D9D9D"><span class="mono">8b0e6d4</span></span><span style="display: flex; flex-direction: column; gap: 2px"><span><span style="font-weight: 600">served by 3 of 4</span> <span style="color: #9D9D9D">today, 09:30</span></span><span>orders.test now requires <span class="mono">orders.read</span> · orders.test no longer allows <span class="mono">orders.delete</span></span></span></li>
+<li style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 16px"><span style="font-size: 21px; font-weight: 300; line-height: 1.2; color: #9D9D9D"><span class="mono">3f9c2a1</span></span><span style="display: flex; flex-direction: column; gap: 2px"><span><span style="font-weight: 600">served by replica-d</span> <span style="color: #9D9D9D">yesterday, 16:05</span></span><span>trusted issuer okta added, <span class="mono">require_token_type</span> false · reports.test now allows audience <span class="mono">api://reports</span></span></span></li>
+<li style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 16px"><span style="font-size: 21px; font-weight: 300; line-height: 1.2; color: #9D9D9D"><span class="mono">5e81c3a</span></span><span style="display: flex; flex-direction: column; gap: 2px"><span><span style="font-weight: 600">superseded</span> <span style="color: #9D9D9D">3 days ago</span></span><span>payments.test client IP allow list set to [CLIENT RANGE 1]</span></span></li>
+<li style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 16px"><span style="font-size: 21px; font-weight: 300; line-height: 1.2; color: #9D9D9D"><span class="mono">0d4f7b2</span></span><span style="display: flex; flex-direction: column; gap: 2px"><span><span style="font-weight: 600">superseded</span> <span style="color: #9D9D9D">6 days ago</span></span><span><span class="mono">jwks_max_age</span> lowered from 24 h to 6 h for every issuer</span></span></li>
+</ol>
+<span style="display: flex; flex-wrap: wrap; gap: 0 24px; margin-left: 80px"><a href="#" style="min-height: 44px; display: inline-flex; align-items: center; color: #9D9D9D">show older revisions</a><a href="#help" onClick="{{goHelp}}" style="min-height: 44px; display: inline-flex; align-items: center; color: #9D9D9D">roll back a revision</a></span>
+</section>
+</section>
+
+<section id="status" aria-label="status" style="flex: 0 0 1120px; box-sizing: border-box; padding: 40px 0 0 64px; overflow: hidden; min-height: 0; display: flex; flex-direction: column; gap: 40px">
+<h2 style="margin: 0; font-size: 87px; font-weight: 300; line-height: 1; letter-spacing: -0.03em">status</h2>
+<div role="tablist" aria-label="Status views" style="display: flex; gap: 32px; padding-right: 96px"><button type="button" role="tab" aria-selected="{{tabOverview.sel}}" onClick="{{tabOverview.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 29px; font-weight: 300; color: {{tabOverview.color}}">overview</button><button type="button" role="tab" aria-selected="{{tabObjectives.sel}}" onClick="{{tabObjectives.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 29px; font-weight: 300; color: {{tabObjectives.color}}">objectives</button><button type="button" role="tab" aria-selected="{{tabSignals.sel}}" onClick="{{tabSignals.go}}" style="min-height: 44px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 29px; font-weight: 300; color: {{tabSignals.color}}">signals</button></div>
+<div style="flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 96px 64px 0; display: flex; flex-direction: column; gap: 40px">
+<sc-if value="{{tabOverview.on}}" hint-placeholder-val="{{ true }}">
+<div role="tabpanel" aria-label="overview" style="display: flex; flex-direction: column; gap: 44px">
+<section aria-label="Services" style="display: flex; flex-direction: column; gap: 16px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300">the last 24 hours</h3>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: grid; grid-template-columns: 128px 80px repeat(24, minmax(0, 1fr)); gap: 4px; color: #9D9D9D; font-size: 14px; align-items: end"><span style="font-size: 16px">service</span><span style="font-size: 16px">version</span><sc-for list="{{hours}}" as="hour" hint-placeholder-count="24"><span style="text-align: center">{{hour}}</span></sc-for></div>
+<sc-for list="{{services}}" as="service" hint-placeholder-count="6">
+<div style="display: grid; grid-template-columns: 128px 80px repeat(24, minmax(0, 1fr)); gap: 4px; align-items: center; min-height: 28px">
+<span style="font-weight: 600">{{service.name}}</span>
+<code class="mono" style="font-size: 14px; color: #9D9D9D">{{service.version}}</code>
+<sc-for list="{{service.cells}}" as="cell" hint-placeholder-count="24">
+<span role="img" aria-label="{{cell.label}}" style="display: flex; justify-content: center">
+<sc-if value="{{cell.ok}}" hint-placeholder-val="{{ true }}"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="3" y="3" width="6" height="6" fill="#6B6B6B"></rect></svg></sc-if>
+<sc-if value="{{cell.warn}}" hint-placeholder-val="{{ false }}"><svg width="14" height="14" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 0l6 12H0z" fill="#F2C200"></path></svg></sc-if>
+<sc-if value="{{cell.down}}" hint-placeholder-val="{{ false }}"><svg width="14" height="14" viewBox="0 0 12 12" aria-hidden="true"><rect x="0.75" y="0.75" width="10.5" height="10.5" fill="none" stroke="#E5322D" stroke-width="1.5"></rect><path d="M3.5 3.5L8.5 8.5M8.5 3.5L3.5 8.5" stroke="#E5322D" stroke-width="1.5"></path></svg></sc-if>
+</span>
+</sc-for>
+</div>
+</sc-for>
+</div>
+<span style="color: #9D9D9D">Listeners on every replica: gateway, token endpoint, admin (<span class="mono">/metrics</span>, <span class="mono">/status</span>) and health. The entra and okta rows show whether Tsong can reach each issuer's JWKS.</span>
+</section>
+<section aria-label="Status feed" style="max-width: 760px; display: flex; flex-direction: column; gap: 16px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300">status feed</h3>
+<ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 20px">
+<li style="display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 16px">
+<svg width="12" height="12" viewBox="0 0 12 12" style="margin-top: 6px" aria-hidden="true"><path d="M6 0l6 12H0z" fill="#F2C200"></path></svg>
+<span><span style="font-weight: 600">JWKS fetch from okta failing</span> <span style="color: #9D9D9D">since 08:27</span></span>
+<span></span>
+<span style="color: #9D9D9D">Fetches time out after 5 s. The cached keys expire at 14:12, and okta tokens are refused after that.</span>
+</li>
+<li style="display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 16px">
+<svg width="12" height="12" viewBox="0 0 12 12" style="margin-top: 6px" aria-hidden="true"><rect x="1" y="1" width="10" height="10" fill="none" stroke="#D4D4D4" stroke-width="1.5"></rect></svg>
+<span><span style="font-weight: 600">c71a5e9 rejected on every replica</span> <span style="color: #9D9D9D">today, 11:40</span></span>
+<span></span>
+<span style="color: #9D9D9D">Replicas go on serving 8b0e6d4. Nothing is down.</span>
+</li>
+<li style="display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 16px">
+<svg width="12" height="12" viewBox="0 0 12 12" style="margin-top: 6px" aria-hidden="true"><path d="M6 0l6 12H0z" fill="#F2C200"></path></svg>
+<span><span style="font-weight: 600">replica-d can't reach the config store</span> <span style="color: #9D9D9D">since 09:20</span></span>
+<span></span>
+<span style="color: #9D9D9D">It serves 3f9c2a1 until a fetch succeeds.</span>
+</li>
+<li style="display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 16px">
+<svg width="12" height="12" viewBox="0 0 12 12" style="margin-top: 6px" aria-hidden="true"><path d="M6 0l6 12H0z" fill="#F2C200"></path></svg>
+<span><span style="font-weight: 600">Exchange p99 reached 70 ms for 20 minutes</span> <span style="color: #9D9D9D">today, 03:00</span></span>
+<span></span>
+<span style="color: #9D9D9D">Replicas restarted for 0.6.1 with empty exchange caches. Back under 50 ms by 03:25.</span>
+</li>
+<li style="display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 16px">
+<svg width="12" height="12" viewBox="0 0 12 12" style="margin-top: 6px" aria-hidden="true"><rect x="1" y="1" width="10" height="10" fill="none" stroke="#D4D4D4" stroke-width="1.5"></rect></svg>
+<span><span style="font-weight: 600">Scheduled maintenance</span> <span style="color: #9D9D9D">[DATE]</span></span>
+<span></span>
+<span style="color: #9D9D9D">The admin listener restarts for [DURATION]. The gateway and token endpoint go on.</span>
+</li>
+</ol>
+<a href="#" style="align-self: flex-start; margin-left: 28px; min-height: 44px; display: inline-flex; align-items: center; color: #9D9D9D">see more</a>
+</section>
+</div>
+</sc-if>
+<sc-if value="{{tabObjectives.on}}" hint-placeholder-val="{{ false }}"><div role="tabpanel" aria-label="objectives">
+<section aria-label="Objectives" style="display: flex; flex-direction: column; gap: 16px">
+<span style="color: #9D9D9D">the last 30 days</span>
+<div style="overflow-x: auto">
+<table style="min-width: 760px; border-collapse: collapse">
+<thead>
+<tr>
+<th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">objective</th><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">target</th><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">measured</th><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">error budget</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<th scope="row" style="padding: 10px 32px 10px 0; vertical-align: baseline; text-align: left; font-weight: 600">gateway <span style="font-weight: 400; color: #9D9D9D">availability</span></th><td style="padding: 10px 32px 10px 0; vertical-align: baseline">99.99%</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">99.995%</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: inline-flex; align-items: center; gap: 12px"><svg width="120" height="6" viewBox="0 0 120 6" aria-hidden="true"><rect x="0" y="2" width="120" height="2" fill="#3A3A3A"></rect><rect x="0" y="1" width="60" height="4" fill="#9D9D9D"></rect></svg><span>50% left</span></span></td>
+</tr>
+<tr>
+<th scope="row" style="padding: 10px 32px 10px 0; vertical-align: baseline; text-align: left; font-weight: 600">exchange <span style="font-weight: 400; color: #9D9D9D">latency</span></th><td style="padding: 10px 32px 10px 0; vertical-align: baseline">99% within 50 ms</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">99.4%</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: inline-flex; align-items: center; gap: 12px"><svg width="120" height="6" viewBox="0 0 120 6" aria-hidden="true"><rect x="0" y="2" width="120" height="2" fill="#3A3A3A"></rect><rect x="0" y="1" width="48" height="4" fill="#9D9D9D"></rect></svg><span>40% left</span></span></td>
+</tr>
+<tr>
+<th scope="row" style="padding: 10px 32px 10px 0; vertical-align: baseline; text-align: left; font-weight: 600">token endpoint <span style="font-weight: 400; color: #9D9D9D">availability</span></th><td style="padding: 10px 32px 10px 0; vertical-align: baseline">99.95%</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">99.97%</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: inline-flex; align-items: center; gap: 12px"><svg width="120" height="6" viewBox="0 0 120 6" aria-hidden="true"><rect x="0" y="2" width="120" height="2" fill="#3A3A3A"></rect><rect x="0" y="1" width="48" height="4" fill="#9D9D9D"></rect></svg><span>40% left</span></span></td>
+</tr>
+<tr>
+<th scope="row" style="padding: 10px 32px 10px 0; vertical-align: baseline; text-align: left; font-weight: 600">JWKS fetch <span style="font-weight: 400; color: #9D9D9D">success</span></th><td style="padding: 10px 32px 10px 0; vertical-align: baseline">99.5%</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline">99.72%</td><td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: inline-flex; align-items: center; gap: 12px"><svg width="120" height="6" viewBox="0 0 120 6" aria-hidden="true"><rect x="0" y="2" width="120" height="2" fill="#3A3A3A"></rect><rect x="0" y="1" width="53" height="4" fill="#9D9D9D"></rect></svg><span>44% left</span><span style="display: inline-flex; align-items: center; gap: 6px; margin-left: 12px"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 0l6 12H0z" fill="#F2C200"></path></svg>falling while okta fails</span></span></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</div></sc-if>
+<sc-if value="{{tabSignals.on}}" hint-placeholder-val="{{ false }}"><div role="tabpanel" aria-label="signals">
+<section aria-label="Golden signals" style="display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; gap: 28px; font-size: 21px; font-weight: 300"><span style="font-weight: 600">hour</span><span style="color: #9D9D9D">day</span><span style="color: #9D9D9D">week</span></div>
+<div style="overflow-x: auto">
+<table style="min-width: 760px; border-collapse: collapse">
+<thead>
+<tr>
+<th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">service</th><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">traffic</th><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">errors</th><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">latency</th><th scope="col" style="padding: 0 32px 10px 0; font-weight: 400; color: #9D9D9D; text-align: left">saturation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<th scope="row" style="padding: 10px 32px 10px 0; vertical-align: baseline; text-align: left; font-weight: 600">gateway</th>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: flex; align-items: center; gap: 16px"><span><span style="font-size: 29px; font-weight: 300; line-height: 1.1">4,820</span><span style="display: block; color: #9D9D9D; font-size: 14px">per minute</span></span><svg width="96" height="28" viewBox="-2 0 100 28" aria-hidden="true" style="flex: 0 0 auto"><polyline points="0.0,16.1 4.2,14.1 8.3,12.6 12.5,14.0 16.7,14.0 20.9,14.3 25.0,13.4 29.2,11.8 33.4,14.1 37.6,16.8 41.7,14.9 45.9,15.3 50.1,13.8 54.3,16.6 58.4,17.0 62.6,15.7 66.8,17.2 71.0,14.7 75.1,12.4 79.3,15.1 83.5,17.8 87.7,17.6 91.8,15.0 96.0,15.7" fill="none" stroke="#9D9D9D" stroke-width="1.5" stroke-linejoin="round"></polyline><circle cx="96.0" cy="15.7" r="2.5" fill="#D4D4D4"></circle></svg></span></td>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: flex; align-items: center; gap: 16px"><span><span style="font-size: 29px; font-weight: 300; line-height: 1.1">0.01%</span><span style="display: block; color: #9D9D9D; font-size: 14px">5xx · refusals not counted</span></span><svg width="96" height="28" viewBox="-2 0 100 28" aria-hidden="true" style="flex: 0 0 auto"><polyline points="0.0,11.4 4.2,8.8 8.3,11.3 12.5,13.7 16.7,11.8 20.9,10.4 25.0,9.5 29.2,10.6 33.4,10.0 37.6,9.3 41.7,8.9 45.9,10.8 50.1,11.2 54.3,11.9 58.4,10.6 62.6,7.7 66.8,5.1 71.0,4.9 75.1,5.2 79.3,6.5 83.5,9.2 87.7,11.9 91.8,12.1 96.0,13.2" fill="none" stroke="#9D9D9D" stroke-width="1.5" stroke-linejoin="round"></polyline><circle cx="96.0" cy="13.2" r="2.5" fill="#D4D4D4"></circle></svg></span></td>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: flex; align-items: center; gap: 16px"><span><span style="font-size: 29px; font-weight: 300; line-height: 1.1">6 ms</span><span style="display: block; color: #9D9D9D; font-size: 14px">p50 · 31 ms p99</span></span><svg width="96" height="28" viewBox="-2 0 100 28" aria-hidden="true" style="flex: 0 0 auto"><polyline points="0.0,15.5 4.2,15.3 8.3,16.0 12.5,15.4 16.7,14.7 20.9,17.2 25.0,20.0 29.2,18.0 33.4,19.4 37.6,21.0 41.7,18.1 45.9,18.3 50.1,16.3 54.3,16.5 58.4,15.7 62.6,17.7 66.8,16.9 71.0,14.8 75.1,14.7 79.3,13.3 83.5,12.3 87.7,14.8 91.8,13.3 96.0,12.8" fill="none" stroke="#9D9D9D" stroke-width="1.5" stroke-linejoin="round"></polyline><circle cx="96.0" cy="12.8" r="2.5" fill="#D4D4D4"></circle></svg></span></td>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: flex; align-items: center; gap: 16px"><span><span style="font-size: 29px; font-weight: 300; line-height: 1.1">82%</span><span style="display: block; color: #9D9D9D; font-size: 14px">exchange cache: 41,200 of <span class="mono">max_entries</span> 50,000 · 120 evictions a minute</span></span><svg width="96" height="28" viewBox="-2 0 100 28" aria-hidden="true" style="flex: 0 0 auto"><polyline points="0.0,22.4 4.2,21.0 8.3,19.6 12.5,18.4 16.7,17.0 20.9,16.2 25.0,15.0 29.2,14.3 33.4,13.6 37.6,12.8 41.7,12.4 45.9,11.9 50.1,11.6 54.3,11.2 58.4,10.9 62.6,10.4 66.8,10.1 71.0,9.8 75.1,9.4 79.3,9.2 83.5,8.9 87.7,8.6 91.8,8.4 96.0,8.2" fill="none" stroke="#9D9D9D" stroke-width="1.5" stroke-linejoin="round"></polyline><circle cx="96.0" cy="8.2" r="2.5" fill="#D4D4D4"></circle></svg></span></td>
+</tr>
+<tr>
+<th scope="row" style="padding: 10px 32px 10px 0; vertical-align: baseline; text-align: left; font-weight: 600">token endpoint</th>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: flex; align-items: center; gap: 16px"><span><span style="font-size: 29px; font-weight: 300; line-height: 1.1">260</span><span style="display: block; color: #9D9D9D; font-size: 14px">per minute</span></span><svg width="96" height="28" viewBox="-2 0 100 28" aria-hidden="true" style="flex: 0 0 auto"><polyline points="0.0,13.3 4.2,11.9 8.3,10.2 12.5,7.7 16.7,6.3 20.9,4.4 25.0,7.1 29.2,7.3 33.4,4.8 37.6,4.4 41.7,4.4 45.9,6.6 50.1,6.8 54.3,8.3 58.4,8.0 62.6,7.6 66.8,10.4 71.0,12.0 75.1,13.3 79.3,10.9 83.5,9.4 87.7,11.3 91.8,9.6 96.0,11.7" fill="none" stroke="#9D9D9D" stroke-width="1.5" stroke-linejoin="round"></polyline><circle cx="96.0" cy="11.7" r="2.5" fill="#D4D4D4"></circle></svg></span></td>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: flex; align-items: center; gap: 16px"><span><span style="font-size: 29px; font-weight: 300; line-height: 1.1">0.02%</span><span style="display: block; color: #9D9D9D; font-size: 14px">5xx · OAuth errors not counted</span></span><svg width="96" height="28" viewBox="-2 0 100 28" aria-hidden="true" style="flex: 0 0 auto"><polyline points="0.0,12.3 4.2,10.5 8.3,10.5 12.5,11.9 16.7,14.8 20.9,13.9 25.0,14.0 29.2,12.5 33.4,13.3 37.6,11.7 41.7,13.0 45.9,11.3 50.1,10.0 54.3,10.4 58.4,10.2 62.6,9.2 66.8,10.9 71.0,10.6 75.1,8.9 79.3,10.2 83.5,8.5 87.7,7.4 91.8,5.4 96.0,6.4" fill="none" stroke="#9D9D9D" stroke-width="1.5" stroke-linejoin="round"></polyline><circle cx="96.0" cy="6.4" r="2.5" fill="#D4D4D4"></circle></svg></span></td>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: flex; align-items: center; gap: 16px"><span><span style="font-size: 29px; font-weight: 300; line-height: 1.1">9 ms</span><span style="display: block; color: #9D9D9D; font-size: 14px">p50 · 38 ms p99</span></span><svg width="96" height="28" viewBox="-2 0 100 28" aria-hidden="true" style="flex: 0 0 auto"><polyline points="0.0,15.0 4.2,17.0 8.3,16.2 12.5,18.6 16.7,18.4 20.9,19.2 25.0,21.7 29.2,21.7 33.4,22.4 37.6,22.4 41.7,22.4 45.9,22.4 50.1,22.4 54.3,20.5 58.4,22.4 62.6,22.4 66.8,21.7 71.0,19.1 75.1,18.6 79.3,19.2 83.5,16.5 87.7,19.1 91.8,17.0 96.0,18.3" fill="none" stroke="#9D9D9D" stroke-width="1.5" stroke-linejoin="round"></polyline><circle cx="96.0" cy="18.3" r="2.5" fill="#D4D4D4"></circle></svg></span></td>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="font-size: 29px; font-weight: 300; line-height: 1.1">—</span><span style="display: block; color: #9D9D9D; font-size: 14px">shares the gateway's exchange cache</span></td>
+</tr>
+<tr>
+<th scope="row" style="padding: 10px 32px 10px 0; vertical-align: baseline; text-align: left; font-weight: 600">JWKS fetch</th>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: flex; align-items: center; gap: 16px"><span><span style="font-size: 29px; font-weight: 300; line-height: 1.1">24</span><span style="display: block; color: #9D9D9D; font-size: 14px">per hour, with retries</span></span><svg width="96" height="28" viewBox="-2 0 100 28" aria-hidden="true" style="flex: 0 0 auto"><polyline points="0.0,20.0 4.2,20.0 8.3,20.0 12.5,20.0 16.7,20.0 20.9,20.0 25.0,20.0 29.2,20.0 33.4,20.0 37.6,20.0 41.7,20.0 45.9,20.0 50.1,20.0 54.3,20.0 58.4,20.0 62.6,20.0 66.8,20.0 71.0,20.0 75.1,20.0 79.3,10.0 83.5,10.0 87.7,10.0 91.8,10.0 96.0,10.0" fill="none" stroke="#9D9D9D" stroke-width="1.5" stroke-linejoin="round"></polyline><circle cx="96.0" cy="10.0" r="2.5" fill="#D4D4D4"></circle></svg></span></td>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: flex; align-items: center; gap: 16px"><span><span style="font-size: 29px; font-weight: 300; line-height: 1.1">67%</span><span style="display: block; color: #9D9D9D; font-size: 14px">of fetches · all of them okta's</span></span><svg width="96" height="28" viewBox="-2 0 100 28" aria-hidden="true" style="flex: 0 0 auto"><polyline points="0.0,22.4 4.2,22.4 8.3,22.4 12.5,22.4 16.7,22.4 20.9,22.4 25.0,22.4 29.2,22.4 33.4,22.4 37.6,22.4 41.7,22.4 45.9,22.4 50.1,22.4 54.3,22.4 58.4,22.4 62.6,22.4 66.8,22.4 71.0,22.4 75.1,22.4 79.3,6.0 83.5,5.8 87.7,6.1 91.8,5.9 96.0,6.0" fill="none" stroke="#F2C200" stroke-width="1.5" stroke-linejoin="round"></polyline><circle cx="96.0" cy="6.0" r="2.5" fill="#F2C200"></circle></svg></span></td>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: flex; align-items: center; gap: 16px"><span><span style="font-size: 29px; font-weight: 300; line-height: 1.1">140 ms</span><span style="display: block; color: #9D9D9D; font-size: 14px">p50 · 5 s p99, the timeout</span></span><svg width="96" height="28" viewBox="-2 0 100 28" aria-hidden="true" style="flex: 0 0 auto"><polyline points="0.0,21.0 4.2,20.6 8.3,21.2 12.5,20.8 16.7,21.1 20.9,20.7 25.0,21.0 29.2,20.9 33.4,21.2 37.6,20.8 41.7,21.0 45.9,20.6 50.1,21.1 54.3,20.9 58.4,21.0 62.6,20.8 66.8,21.1 71.0,20.9 75.1,21.0 79.3,3.0 83.5,3.0 87.7,3.0 91.8,3.0 96.0,3.0" fill="none" stroke="#9D9D9D" stroke-width="1.5" stroke-linejoin="round"></polyline><circle cx="96.0" cy="3.0" r="2.5" fill="#D4D4D4"></circle></svg></span></td>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="font-size: 29px; font-weight: 300; line-height: 1.1">—</span><span style="display: block; color: #9D9D9D; font-size: 14px">no shared resource</span></td>
+</tr>
+<tr>
+<th scope="row" style="padding: 10px 32px 10px 0; vertical-align: baseline; text-align: left; font-weight: 600">admin</th>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: flex; align-items: center; gap: 16px"><span><span style="font-size: 29px; font-weight: 300; line-height: 1.1">40</span><span style="display: block; color: #9D9D9D; font-size: 14px">per minute, mostly scrapes</span></span><svg width="96" height="28" viewBox="-2 0 100 28" aria-hidden="true" style="flex: 0 0 auto"><polyline points="0.0,14.2 4.2,14.9 8.3,17.0 12.5,14.9 16.7,17.8 20.9,17.7 25.0,15.4 29.2,17.9 33.4,17.5 37.6,16.9 41.7,19.5 45.9,20.2 50.1,19.0 54.3,19.3 58.4,18.0 62.6,20.0 66.8,21.5 71.0,22.4 75.1,22.4 79.3,19.9 83.5,19.4 87.7,17.8 91.8,18.5 96.0,17.1" fill="none" stroke="#9D9D9D" stroke-width="1.5" stroke-linejoin="round"></polyline><circle cx="96.0" cy="17.1" r="2.5" fill="#D4D4D4"></circle></svg></span></td>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: flex; align-items: center; gap: 16px"><span><span style="font-size: 29px; font-weight: 300; line-height: 1.1">0%</span><span style="display: block; color: #9D9D9D; font-size: 14px">of requests</span></span><svg width="96" height="28" viewBox="-2 0 100 28" aria-hidden="true" style="flex: 0 0 auto"><polyline points="0.0,16.3 4.2,15.1 8.3,14.2 12.5,11.7 16.7,13.0 20.9,14.4 25.0,13.1 29.2,12.1 33.4,13.3 37.6,12.2 41.7,12.8 45.9,11.2 50.1,13.4 54.3,15.0 58.4,12.7 62.6,13.5 66.8,14.9 71.0,13.1 75.1,12.4 79.3,14.4 83.5,14.1 87.7,13.2 91.8,15.1 96.0,14.2" fill="none" stroke="#9D9D9D" stroke-width="1.5" stroke-linejoin="round"></polyline><circle cx="96.0" cy="14.2" r="2.5" fill="#D4D4D4"></circle></svg></span></td>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="display: flex; align-items: center; gap: 16px"><span><span style="font-size: 29px; font-weight: 300; line-height: 1.1">2 ms</span><span style="display: block; color: #9D9D9D; font-size: 14px">p50 · 11 ms p99</span></span><svg width="96" height="28" viewBox="-2 0 100 28" aria-hidden="true" style="flex: 0 0 auto"><polyline points="0.0,11.3 4.2,14.1 8.3,12.8 12.5,14.7 16.7,11.9 20.9,14.7 25.0,12.5 29.2,11.5 33.4,9.4 37.6,6.6 41.7,8.1 45.9,9.0 50.1,7.8 54.3,9.1 58.4,10.4 62.6,12.0 66.8,9.9 71.0,7.8 75.1,6.0 79.3,7.6 83.5,5.2 87.7,5.1 91.8,6.7 96.0,6.9" fill="none" stroke="#9D9D9D" stroke-width="1.5" stroke-linejoin="round"></polyline><circle cx="96.0" cy="6.9" r="2.5" fill="#D4D4D4"></circle></svg></span></td>
+<td style="padding: 10px 32px 10px 0; vertical-align: baseline"><span style="font-size: 29px; font-weight: 300; line-height: 1.1">—</span><span style="display: block; color: #9D9D9D; font-size: 14px">no shared resource</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</div></sc-if>
+</div>
+</section>
+
+<section id="help" aria-label="help" style="flex: 0 0 1120px; box-sizing: border-box; padding: 40px 96px 64px 64px; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 40px">
+<h2 style="margin: 0; font-size: 87px; font-weight: 300; line-height: 1; letter-spacing: -0.03em">help</h2>
+<div style="display: flex; gap: 64px; align-items: flex-start">
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 40px">
+<section aria-label="Config" style="display: flex; flex-direction: column; gap: 14px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300">config</h3>
+<div style="display: flex; flex-direction: column"><a href="#" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 21px; font-weight: 600; text-decoration: none">Reference</a><span style="color: #9D9D9D">Every key in the config file, with its default.</span></div>
+<div style="display: flex; flex-direction: column"><a href="#" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 21px; font-weight: 600; text-decoration: none">Routes and policy</a><span style="color: #9D9D9D">Hosts, downstreams, and audience and scope allow, require, deny.</span></div>
+<div style="display: flex; flex-direction: column"><a href="#" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 21px; font-weight: 600; text-decoration: none">Trusted issuers</a><span style="color: #9D9D9D">Algorithms, token_types, require_token_type and jwks_max_age.</span></div>
+<div style="display: flex; flex-direction: column"><a href="#" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 21px; font-weight: 600; text-decoration: none">Signing keys</a><span style="color: #9D9D9D">One active key per algorithm, and what the JWKS publishes.</span></div>
+</section>
+<section aria-label="Troubleshooting" style="display: flex; flex-direction: column; gap: 14px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300">troubleshooting</h3>
+<div style="display: flex; flex-direction: column"><a href="#" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 21px; font-weight: 600; text-decoration: none">A token was refused</a><span style="color: #9D9D9D">Find its audit line in watch, then replay it in explain.</span></div>
+<div style="display: flex; flex-direction: column"><a href="#" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 21px; font-weight: 600; text-decoration: none">Keys about to expire</a><span style="color: #9D9D9D">A trusted issuer's cached JWKS, or one of Tsong's signing keys.</span></div>
+<div style="display: flex; flex-direction: column"><a href="#" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 21px; font-weight: 600; text-decoration: none">Replicas that disagree</a><span style="color: #9D9D9D">Why a replica serves an older revision, and how to bring it back.</span></div>
+<div style="display: flex; flex-direction: column"><a href="#" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 21px; font-weight: 600; text-decoration: none">A config that won't load</a><span style="color: #9D9D9D">Read the rejection, fix the file, run tsong check, publish again.</span></div>
+</section>
+<section aria-label="Runbooks" style="display: flex; flex-direction: column; gap: 14px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300">runbooks</h3>
+<div style="display: flex; flex-direction: column"><a href="#" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 21px; font-weight: 600; text-decoration: none">Rotate a signing key</a><span style="color: #9D9D9D">Publish the next key, switch to it, retire the old one.</span></div>
+<div style="display: flex; flex-direction: column"><a href="#" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 21px; font-weight: 600; text-decoration: none">Roll back a revision</a><span style="color: #9D9D9D">Publish the last good revision again. Replicas fetch it on their own.</span></div>
+<div style="display: flex; flex-direction: column"><a href="#" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 21px; font-weight: 600; text-decoration: none">An issuer's JWKS can't be fetched</a><span style="color: #9D9D9D">What fails when the cache expires, and what to do before then.</span></div>
+<div style="display: flex; flex-direction: column"><a href="#" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 21px; font-weight: 600; text-decoration: none">Narrow a route's client addresses</a><span style="color: #9D9D9D">Change its IP allow list and publish a new revision.</span></div>
+</section>
+</div>
+<section aria-label="Glossary" style="flex: 0 0 360px; display: flex; flex-direction: column; gap: 16px">
+<h3 style="margin: 0; font-size: 29px; font-weight: 300">glossary</h3>
+<dl style="margin: 0; display: flex; flex-direction: column; gap: 12px">
+<div><dt style="font-weight: 600">exchange</dt><dd style="margin: 0">Trading a caller's token for one Tsong mints for the route's downstream, per RFC 8693.</dd></div>
+<div><dt style="font-weight: 600">subject token</dt><dd style="margin: 0">The caller's bearer token, from a trusted issuer. Tsong validates it and never forwards it.</dd></div>
+<div><dt style="font-weight: 600">audience <span class="mono" style="font-weight: 400; color: #9D9D9D">aud</span></dt><dd style="margin: 0">Who a token is for. Routes allow, require or deny values.</dd></div>
+<div><dt style="font-weight: 600">scope <span class="mono" style="font-weight: 400; color: #9D9D9D">scope, scp</span></dt><dd style="margin: 0">What a token lets its holder do. Routes allow, require or deny values.</dd></div>
+<div><dt style="font-weight: 600">typ <span class="mono" style="font-weight: 400; color: #9D9D9D">at+jwt</span></dt><dd style="margin: 0">The header that says what kind of token this is, so an ID token can't pass as an access token.</dd></div>
+<div><dt style="font-weight: 600">JWKS</dt><dd style="margin: 0">A published set of public keys. Tsong fetches issuers' sets and publishes its own.</dd></div>
+<div><dt style="font-weight: 600">kid</dt><dd style="margin: 0">The key ID in a token's header, naming the key that signed it.</dd></div>
+<div><dt style="font-weight: 600">error budget</dt><dd style="margin: 0">The failures an objective allows over 30 days before it's missed.</dd></div>
+<div><dt style="font-weight: 600">p99</dt><dd style="margin: 0">The time within which 99 of every 100 requests finish.</dd></div>
+<div><dt style="font-weight: 600">revision <span class="mono" style="font-weight: 400; color: #9D9D9D">8b0e6d4</span></dt><dd style="margin: 0">One published version of the config file. Each replica serves one.</dd></div>
+</dl>
+<a href="#" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; color: #9D9D9D">the whole glossary</a>
+</section>
+</div>
+</section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"face":{"editor":"enum","options":["Segoe UI","Selawik","Open Sans"],"default":"Segoe UI"},"stripHeight":{"editor":null},"onGo":{"editor":null},"$preview":{"width":12320,"height":1500}}'>
+class Component extends DCLogic {
+constructor(props) {
+super(props);
+this.state = { statusTab: 'overview', trustTab: 'entra', routeSort: 'busiest', routeFilterOpen: false, activeRouteFilter: '', watchRange: 'live', filterOpen: false, activeFilter: '', alertTab: 'open', reviewed: { 'key-expiry': true } };
+}
+componentDidUpdate(prevProps, prevState) {
+const reveal = (box, input) => {
+let smooth = true;
+try { smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+try { box.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: smooth ? 'smooth' : 'auto' }); } catch (e) {}
+try { if (input) input.focus({ preventScroll: true }); } catch (e) {}
+};
+if (prevState && !prevState.routeFilterOpen && this.state.routeFilterOpen && this.routeFilterEl) reveal(this.routeFilterEl, this.routeQueryEl);
+if (prevState && !prevState.filterOpen && this.state.filterOpen && this.filterEl) {
+let smooth = true;
+try { smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+try { this.filterEl.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: smooth ? 'smooth' : 'auto' }); } catch (e) {}
+try { if (this.queryEl) this.queryEl.focus({ preventScroll: true }); } catch (e) {}
+}
+}
+go(e, name) {
+if (this.props.onGo) {
+e?.preventDefault?.();
+this.props.onGo(name);
+}
+}
+renderVals() {
+const hours = [];
+for (let i = 0; i < 24; i++) {
+hours.push(String((13 + i) % 24).padStart(2, '0'));
+}
+const row = (name, version, at) => ({
+name,
+version,
+cells: hours.map((hour, i) => {
+const state = at(i);
+const word = state === 'down' ? 'down' : state === 'warn' ? 'degraded' : 'serving';
+return { ok: state === 'ok', warn: state === 'warn', down: state === 'down', label: name + ' at ' + hour + ':00, ' + word };
+}),
+});
+const always = () => 'ok';
+const tab = (name) => ({
+on: this.state.statusTab === name,
+sel: this.state.statusTab === name ? 'true' : 'false',
+color: this.state.statusTab === name ? '#D4D4D4' : '#9D9D9D',
+go: () => this.setState({ statusTab: name }),
+});
+const reviewed = this.state.reviewed || {};
+const alerts = [
+{ id: 'jwks', serious: true, title: "okta's JWKS refresh is failing", body: "Tsong hasn't fetched okta's keys since 08:12. The cached copy expires in 2 h, at 14:12. After that, every okta token is refused.", meta: 'serious · issuer okta · since 08:27', action: 'see trust', target: 'trust' },
+{ id: 'tip', serious: true, title: "Config c71a5e9 won't load", body: 'Every replica rejected the tip: route billing.test asks for ES384, and there is no active ES384 key. They keep serving what they had.', meta: 'serious · revision c71a5e9 · today, 11:40', action: 'see config', target: 'config' },
+{ id: 'drift', serious: true, title: 'Replicas serve different revisions', body: "replica-d still serves 3f9c2a1 and hasn't fetched since 09:20. Until it catches up, orders.test there doesn't require orders.read and still allows orders.delete.", meta: 'serious · 3 of 4 on 8b0e6d4 · since 09:30', action: 'see config', target: 'config' },
+{ id: 'typ', serious: false, title: 'typ refusals spiking from one address', body: '[CLIENT ADDRESS] sent 2,400 tokens with typ JWT to entra routes in the last hour, usually about 10. A client built for the wrong token type, or probing.', meta: 'notice · issuer entra · the last hour', action: 'see events', target: 'watch' },
+{ id: 'sweep', serious: false, title: 'One caller is sweeping route hosts', body: 'okta:svc-crawler tried 38 of 42 route hosts in 10 minutes. It usually calls 2. 71% of its exchanges were refused for scope.', meta: 'notice · issuer okta · today, 11:52', action: 'see callers', target: 'callers' },
+{ id: 'key-expiry', serious: false, title: 'Signing key rs256-2026-05 expires in 6 days', body: "It's the only RS256 key, used by payments.test and legacy.test. No successor is published yet.", meta: 'notice · expires 2026-11-29', action: 'see keys', target: 'keys' },
+];
+const alertTab = this.state.alertTab;
+const openCount = alerts.filter((a) => !reviewed[a.id]).length;
+const alertList = alerts
+.filter((a) => alertTab === 'all' || (alertTab === 'reviewed') === !!reviewed[a.id])
+.map((a) => ({
+title: a.title,
+body: a.body,
+meta: a.meta,
+serious: a.serious,
+notice: !a.serious,
+action: a.action,
+href: '#' + a.target,
+go: (e) => this.go(e, a.target),
+toggle: () => this.setState({ reviewed: Object.assign({}, reviewed, { [a.id]: !reviewed[a.id] }) }),
+toggleLabel: reviewed[a.id] ? 'reopen' : 'mark reviewed',
+}));
+const atab = (name, label) => ({
+on: alertTab === name,
+sel: alertTab === name ? 'true' : 'false',
+color: alertTab === name ? '#D4D4D4' : '#9D9D9D',
+go: () => this.setState({ alertTab: name }),
+label,
+});
+const ev = (time, outcome, reason, route, issuer, subject, cache) => ({
+time, outcome, reason, route, issuer, subject, cache,
+minted: outcome === 'minted',
+refused: outcome !== 'minted',
+});
+const events = [
+ev('12:10:04', 'minted', '', 'orders.test', 'entra', 'entra:svc-checkout', 'cached'),
+ev('12:10:04', 'refused 401', 'typ JWT not accepted', 'reports.test', 'entra', '— not read', '—'),
+ev('12:10:03', 'minted', '', 'inventory.test', 'entra', 'entra:svc-stock', 'fresh'),
+ev('12:10:03', 'refused 403', 'scope orders.delete not in allow', 'orders.test', 'okta', 'okta:jdoe', '—'),
+ev('12:10:02', 'refused 403', 'scope search.query required', 'search.test', 'okta', 'okta:svc-crawler', '—'),
+ev('12:10:02', 'minted', '', 'payments.test', 'entra', 'entra:svc-checkout', 'fresh'),
+ev('12:10:01', 'refused 401', 'audience missing tsong', 'reports.test', 'okta', 'okta:svc-reporting', '—'),
+ev('12:10:01', 'minted', '', 'orders.test', 'okta', 'okta:svc-reporting', 'cached'),
+ev('12:10:00', 'refused 401', 'typ JWT not accepted', 'reports.test', 'entra', '— not read', '—'),
+ev('12:09:59', 'refused 403', 'scope legacy.read required', 'legacy.test', 'okta', 'okta:svc-crawler', '—'),
+ev('12:09:59', 'minted', '', 'search.test', 'entra', 'entra:svc-search', 'cached'),
+ev('12:09:58', 'refused 401', 'token expired 41 s ago', 'inventory.test', 'entra', 'entra:svc-stock', '—'),
+];
+const faces = { 'Segoe UI': "'Segoe UI', sans-serif", 'Selawik': "'Selawik', sans-serif", 'Open Sans': "'Open Sans', sans-serif" };
+const ttab = (name) => ({
+on: this.state.trustTab === name,
+sel: this.state.trustTab === name ? 'true' : 'false',
+color: this.state.trustTab === name ? '#D4D4D4' : '#9D9D9D',
+go: () => this.setState({ trustTab: name }),
+});
+const wtab = (name) => ({
+sel: this.state.watchRange === name ? 'true' : 'false',
+color: this.state.watchRange === name ? '#D4D4D4' : '#9D9D9D',
+go: () => this.setState({ watchRange: name }),
+});
+const rtab = (name) => ({
+sel: this.state.routeSort === name ? 'true' : 'false',
+color: this.state.routeSort === name ? '#D4D4D4' : '#9D9D9D',
+go: () => this.setState({ routeSort: name }),
+});
+return {
+rBusiest: rtab('busiest'),
+rRefused: rtab('refused'),
+rChanged: rtab('changed'),
+rName: rtab('name'),
+routeFilterOpen: this.state.routeFilterOpen,
+routeFilterOpenAttr: this.state.routeFilterOpen ? 'true' : 'false',
+hasRouteFilter: this.state.activeRouteFilter !== '',
+activeRouteFilter: this.state.activeRouteFilter,
+openRouteFilter: () => this.setState({ routeFilterOpen: !this.state.routeFilterOpen }),
+closeRouteFilter: () => this.setState({ routeFilterOpen: false }),
+applyRouteFilter: () => this.setState({ routeFilterOpen: false, activeRouteFilter: 'scope = orders.* and alg = RS256' }),
+clearRouteFilter: () => this.setState({ activeRouteFilter: '' }),
+routeFilterRef: (el) => { this.routeFilterEl = el; },
+routeQueryRef: (el) => { this.routeQueryEl = el; },
+wLive: wtab('live'),
+w15: wtab('15m'),
+w1h: wtab('1h'),
+w24h: wtab('24h'),
+w7d: wtab('7d'),
+filterOpen: this.state.filterOpen,
+filterRef: (el) => { this.filterEl = el; },
+queryRef: (el) => { this.queryEl = el; },
+filterOpenAttr: this.state.filterOpen ? 'true' : 'false',
+hasFilter: this.state.activeFilter !== '',
+activeFilter: this.state.activeFilter,
+openFilter: () => this.setState({ filterOpen: !this.state.filterOpen }),
+closeFilter: () => this.setState({ filterOpen: false }),
+applyFilter: () => this.setState({ filterOpen: false, activeFilter: 'outcome = refused and route = orders.* and issuer = okta' }),
+clearFilter: () => this.setState({ activeFilter: '' }),
+trustEntra: ttab('entra'),
+trustOkta: ttab('okta'),
+tabOverview: tab('overview'),
+tabObjectives: tab('objectives'),
+tabSignals: tab('signals'),
+aOpen: atab('open', 'open ' + openCount),
+aReviewed: atab('reviewed', 'reviewed ' + (alerts.length - openCount)),
+aAll: atab('all', 'all ' + alerts.length),
+alertTab,
+alertList,
+alertsEmpty: alertList.length === 0,
+openCount,
+events,
+sans: faces[this.props.face] ?? faces['Segoe UI'],
+stripHeight: this.props.stripHeight ?? 1500,
+hours,
+goAlerts: (e) => this.go(e, 'alerts'),
+goWatch: (e) => this.go(e, 'watch'),
+goRoutes: (e) => this.go(e, 'routes'),
+goTrust: (e) => { this.setState({ trustTab: 'okta' }); this.go(e, 'trust'); },
+goKeys: (e) => this.go(e, 'keys'),
+goExplain: (e) => this.go(e, 'explain'),
+goCallers: (e) => this.go(e, 'callers'),
+goConfig: (e) => this.go(e, 'config'),
+goStatus: (e) => { this.setState({ statusTab: 'overview' }); this.go(e, 'status'); },
+goObjectives: (e) => { this.setState({ statusTab: 'objectives' }); this.go(e, 'status'); },
+goSignals: (e) => { this.setState({ statusTab: 'signals' }); this.go(e, 'status'); },
+goHelp: (e) => this.go(e, 'help'),
+services: [
+row('gateway', '0.6.1', (i) => (i === 14 ? 'warn' : 'ok')),
+row('token endpoint', '0.6.1', (i) => (i === 14 ? 'warn' : 'ok')),
+row('JWKS fetch', '0.6.1', (i) => (i >= 19 ? 'warn' : 'ok')),
+row('admin', '0.6.1', always),
+row('entra', 'Entra ID', always),
+row('okta', 'Okta', (i) => (i >= 19 ? 'down' : 'ok')),
+],
+};
+}
+}
+</script>
+</body>
+</html>
