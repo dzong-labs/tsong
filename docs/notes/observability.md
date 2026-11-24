@@ -50,13 +50,13 @@ The list is deployed in the bootstrap file, never loaded from the config, and ch
 | `tsong_config_last_fetch_timestamp_seconds` | | When the config store was last read, new revision or not. The config is read only at start until roadmap item 32, so the value stays fixed after start |
 | `tsong_config_revision_info` | `revision` | The revision being served, set to 1: the newest revision read whose config is in use. Across replicas, more than one `revision` means they haven't converged |
 | `tsong_config_tip_rejected` | | 1 while the newest config read was invalid or failed to build, so an older one is still served |
-| `tsong_audit_lines_dropped_total` | | Audit lines dropped because the writer had fallen behind, or was still stuck at shutdown |
+| `tsong_audit_lines_dropped_total` | | Audit lines dropped: the queue was full, the write failed, or the writer was still stuck at shutdown |
 
 Labelling by route costs one series per route and status, and one histogram per route. That cost grows with the route count.
 
 ## Audit
 
-Each token exchange writes one JSON line to stdout. That covers every cache miss in the gateway and every call to the token endpoint. A cache hit isn't an exchange, so it writes nothing, and the metrics count it instead. Collecting stdout belongs to the platform. A thread of its own writes the lines through a buffer, flushing whenever it has no more queued, so a request never waits on stdout. It holds up to 65,536 lines; past that a line is dropped and counted in `tsong_audit_lines_dropped_total`. Lines keep the order they were recorded in. At shutdown Tsong waits up to five seconds for the writer, then leaves a stuck one behind and counts the lines it never wrote as dropped.
+Each token exchange writes one JSON line to stdout. That covers every cache miss in the gateway and every call to the token endpoint. A cache hit isn't an exchange, so it writes nothing, and the metrics count it instead. Collecting stdout belongs to the platform. A thread of its own writes the lines through a buffer, flushing whenever it has no more queued, so a request never waits on stdout. It holds up to 65,536 lines; past that a line is dropped and counted in `tsong_audit_lines_dropped_total`, and so is each line of a write that fails, such as on a closed stdout or a full disk. Lines keep the order they were recorded in. At shutdown Tsong closes the writer off the async workers and waits up to five seconds for it, then leaves a stuck one behind, discarding the lines still queued and counting them as dropped.
 
 ```json
 {"event":"token_exchange","at":1763251200,"outcome":"issued","request_id":"9f1c…","trace_id":"4bf92f35…",

@@ -45,8 +45,8 @@ pub struct Metrics {
     pub gateway: Arc<GatewayMetrics>,
     /// Token exchanges, by outcome.
     pub exchanges: Family<OutcomeLabel, Counter>,
-    /// Audit lines dropped because the writer had fallen behind, or was
-    /// still stuck at shutdown.
+    /// Audit lines dropped: the queue was full, the write failed, or the
+    /// writer was still stuck at shutdown.
     pub audit_dropped: Counter,
     /// Failed JWKS fetches, by trusted issuer.
     pub jwks_failures: Family<IssuerLabel, Counter>,
@@ -99,7 +99,7 @@ impl Default for Metrics {
         let audit_dropped = Counter::default();
         registry.register(
             "tsong_audit_lines_dropped",
-            "Audit lines dropped because the writer had fallen behind",
+            "Audit lines dropped: queue full, write failed, or left unwritten at shutdown",
             audit_dropped.clone(),
         );
         let config_fetched = Gauge::default();

@@ -113,14 +113,30 @@ pub async fn serve_until(
 ) -> Result<(), Error> {
     let bootstrap = Bootstrap::load(path)?;
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-    let store = store(&bootstrap.source);
     let metrics = Arc::new(Metrics::default());
-    let audit: Arc<dyn Audit> = Arc::new(Queued::spawn(
+    let queued = Arc::new(Queued::spawn(
         std::io::stdout(),
         AUDIT_QUEUE,
         metrics.audit_dropped.clone(),
         AUDIT_SHUTDOWN,
     )?);
+    let audit: Arc<dyn Audit> = queued.clone();
+    let served = serve_with(bootstrap, clock, metrics, audit, shutdown).await;
+    // Closing waits on the writer thread, so it runs off the async workers.
+    let _ = tokio::task::spawn_blocking(move || queued.close()).await;
+    served
+}
+
+/// Serves Tsong for `bootstrap`, auditing to `audit`, as `serve_until`
+/// describes.
+async fn serve_with(
+    bootstrap: Bootstrap,
+    clock: Arc<dyn Clock>,
+    metrics: Arc<Metrics>,
+    audit: Arc<dyn Audit>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), Error> {
+    let store = store(&bootstrap.source);
     let fetcher: Arc<dyn JwksFetcher> = Arc::new(ObservedFetcher::new(
         HttpFetcher::default(),
         metrics.jwks_failures.clone(),

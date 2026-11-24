@@ -105,14 +105,57 @@ fn a_full_queue_drops_and_counts_without_blocking() -> TestResult {
 fn shutdown_leaves_a_stuck_writer_behind_and_counts_what_it_never_wrote() -> TestResult {
     let (writer, entered) = Gated::new(false);
     let dropped = Counter::<u64>::default();
-    let queued = Queued::spawn(writer, 4, dropped.clone(), Duration::from_millis(50))?;
+    let queued = Queued::spawn(
+        writer.clone(),
+        4,
+        dropped.clone(),
+        Duration::from_millis(50),
+    )?;
     queued.record("first");
     entered.recv_timeout(WAIT)?;
     queued.record("second");
     queued.record("third");
     let started = Instant::now();
-    drop(queued);
+    queued.close();
     assert!(started.elapsed() < WAIT, "shutdown waited too long");
+    assert_eq!(dropped.get(), 2, "the queued lines, not the one mid-write");
+    queued.record("late");
+    assert_eq!(dropped.get(), 3, "a line after closing is dropped");
+
+    // Unstuck, the writer finishes its write but nothing counted as dropped.
+    writer.open();
+    let deadline = Instant::now() + WAIT;
+    while writer.lines()?.is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(writer.lines()?, ["first"]);
+    drop(queued);
+    assert_eq!(dropped.get(), 3);
+    Ok(())
+}
+
+/// A writer whose every write fails, as a closed stdout's does.
+struct Broken;
+
+impl Write for Broken {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::ErrorKind::BrokenPipe.into())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Err(std::io::ErrorKind::BrokenPipe.into())
+    }
+}
+
+#[test]
+fn lines_whose_write_fails_are_counted_once() -> TestResult {
+    let dropped = Counter::<u64>::default();
+    let queued = Queued::spawn(Broken, 16, dropped.clone(), WAIT)?;
+    queued.record("one");
+    queued.record("two");
+    queued.record("three");
+    queued.close();
     assert_eq!(dropped.get(), 3);
     Ok(())
 }

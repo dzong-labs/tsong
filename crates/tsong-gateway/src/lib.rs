@@ -325,32 +325,58 @@ fn normalized(name: &[u8]) -> String {
 /// `access_token`, as [`normalized`] leaves it.
 const ACCESS_TOKEN: &str = "accesstoken";
 
-/// `text` with each `%XX` escape decoded and `+` read as a space, as
-/// `application/x-www-form-urlencoded` reads a name. A malformed escape is
-/// kept as it is.
+/// `text` percent-decoded as some downstream could read it: `%XX`, and
+/// IIS's `%uXXXX` as UTF-8, with `+` read as a space. Decoding repeats, up
+/// to three passes, until the text stops changing, so a double-encoded
+/// `%255F` decodes too. A malformed escape is kept as it is.
 fn percent_decoded(text: &str) -> Vec<u8> {
-    let bytes = text.as_bytes();
+    let mut decoded = text.as_bytes().to_vec();
+    for _ in 0..3 {
+        let next = decoded_once(&decoded);
+        if next == decoded {
+            break;
+        }
+        decoded = next;
+    }
+    decoded
+}
+
+/// `bytes` with one pass of escapes decoded.
+fn decoded_once(bytes: &[u8]) -> Vec<u8> {
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while let Some(&byte) = bytes.get(index) {
-        let escaped = (byte == b'%')
-            .then(|| bytes.get(index + 1..index + 3))
+        let rest = bytes.get(index + 1..).unwrap_or_default();
+        let wide = rest
+            .split_first()
+            .filter(|&(&u, _)| byte == b'%' && u.eq_ignore_ascii_case(&b'u'))
+            .and_then(|(_, digits)| hex(digits.get(..4)?))
+            .and_then(char::from_u32);
+        let narrow = (byte == b'%')
+            .then(|| hex(rest.get(..2)?))
             .flatten()
-            .filter(|hex| hex.iter().all(u8::is_ascii_hexdigit))
-            .and_then(|hex| std::str::from_utf8(hex).ok())
-            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
-        match escaped {
-            Some(value) => {
-                decoded.push(value);
-                index += 3;
-            }
-            None => {
-                decoded.push(if byte == b'+' { b' ' } else { byte });
-                index += 1;
-            }
+            .and_then(|value| u8::try_from(value).ok());
+        if let Some(c) = wide {
+            let mut utf8 = [0; 4];
+            decoded.extend_from_slice(c.encode_utf8(&mut utf8).as_bytes());
+            index += 6;
+        } else if let Some(value) = narrow {
+            decoded.push(value);
+            index += 3;
+        } else {
+            decoded.push(if byte == b'+' { b' ' } else { byte });
+            index += 1;
         }
     }
     decoded
+}
+
+/// The value of `digits`, when they are all hex digits.
+fn hex(digits: &[u8]) -> Option<u32> {
+    if !digits.iter().all(u8::is_ascii_hexdigit) {
+        return None;
+    }
+    u32::from_str_radix(std::str::from_utf8(digits).ok()?, 16).ok()
 }
 
 /// Whether `text` is an RFC 9110 token, as an auth scheme must be.

@@ -321,6 +321,11 @@ async fn an_access_token_in_the_query_is_refused_as_a_downstream_reads_it() -> T
         "access_to%E2%84%AAen=alice",
         "access-token=alice",
         "access__token=alice",
+        "access%255Ftoken=alice",
+        "access%25255Ftoken=alice",
+        "access%u005Ftoken=alice",
+        "%U0061ccess_token=alice",
+        "acce%u017Fs_token=alice",
     ] {
         for token in [None, Some("alice")] {
             let answer = send(&h, get("orders.test", &format!("/?{query}"), token)?).await?;
@@ -342,6 +347,8 @@ async fn an_access_token_in_the_query_is_refused_as_a_downstream_reads_it() -> T
         "access%5token=x",
         "access_tokens=x",
         "xaccess_token=x",
+        "access%u5Ftoken=x",
+        "access%2525255Ftoken=x",
     ] {
         let answer = send(&h, get("orders.test", &format!("/?{query}"), None)?).await?;
         assert_eq!(answer.status, StatusCode::OK, "{query}");
@@ -546,9 +553,16 @@ async fn a_trusted_proxy_with_a_malformed_chain_is_a_400() -> TestResult {
 
 #[tokio::test]
 async fn an_unreachable_downstream_is_a_502() -> TestResult {
-    let h = closing_harness().await?;
+    // A socket bound but never listening holds its port, so every
+    // connection to it is refused and no other test can take the port.
+    let refusing = tokio::net::TcpSocket::new_v4()?;
+    refusing.bind("127.0.0.1:0".parse()?)?;
+    let address = refusing.local_addr()?;
+    let config = config_to(&format!("http://{address}"))?;
+    let h = harness_with(&config, Arc::new(FakeExchanger::default()), address)?;
     let answer = send(&h, get("orders.test", "/", Some("alice"))?).await?;
     assert_eq!(answer.status, StatusCode::BAD_GATEWAY);
+    drop(refusing);
     Ok(())
 }
 
