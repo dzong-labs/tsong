@@ -116,12 +116,12 @@ fn hex(digits: Option<&[u8]>) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tsong_config::{default_refused_query_params, normalize_name};
+    use tsong_config::{ACCESS_TOKEN, default_refused_query_params, normalize_name};
 
     fn refused(query: &str) -> bool {
-        let defaults: Vec<String> = default_refused_query_params()
-            .iter()
-            .map(|name| normalize_name(name))
+        let defaults: Vec<String> = std::iter::once(ACCESS_TOKEN.to_owned())
+            .chain(default_refused_query_params())
+            .map(|name| normalize_name(&name))
             .collect();
         has_refused_param(Some(query), &defaults)
     }

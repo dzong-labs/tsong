@@ -80,11 +80,6 @@ impl Config {
 
     fn check_refused(&self, problems: &mut Vec<String>) {
         let gateway = &self.gateway;
-        if gateway.refused_query_params.is_empty() {
-            problems.push(
-                "gateway.refused_query_params is empty; leave it unset for the defaults".into(),
-            );
-        }
         for name in &gateway.refused_query_params {
             if crate::normalize_name(name).is_empty() {
                 problems.push(format!(
@@ -97,13 +92,16 @@ impl Config {
                 .push("gateway.refused_headers is empty; leave it unset for the defaults".into());
         }
         for name in &gateway.refused_headers {
+            let normalized = crate::normalize_name(name);
             if !is_header_name(name) {
                 problems.push(format!(
                     "gateway.refused_headers has \"{name}\", which isn't a header name"
                 ));
-            } else if name.eq_ignore_ascii_case("authorization")
-                || name.eq_ignore_ascii_case("proxy-authorization")
-            {
+            } else if normalized.is_empty() {
+                problems.push(format!(
+                    "gateway.refused_headers has \"{name}\", which has no letters or digits"
+                ));
+            } else if normalized == "authorization" || normalized == "proxyauthorization" {
                 problems.push(format!(
                     "gateway.refused_headers may not hold {name}, which the gateway reads itself"
                 ));

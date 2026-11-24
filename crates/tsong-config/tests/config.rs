@@ -2148,7 +2148,7 @@ fn credential_names_default_and_may_be_set() -> TestResult {
     let config = Config::from_toml(&minimal())?;
     assert_eq!(
         config.gateway.refused_query_params,
-        ["access_token", "private_token", "job_token", "api_key"]
+        ["private_token", "job_token", "api_key"]
     );
     assert_eq!(
         config.gateway.refused_headers,
@@ -2161,16 +2161,23 @@ fn credential_names_default_and_may_be_set() -> TestResult {
     let config = Config::from_toml(&text)?;
     assert_eq!(config.gateway.refused_query_params, ["sig"]);
     assert_eq!(config.gateway.refused_headers, ["X-Session"]);
+    // With access_token always refused, an empty list only drops the rest.
+    let text = minimal().replace(
+        "[gateway.cache]",
+        "refused_query_params = []\n\n[gateway.cache]",
+    );
+    assert!(
+        Config::from_toml(&text)?
+            .gateway
+            .refused_query_params
+            .is_empty()
+    );
     Ok(())
 }
 
 #[test]
 fn credential_names_that_would_turn_the_check_off_or_never_match_are_refused() -> TestResult {
     for (lists, problem) in [
-        (
-            "refused_query_params = []",
-            "gateway.refused_query_params is empty; leave it unset for the defaults",
-        ),
         (
             "refused_query_params = [\"__\"]",
             "gateway.refused_query_params has \"__\", which has no letters or digits",
@@ -2194,6 +2201,18 @@ fn credential_names_that_would_turn_the_check_off_or_never_match_are_refused() -
         (
             "refused_headers = [\"proxy-authorization\"]",
             "gateway.refused_headers may not hold proxy-authorization, which the gateway reads itself",
+        ),
+        (
+            "refused_headers = [\"Proxy_Authorization\"]",
+            "gateway.refused_headers may not hold Proxy_Authorization, which the gateway reads itself",
+        ),
+        (
+            "refused_headers = [\"AUTHORIZATION\"]",
+            "gateway.refused_headers may not hold AUTHORIZATION, which the gateway reads itself",
+        ),
+        (
+            "refused_headers = [\"--\"]",
+            "gateway.refused_headers has \"--\", which has no letters or digits",
         ),
     ] {
         let text = minimal().replace("[gateway.cache]", &format!("{lists}\n\n[gateway.cache]"));

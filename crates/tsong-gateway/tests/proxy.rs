@@ -744,6 +744,11 @@ async fn each_default_credential_header_is_refused_in_any_case() -> TestResult {
         ("Job-Token", "JOB-TOKEN"),
         ("X-API-Key", "X-API-Key"),
         ("x-api-key", "X-API-Key"),
+        ("X_API_Key", "X-API-Key"),
+        ("x_api_key", "X-API-Key"),
+        ("X-Api_Key", "X-API-Key"),
+        ("private_token", "PRIVATE-TOKEN"),
+        ("PRIVATE_TOKEN", "PRIVATE-TOKEN"),
     ] {
         for token in [None, Some("alice")] {
             let mut builder = Request::get("/")
@@ -766,7 +771,7 @@ async fn each_default_credential_header_is_refused_in_any_case() -> TestResult {
 }
 
 #[tokio::test]
-async fn configured_lists_replace_the_defaults() -> TestResult {
+async fn configured_lists_replace_the_defaults_but_access_token_stays() -> TestResult {
     let address = downstream().await?;
     let mut config = config_to(&format!("http://{address}"))?;
     config.gateway.refused_query_params = vec!["sig".into()];
@@ -782,5 +787,17 @@ async fn configured_lists_replace_the_defaults() -> TestResult {
     assert_eq!(answer.body, "the X-Session header is not accepted\n");
     let answer = send(&h, get("orders.test", "/?api_key=1", None)?).await?;
     assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+    let answer = send(&h, get("orders.test", "/?Access-Token=1", None)?).await?;
+    assert_eq!(
+        answer.status,
+        StatusCode::UNAUTHORIZED,
+        "access_token is always refused"
+    );
+    let session = Request::get("/")
+        .header("host", "orders.test")
+        .header("x_session", "s")
+        .body(Body::empty())?;
+    let answer = send(&h, from(CLIENT, session)?).await?;
+    assert_eq!(answer.body, "the X-Session header is not accepted\n");
     Ok(())
 }

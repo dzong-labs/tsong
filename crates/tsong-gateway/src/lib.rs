@@ -26,11 +26,13 @@ use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::{HeaderName, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use ipnet::IpNet;
 use tsong_clock::Clock;
-use tsong_config::{Config, Route, RouteTable, allowed, client_ip, normalize_name};
+use tsong_config::{
+    ACCESS_TOKEN, Config, Route, RouteTable, allowed, client_ip, fold_name_char, normalize_name,
+};
 use tsong_issuer::{ExchangeContext, ExchangeError};
 
 use credential::{Credential, credential};
@@ -49,8 +51,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub enum GatewayError {
     #[error("building the downstream client: {0}")]
     Client(#[from] reqwest::Error),
-    #[error("gateway.refused_headers has {0:?}, which isn't a header name")]
-    HeaderName(String),
 }
 
 /// The reverse proxy for one config.
@@ -63,10 +63,12 @@ pub struct Gateway {
     /// One downstream client per read timeout in the config.
     clients: HashMap<Duration, reqwest::Client>,
     metrics: Arc<GatewayMetrics>,
-    /// The refused query parameter names, normalized.
+    /// The refused query parameter names, normalized: `access_token`, then
+    /// the config's.
     refused_query_params: Vec<String>,
-    /// The refused headers, with each name as the config spells it.
-    refused_headers: Vec<(HeaderName, String)>,
+    /// The refused header names, normalized, each with its name as the
+    /// config spells it.
+    refused_headers: Vec<(String, String)>,
 }
 
 impl Gateway {
@@ -87,22 +89,22 @@ impl Gateway {
                 entry.insert(client(timeout)?);
             }
         }
-        let refused_query_params = config
-            .gateway
-            .refused_query_params
-            .iter()
-            .map(|name| normalize_name(name))
+        let refused_query_params = std::iter::once(ACCESS_TOKEN)
+            .chain(
+                config
+                    .gateway
+                    .refused_query_params
+                    .iter()
+                    .map(String::as_str),
+            )
+            .map(normalize_name)
             .collect();
         let refused_headers = config
             .gateway
             .refused_headers
             .iter()
-            .map(|name| {
-                HeaderName::from_bytes(name.as_bytes())
-                    .map(|header| (header, name.clone()))
-                    .map_err(|_| GatewayError::HeaderName(name.clone()))
-            })
-            .collect::<Result<_, _>>()?;
+            .map(|name| (normalize_name(name), name.clone()))
+            .collect();
         Ok(Self {
             routes: RouteTable::new(&config.routes),
             allow: config.gateway.allow.clone(),
@@ -175,11 +177,7 @@ impl Gateway {
         if has_refused_param(request.uri().query(), &self.refused_query_params) {
             return unauthorized("a token in the query is not accepted", None);
         }
-        if let Some((_, name)) = self
-            .refused_headers
-            .iter()
-            .find(|(header, _)| request.headers().contains_key(header))
-        {
+        if let Some(name) = self.refused_header(request.headers()) {
             return unauthorized(&format!("the {name} header is not accepted"), None);
         }
         let minted = match credential(request.headers()) {
@@ -201,6 +199,23 @@ impl Gateway {
         };
         self.send_downstream(route, request, minted.as_deref(), peer)
             .await
+    }
+
+    /// The configured name of the first refused header `headers` carries,
+    /// comparing normalized names, so `X_API_Key` is `X-API-Key`.
+    fn refused_header(&self, headers: &HeaderMap) -> Option<&str> {
+        headers.keys().find_map(|header| {
+            self.refused_headers
+                .iter()
+                .find(|(normalized, _)| {
+                    header
+                        .as_str()
+                        .chars()
+                        .flat_map(fold_name_char)
+                        .eq(normalized.chars())
+                })
+                .map(|(_, name)| name.as_str())
+        })
     }
 
     /// Streams `request` to `route`'s downstream with `minted` as its

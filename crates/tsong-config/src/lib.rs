@@ -167,14 +167,16 @@ pub struct Gateway {
     /// answering 504. A route may set its own.
     #[serde(default = "default_read_timeout", with = "duration")]
     pub read_timeout: Duration,
-    /// Query parameter names that carry a credential. A request whose
-    /// query has one, read as a downstream could read it, is refused,
-    /// bearer token or not. Unset, the defaults.
+    /// Query parameter names that carry a credential, refused beside
+    /// `access_token`, which is always refused. A request whose query has
+    /// one, read as a downstream could read it, is refused, bearer token or
+    /// not. Unset, the defaults; empty, only `access_token`.
     #[serde(default = "default_refused_query_params")]
     pub refused_query_params: Vec<String>,
-    /// Headers that carry a credential Tsong doesn't exchange, matched
-    /// without regard to case. A request with one is refused, bearer token
-    /// or not. Unset, the defaults.
+    /// Headers that carry a credential Tsong doesn't exchange, matched by
+    /// normalized name, as query names are, so `X_API_Key` is `X-API-Key`.
+    /// A request with one is refused, bearer token or not. Unset, the
+    /// defaults.
     #[serde(default = "default_refused_headers")]
     pub refused_headers: Vec<String>,
     pub cache: Cache,
@@ -184,10 +186,14 @@ fn default_read_timeout() -> Duration {
     Duration::from_secs(60)
 }
 
-/// The query parameters refused by default: RFC 6750's `access_token`,
+/// The query parameter always refused, whatever the config says: RFC
+/// 6750's `access_token`.
+pub const ACCESS_TOKEN: &str = "access_token";
+
+/// The query parameters refused by default beside `access_token`:
 /// GitLab's `private_token` and `job_token`, and `api_key`.
 pub fn default_refused_query_params() -> Vec<String> {
-    ["access_token", "private_token", "job_token", "api_key"]
+    ["private_token", "job_token", "api_key"]
         .map(String::from)
         .into()
 }
