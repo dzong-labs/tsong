@@ -35,7 +35,10 @@ fn is_gateway_header(name: &str) -> bool {
             | "traceparent"
             | "tracestate"
             | "forwarded"
-    ) || name.starts_with("xforwarded")
+            | "xforwardedfor"
+            | "xforwardedhost"
+            | "xforwardedproto"
+    )
 }
 
 /// Whether `text` is an RFC 9110 token, as a header name must be.

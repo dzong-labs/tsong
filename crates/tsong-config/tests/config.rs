@@ -2227,8 +2227,8 @@ fn credential_names_that_would_turn_the_check_off_or_never_match_are_refused() -
             "gateway.refused_headers may not hold Forwarded, which the gateway reads, sets or strips itself",
         ),
         (
-            "refused_headers = [\"X-Forwarded-Port\"]",
-            "gateway.refused_headers may not hold X-Forwarded-Port, which the gateway reads, sets or strips itself",
+            "refused_headers = [\"X_Forwarded_Host\"]",
+            "gateway.refused_headers may not hold X_Forwarded_Host, which the gateway reads, sets or strips itself",
         ),
         (
             "refused_headers = [\"--\"]",
