@@ -46,8 +46,9 @@ pub struct Metrics {
     pub gateway: Arc<GatewayMetrics>,
     /// Token exchanges, by outcome.
     pub exchanges: Family<OutcomeLabel, Counter>,
-    /// Gateway requests with no `Authorization` header answered after the
-    /// allow lists, whatever the status.
+    /// Gateway requests with no `Authorization` header that passed the
+    /// allow lists and the `access_token` query check, whatever the status
+    /// they got. Requests those checks refuse aren't counted here.
     pub anonymous_requests: Counter,
     /// Audit lines dropped because the writer had fallen behind.
     pub audit_dropped: Counter,
@@ -102,7 +103,7 @@ impl Default for Metrics {
         let anonymous_requests = Counter::default();
         registry.register(
             "tsong_anonymous_requests",
-            "Gateway requests received with no Authorization header",
+            "Gateway requests with no Authorization header that passed the allow lists and the access_token query check, whatever the status",
             anonymous_requests.clone(),
         );
         let audit_dropped = Counter::default();

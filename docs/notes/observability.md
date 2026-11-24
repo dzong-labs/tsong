@@ -43,7 +43,7 @@ The list is deployed in the bootstrap file, never loaded from the config, and ch
 | `tsong_gateway_requests_total` | `route`, `status` | Gateway answers. `route` is `-` when no route matched |
 | `tsong_downstream_seconds` | `route` | Time to a downstream's response headers, 1ms to about 16s |
 | `tsong_exchanges_total` | `outcome` | Token exchanges: `issued`, or the OAuth error code |
-| `tsong_anonymous_requests_total` | | Gateway requests with no `Authorization` header, passed through without a token, whatever the status. They aren't exchanges |
+| `tsong_anonymous_requests_total` | | Gateway requests with no `Authorization` header that passed the allow lists and the `access_token` query check, whatever the status they got, 499 included. Requests those checks refuse aren't counted here; `tsong_gateway_requests_total` counts them by status. They aren't exchanges |
 | `tsong_jwks_fetch_failures_total` | `issuer` | Failed JWKS fetches, by the trusted issuer's `iss` |
 | `tsong_jwks_age_seconds` | `issuer` | Seconds since the trusted issuer's keys were fetched, for the config being served. Past its `jwks_max_age`, its tokens are refused. An issuer whose keys were never fetched has no series |
 | `tsong_config_reloads_total` | `outcome` | Reloads that found a new revision: `applied`, `fetch_failed`, `invalid_config` or `build_failed` |

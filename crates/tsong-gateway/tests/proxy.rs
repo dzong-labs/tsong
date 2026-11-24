@@ -316,7 +316,7 @@ async fn an_abandoned_anonymous_request_is_still_observed() -> TestResult {
 }
 
 #[tokio::test]
-async fn an_access_token_in_the_query_is_refused() -> TestResult {
+async fn an_access_token_in_the_query_is_refused_as_a_downstream_reads_it() -> TestResult {
     let h = harness().await?;
     for query in [
         "access_token=alice",
@@ -326,6 +326,17 @@ async fn an_access_token_in_the_query_is_refused() -> TestResult {
         "%61ccess_token=alice",
         "access%5Ftoken=alice",
         "access%5ftoken=alice",
+        "ACCESS_TOKEN=alice",
+        "Access_Token=alice",
+        "Access_token=alice",
+        "x=1;access_token=alice",
+        "access.token=alice",
+        "access+token=alice",
+        "access%20token=alice",
+        "access%5Btoken=alice",
+        "access_token[]=alice",
+        "access_token[x]=alice",
+        "access_token%5B%5D=alice",
     ] {
         for token in [None, Some("alice")] {
             let answer = send(&h, get("orders.test", &format!("/?{query}"), token)?).await?;
@@ -343,8 +354,12 @@ async fn an_access_token_in_the_query_is_refused() -> TestResult {
         "my_access_token=x",
         "access_token_x=1",
         "x=access_token",
-        "Access_token=x",
+        "x=1;y=access_token",
         "access%5token=x",
+        "access_tokens=x",
+        "xaccess_token=x",
+        "access-token=x",
+        "access__token=x",
     ] {
         let answer = send(&h, get("orders.test", &format!("/?{query}"), None)?).await?;
         assert_eq!(answer.status, StatusCode::OK, "{query}");

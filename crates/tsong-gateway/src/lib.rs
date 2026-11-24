@@ -327,15 +327,42 @@ fn is_b64token(text: &str) -> bool {
 }
 
 /// Whether `query` has an `access_token` parameter (RFC 6750 section
-/// 2.3), its name compared after percent-decoding.
+/// 2.3) as a downstream could read it: pairs split on `&` or `;`, and the
+/// name percent-decoded, `+` read as a space.
 fn has_access_token(query: Option<&str>) -> bool {
     query.is_some_and(|query| {
-        query.split('&').any(|pair| {
+        query.split(['&', ';']).any(|pair| {
             let name = pair.split_once('=').map_or(pair, |(name, _)| name);
-            percent_decoded(name) == b"access_token"
+            reads_as_access_token(&percent_decoded(name))
         })
     })
 }
+
+/// Whether a downstream framework could read the decoded parameter name
+/// `name` as `access_token`: compared without regard to ASCII case, with
+/// `.`, space and `[` read as `_` as PHP renames them, and with or without
+/// anything from the first `[` on, so `access_token[]` counts.
+fn reads_as_access_token(name: &[u8]) -> bool {
+    let matches = |name: &[u8]| {
+        name.len() == ACCESS_TOKEN.len()
+            && name.iter().zip(ACCESS_TOKEN).all(|(&byte, &expected)| {
+                let byte = match byte {
+                    b'.' | b' ' | b'[' => b'_',
+                    byte => byte.to_ascii_lowercase(),
+                };
+                byte == expected
+            })
+    };
+    let base = name
+        .iter()
+        .position(|&byte| byte == b'[')
+        .and_then(|bracket| name.get(..bracket))
+        .unwrap_or(name);
+    matches(name) || matches(base)
+}
+
+/// The query parameter RFC 6750 section 2.3 carries a token in.
+const ACCESS_TOKEN: &[u8] = b"access_token";
 
 /// `text` with each `%XX` escape decoded and `+` read as a space, as
 /// `application/x-www-form-urlencoded` reads a name. A malformed escape is
