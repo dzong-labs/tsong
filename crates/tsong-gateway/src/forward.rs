@@ -61,12 +61,13 @@ pub fn request_host(request: &Request) -> Option<String> {
 }
 
 /// Sends `request` to the route's downstream with `minted` as its bearer
-/// token, and returns the downstream's response.
+/// token, or with no `Authorization` header when there is none, and
+/// returns the downstream's response.
 pub async fn forward(
     client: &reqwest::Client,
     route: &Route,
     request: Request,
-    minted: &str,
+    minted: Option<&str>,
     peer: IpAddr,
     trusted_peer: bool,
 ) -> Response {
@@ -100,12 +101,12 @@ pub async fn forward(
 }
 
 /// The downstream request's headers: the inbound headers without the
-/// hop-by-hop and replaced ones, then the minted bearer token and the
-/// `X-Forwarded-*` headers. The downstream host is set by the client from
+/// hop-by-hop and replaced ones, then the minted bearer token, if any, and
+/// the `X-Forwarded-*` headers. The downstream host is set by the client from
 /// the URL.
 fn outbound_headers(
     request: &Request,
-    minted: &str,
+    minted: Option<&str>,
     peer: IpAddr,
     trusted_peer: bool,
 ) -> Option<HeaderMap> {
@@ -115,9 +116,11 @@ fn outbound_headers(
         headers.remove(name);
     }
 
-    let mut authorization = HeaderValue::from_str(&format!("Bearer {minted}")).ok()?;
-    authorization.set_sensitive(true);
-    headers.insert(header::AUTHORIZATION, authorization);
+    if let Some(minted) = minted {
+        let mut authorization = HeaderValue::from_str(&format!("Bearer {minted}")).ok()?;
+        authorization.set_sensitive(true);
+        headers.insert(header::AUTHORIZATION, authorization);
+    }
 
     // A trusted proxy's chain is kept; anyone else's could be forged.
     let mut chain: Vec<u8> = Vec::new();

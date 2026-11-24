@@ -1,6 +1,7 @@
 //! What Tsong reports about itself: Prometheus metrics, kept for the life
-//! of the process, the audit line written for each token exchange, and the
-//! audit lines for JWKS fetches that fail and for the fetch that recovers.
+//! of the process, the audit line written for each token exchange and each
+//! request passed through without a token, and the audit lines for JWKS
+//! fetches that fail and for the fetch that recovers.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -15,13 +16,14 @@ use std::time::Duration;
 use tsong_clock::Clock;
 use tsong_config::TrustedIssuer;
 use tsong_gateway::GatewayMetrics;
-use tsong_issuer::{ExchangeEvent, ExchangeObserver, Issuer};
+use tsong_issuer::{ExchangeContext, ExchangeEvent, ExchangeObserver, Issuer};
 use tsong_validate::{FetchFuture, JwksFetcher};
 
 use crate::reload::Audit;
 
 /// An outcome, as a label: `issued` or an OAuth error code for an
-/// exchange, `applied` or a reason for a reload.
+/// exchange, `anonymous` for a request passed through without a token,
+/// `applied` or a reason for a reload.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct OutcomeLabel {
     pub outcome: String,
@@ -43,7 +45,8 @@ pub struct IssuerLabel {
 pub struct Metrics {
     pub registry: Registry,
     pub gateway: Arc<GatewayMetrics>,
-    /// Token exchanges, by outcome.
+    /// Token exchanges, and requests passed through without a token, by
+    /// outcome.
     pub exchanges: Family<OutcomeLabel, Counter>,
     /// Failed JWKS fetches, by trusted issuer.
     pub jwks_failures: Family<IssuerLabel, Counter>,
@@ -75,7 +78,7 @@ impl Default for Metrics {
         let reloads = Family::<OutcomeLabel, Counter>::default();
         registry.register(
             "tsong_exchanges",
-            "Token exchanges, by outcome",
+            "Token exchanges, and requests passed through without a token, by outcome",
             exchanges.clone(),
         );
         registry.register(
@@ -134,16 +137,19 @@ impl Metrics {
     }
 }
 
-/// Writes one audit line per token exchange and counts it.
+/// Writes one audit line per token exchange, and per request passed
+/// through without a token, and counts it by outcome.
 pub struct ExchangeAudit {
     pub audit: Arc<dyn Audit>,
     pub exchanges: Family<OutcomeLabel, Counter>,
     pub clock: Arc<dyn Clock>,
 }
 
-impl ExchangeObserver for ExchangeAudit {
-    fn exchanged(&self, event: &ExchangeEvent) {
-        let outcome = event.error.unwrap_or("issued");
+/// The outcome of a request passed through without a token.
+pub const ANONYMOUS: &str = "anonymous";
+
+impl ExchangeAudit {
+    fn record(&self, outcome: &str, event: &ExchangeEvent) {
         self.exchanges
             .get_or_create(&OutcomeLabel {
                 outcome: outcome.to_owned(),
@@ -164,6 +170,27 @@ impl ExchangeObserver for ExchangeAudit {
             "duration_ms": event.duration.as_secs_f64() * 1000.0,
         });
         self.audit.record(&line.to_string());
+    }
+}
+
+impl ExchangeObserver for ExchangeAudit {
+    fn exchanged(&self, event: &ExchangeEvent) {
+        self.record(event.error.unwrap_or("issued"), event);
+    }
+
+    fn passed_anonymous(&self, audience: &str, context: &ExchangeContext) {
+        let event = ExchangeEvent {
+            context: context.clone(),
+            audience: Some(audience.to_owned()),
+            trusted_issuer: None,
+            iss: None,
+            sub: None,
+            scope: None,
+            error: None,
+            error_description: None,
+            duration: Duration::ZERO,
+        };
+        self.record(ANONYMOUS, &event);
     }
 }
 

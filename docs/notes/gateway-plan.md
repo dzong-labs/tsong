@@ -1,7 +1,7 @@
 ---
 title: The gateway exchanges each bearer token once and forwards by host
 type: note
-summary: The gateway looks up a route by host, exchanges the bearer token through a read-through cache, swaps it in, and streams the request to the route's downstream.
+summary: The gateway looks up a route by host, exchanges the bearer token through a read-through cache, swaps it in, and streams the request to the route's downstream. A request without a token passes through unexchanged.
 status: evolving
 created: 2026-11-15
 ---
@@ -15,6 +15,8 @@ The gateway authenticates callers. Downstreams own authorization. A request flow
 3. Read the bearer token.
 4. Get the exchanged token from the cache, exchanging on a miss.
 5. Replace the bearer token and stream the request to the route's downstream.
+
+A request with no `Authorization` header skips steps 3 to 5 and is streamed to the downstream with no token, unexchanged, as roadmap item 33 describes. Deciding what an anonymous caller may see is the downstream's job.
 
 The gateway is item 5 of the [roadmap](../../ROADMAP.md), and its exchange cache is item 6.
 
@@ -88,7 +90,9 @@ The cache is read-through. A miss exchanges the token and stores the result, and
 
 - The client IP is the TCP peer, unless the peer is in `gateway.trusted_proxies`. In that case the gateway walks `X-Forwarded-For` from the right and stops at the first address outside `trusted_proxies`. A caller can forge `X-Forwarded-For`, so only trusted proxies are believed.
 - The gateway-wide `allow` list applies first, then the route's `allow`.
-- The token comes from `Authorization: Bearer`.
+- The token comes from `Authorization: Bearer`. The scheme name compares without regard to case (RFC 9110 section 11.1).
+- A request with no `Authorization` header is anonymous. It is forwarded without one, never exchanged and never cached, and its audit line and `tsong_exchanges_total` count record the outcome `anonymous`.
+- A bearer token that fails is refused, never downgraded to anonymous. Any other scheme, such as `Basic`, `Digest`, `NTLM`, `Negotiate` or `DPoP`, is refused, so no credential Tsong hasn't vouched for reaches a downstream.
 - The `Authorization` header is replaced with the minted token. The inbound token is never forwarded.
 - Hop-by-hop headers are stripped, as RFC 9110 section 7.6.1 requires of an intermediary.
 - The gateway sends `X-Forwarded-*`, which load balancers and downstream frameworks read by default. It strips any inbound `Forwarded` header (RFC 7239), so a downstream never trusts a value the gateway didn't check.
@@ -103,13 +107,16 @@ The gateway fails closed:
 | No route for the host | 404 |
 | A trusted proxy's `X-Forwarded-For` hop is not an IP address | 400 |
 | Client IP not allowed | 403 |
-| Missing or malformed bearer token | 401 with `WWW-Authenticate: Bearer` |
-| Inbound token invalid | 401 with `WWW-Authenticate: Bearer` |
+| Malformed `Authorization`: empty, `Bearer` without exactly one token, or more than one header | 401 with `WWW-Authenticate: Bearer` |
+| A scheme other than `Bearer` | 401 with `WWW-Authenticate: Bearer` |
+| Inbound token invalid | 401 with `WWW-Authenticate: Bearer error="invalid_token"` |
 | Audience or scope not allowed for the route | 403 |
 | Issuer or inbound JWKS unavailable | 503, without the cause |
 | Exchange failed inside the issuer, such as signing | 500, without the cause |
 | Downstream unreachable | 502 |
 | Downstream silent past its read timeout | 504 |
+
+A scheme other than `Bearer` gets a 401 with a bare `Bearer` challenge, the one Tsong accepts, as RFC 9110 section 11.6.1 requires of a 401. It carries no error code: RFC 6750 section 3.1 says a request that used an unsupported authentication method should get none, and its `invalid_request` would call for a 400. The body names the reason.
 
 ## Config lint
 

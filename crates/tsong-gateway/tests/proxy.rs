@@ -207,45 +207,140 @@ async fn an_opaque_minted_token_is_forwarded() -> TestResult {
     Ok(())
 }
 
-#[tokio::test]
-async fn a_missing_or_malformed_bearer_token_is_a_401() -> TestResult {
-    let h = harness().await?;
-    for authorization in [
-        None,
-        Some("Basic YWxpY2U="),
-        Some("Bearer"),
-        Some("Bearer "),
-        Some("Bearer a b"),
-        Some("bearer\talice"),
-    ] {
-        let mut builder = Request::get("/").header("host", "orders.test");
-        if let Some(value) = authorization {
-            builder = builder.header("authorization", value);
-        }
-        let answer = send(&h, from(CLIENT, builder.body(Body::empty())?)?).await?;
-        assert_eq!(answer.status, StatusCode::UNAUTHORIZED, "{authorization:?}");
-        assert_eq!(answer.header("www-authenticate"), Some("Bearer"));
+/// A request to `orders.test` from `CLIENT` with these `Authorization`
+/// values.
+fn authorized(values: &[&str]) -> TestResult<Request> {
+    let mut builder = Request::get("/").header("host", "orders.test");
+    for value in values {
+        builder = builder.header("authorization", *value);
     }
-    let twice = Request::get("/")
-        .header("host", "orders.test")
-        .header("authorization", "Bearer alice")
-        .header("authorization", "Bearer bob")
-        .body(Body::empty())?;
-    let answer = send(&h, from(CLIENT, twice)?).await?;
-    assert_eq!(answer.status, StatusCode::UNAUTHORIZED);
+    from(CLIENT, builder.body(Body::empty())?)
+}
+
+/// Asserts the gateway answered with a 401 and a bare `Bearer` challenge
+/// itself, so the downstream never saw the request.
+fn assert_refused(answer: &Answer, body: &str, case: &str) {
+    assert_eq!(answer.status, StatusCode::UNAUTHORIZED, "{case}");
+    assert_eq!(answer.header("www-authenticate"), Some("Bearer"), "{case}");
+    assert_eq!(answer.header("x-echo"), None, "{case}");
+    assert_eq!(answer.body, body, "{case}");
+}
+
+#[tokio::test]
+async fn a_malformed_authorization_header_is_a_401() -> TestResult {
+    let h = harness().await?;
+    for values in [
+        &[""][..],
+        &["Bearer"],
+        &["Bearer "],
+        &["bearer   "],
+        &["Bearer a b"],
+        &[" Bearer alice"],
+        &["Bearer alice", "Bearer bob"],
+        &["Bearer alice", "Basic YWxpY2U="],
+    ] {
+        let answer = send(&h, authorized(values)?).await?;
+        assert_refused(
+            &answer,
+            "a bearer token is required\n",
+            &format!("{values:?}"),
+        );
+    }
     assert!(h.exchanger.calls().is_empty());
+    assert!(h.anonymous.passed().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn schemes_other_than_bearer_are_refused_and_never_forwarded() -> TestResult {
+    let h = harness().await?;
+    for value in [
+        "Basic YWxpY2U6c2VjcmV0",
+        "basic YWxpY2U6c2VjcmV0",
+        r#"Digest username="alice", realm="tsong", response="6629fae4""#,
+        "NTLM TlRMTVNTUAABAAAAB4IIog==",
+        "Negotiate YIIBhwYGKwYBBQUCoIIBezCCAXc=",
+        "DPoP eyJhbGciOiJFUzI1NiJ9.e30.c2ln",
+        r#"MAC id="h480djs93hd8""#,
+        "Bearer\talice",
+        "Basic",
+    ] {
+        let answer = send(&h, authorized(&[value])?).await?;
+        assert_refused(&answer, "only the Bearer scheme is accepted\n", value);
+    }
+    assert!(h.exchanger.calls().is_empty());
+    assert!(h.anonymous.passed().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_request_without_a_token_passes_through_unexchanged() -> TestResult {
+    let h = harness().await?;
+    let request = from(
+        CLIENT,
+        Request::post("/catalog?page=2")
+            .header("host", "orders.test")
+            .header("x-request-id", "r-anon")
+            .header("proxy-authorization", "Basic cHJveHk=")
+            .body(Body::from("hello"))?,
+    )?;
+    let answer = send(&h, request).await?;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+    assert_eq!(answer.header("x-echo"), Some("yes"));
+    assert!(answer.received("authorization")?.is_empty());
+    assert!(answer.received("proxy-authorization")?.is_empty());
+    let echoed = answer.echoed()?;
+    assert_eq!(echoed.get("path"), Some(&json!("/catalog?page=2")));
+    assert_eq!(echoed.get("body"), Some(&json!("hello")));
+    assert_eq!(answer.received_one("x-forwarded-for")?, "10.1.2.3");
+    assert_eq!(answer.received_one("x-request-id")?, "r-anon");
+
+    assert!(h.exchanger.calls().is_empty());
+    assert_eq!(
+        (h.metrics.cache_hits.get(), h.metrics.cache_misses.get()),
+        (0, 0)
+    );
+    let passed = h.anonymous.passed();
+    assert_eq!(passed.len(), 1);
+    let (audience, context) = passed.first().ok_or("nothing passed")?;
+    assert_eq!(audience, "orders.test");
+    assert_eq!(context.request_id.as_deref(), Some("r-anon"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_bad_bearer_token_is_refused_not_passed_through() -> TestResult {
+    let h = harness().await?;
+    let answer = send(&h, get("orders.test", "/", Some("invalid"))?).await?;
+    assert_eq!(answer.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        answer.header("www-authenticate"),
+        Some(r#"Bearer error="invalid_token""#)
+    );
+    assert_eq!(answer.header("x-echo"), None);
+    assert_eq!(answer.body, "bad signature\n");
+    let answer = send(&h, get("orders.test", "/", Some("unscoped"))?).await?;
+    assert_eq!(answer.status, StatusCode::FORBIDDEN);
+    assert_eq!(answer.header("x-echo"), None);
+    assert!(h.anonymous.passed().is_empty());
     Ok(())
 }
 
 #[tokio::test]
 async fn the_bearer_scheme_is_case_insensitive() -> TestResult {
     let h = harness().await?;
-    let request = Request::get("/")
-        .header("host", "orders.test")
-        .header("authorization", "BEARER alice")
-        .body(Body::empty())?;
-    let answer = send(&h, from(CLIENT, request)?).await?;
-    assert_eq!(answer.status, StatusCode::OK);
+    for scheme in ["BEARER", "bearer", "bEaReR"] {
+        let answer = send(&h, authorized(&[&format!("{scheme} alice")])?).await?;
+        assert_eq!(answer.status, StatusCode::OK, "{scheme}");
+        assert_eq!(
+            answer.received_one("authorization")?,
+            format!("Bearer {}", minted("alice@orders.test", NOW + 900)?),
+            "{scheme}"
+        );
+    }
+    assert_eq!(h.exchanger.calls().len(), 1);
+    assert_eq!(h.metrics.cache_hits.get(), 2);
+    assert!(h.anonymous.passed().is_empty());
     Ok(())
 }
 
@@ -343,6 +438,30 @@ async fn clients_outside_the_allow_lists_are_refused() -> TestResult {
         let answer = send(&h, from(peer, request)?).await?;
         assert_eq!(answer.status, status, "{peer} {host}");
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_allow_lists_refuse_anonymous_requests_too() -> TestResult {
+    let h = harness().await?;
+    for (peer, host, status) in [
+        ("192.0.2.1:1", "orders.test", StatusCode::FORBIDDEN),
+        ("10.2.0.1:1", "builds.test", StatusCode::FORBIDDEN),
+        ("10.1.0.1:1", "builds.test", StatusCode::OK),
+    ] {
+        let request = Request::get("/").header("host", host).body(Body::empty())?;
+        let answer = send(&h, from(peer, request)?).await?;
+        assert_eq!(answer.status, status, "{peer} {host}");
+        let forwarded = answer.header("x-echo").is_some();
+        assert_eq!(forwarded, status == StatusCode::OK, "{peer} {host}");
+    }
+    let passed: Vec<String> = h
+        .anonymous
+        .passed()
+        .into_iter()
+        .map(|(audience, _)| audience)
+        .collect();
+    assert_eq!(passed, ["builds.test"]);
     Ok(())
 }
 
@@ -490,6 +609,7 @@ async fn requests_are_counted_by_route_and_status_and_timed() -> TestResult {
     let h = harness().await?;
     send(&h, get("orders.test", "/", Some("alice"))?).await?;
     send(&h, get("orders.test", "/", None)?).await?;
+    send(&h, get("orders.test", "/", Some("invalid"))?).await?;
     send(&h, get("nowhere.test", "/", Some("alice"))?).await?;
     let count = |route: &str, status: u16| {
         h.metrics
@@ -500,7 +620,7 @@ async fn requests_are_counted_by_route_and_status_and_timed() -> TestResult {
             })
             .get()
     };
-    assert_eq!(count("orders", 200), 1);
+    assert_eq!(count("orders", 200), 2);
     assert_eq!(count("orders", 401), 1);
     assert_eq!(count("-", 404), 1);
 
@@ -509,7 +629,7 @@ async fn requests_are_counted_by_route_and_status_and_timed() -> TestResult {
     let mut text = String::new();
     prometheus_client::encoding::text::encode(&mut text, &registry)?;
     assert!(
-        text.contains(r#"downstream_count{route="orders"} 1"#),
+        text.contains(r#"downstream_count{route="orders"} 2"#),
         "{text}"
     );
     h.metrics

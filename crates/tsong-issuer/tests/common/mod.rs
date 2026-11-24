@@ -8,7 +8,8 @@ use serde_json::{Map, Value, json};
 use tsong_clock::ManualClock;
 use tsong_config::Config;
 use tsong_issuer::{
-    ACCESS_TOKEN, ExchangeEvent, ExchangeObserver, Issuer, TOKEN_EXCHANGE, TokenRequest,
+    ACCESS_TOKEN, ExchangeContext, ExchangeEvent, ExchangeObserver, Issuer, TOKEN_EXCHANGE,
+    TokenRequest,
 };
 use tsong_keys::{FileKey, KeySet, SigningAlgorithm};
 use tsong_validate::Validator;
@@ -119,6 +120,9 @@ impl ExchangeObserver for Recording {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(event.clone());
     }
+
+    /// The issuer never passes a request through.
+    fn passed_anonymous(&self, _: &str, _: &ExchangeContext) {}
 }
 
 pub struct Harness {

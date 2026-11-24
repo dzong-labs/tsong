@@ -19,7 +19,9 @@ use tower::ServiceExt;
 use tsong_clock::ManualClock;
 use tsong_config::Config;
 use tsong_gateway::{ExchangeFuture, Exchanger, Gateway, GatewayMetrics};
-use tsong_issuer::{ExchangeContext, ExchangeError, TokenResponse};
+use tsong_issuer::{
+    ExchangeContext, ExchangeError, ExchangeEvent, ExchangeObserver, TokenResponse,
+};
 
 /// What a test returns: nothing, or why it failed.
 pub type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
@@ -153,6 +155,32 @@ impl Exchanger for FakeExchanger {
     }
 }
 
+/// An observer that records each request passed through without a token:
+/// its audience and context.
+#[derive(Default)]
+pub struct Anonymous(Mutex<Vec<(String, ExchangeContext)>>);
+
+impl Anonymous {
+    pub fn passed(&self) -> Vec<(String, ExchangeContext)> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+impl ExchangeObserver for Anonymous {
+    /// The fake exchanger reports no exchanges.
+    fn exchanged(&self, _: &ExchangeEvent) {}
+
+    fn passed_anonymous(&self, audience: &str, context: &ExchangeContext) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((audience.into(), context.clone()));
+    }
+}
+
 /// The request a fake downstream received, as JSON: its method, path and
 /// query, headers (each name to its values) and body.
 async fn echo(request: Request) -> Response {
@@ -205,6 +233,7 @@ pub struct Harness {
     pub exchanger: Arc<FakeExchanger>,
     pub downstream: SocketAddr,
     pub metrics: Arc<GatewayMetrics>,
+    pub anonymous: Arc<Anonymous>,
 }
 
 /// The config with every route forwarding to `downstream` over plain
@@ -231,12 +260,15 @@ pub fn harness_with(
 ) -> TestResult<Harness> {
     let clock = Arc::new(ManualClock::at(NOW));
     let metrics = Arc::new(GatewayMetrics::default());
-    let gateway = Gateway::new(config, exchanger.clone(), clock, metrics.clone())?;
+    let anonymous = Arc::new(Anonymous::default());
+    let gateway = Gateway::new(config, exchanger.clone(), clock, metrics.clone())?
+        .with_observer(anonymous.clone());
     Ok(Harness {
         router: tsong_gateway::router(Arc::new(gateway)),
         exchanger,
         downstream,
         metrics,
+        anonymous,
     })
 }
 

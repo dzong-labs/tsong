@@ -87,6 +87,52 @@ fn each_exchange_writes_one_audit_line_and_is_counted() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn an_anonymous_request_writes_an_audit_line_and_is_counted() -> TestResult {
+    let lines = Arc::new(Recorded::default());
+    let metrics = Metrics::default();
+    let audit = ExchangeAudit {
+        audit: lines.clone(),
+        exchanges: metrics.exchanges.clone(),
+        clock: Arc::new(ManualClock::at(NOW)),
+    };
+    audit.passed_anonymous("orders.test", &event(None).context);
+    audit.exchanged(&event(None));
+    let parsed = lines.parsed()?;
+    assert_eq!(
+        parsed.first(),
+        Some(&json!({
+            "event": "token_exchange",
+            "at": NOW,
+            "outcome": "anonymous",
+            "request_id": "r-1",
+            "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+            "audience": "orders.test",
+            "trusted_issuer": null,
+            "iss": null,
+            "sub": null,
+            "scope": null,
+            "error_description": null,
+            "duration_ms": 0.0,
+        }))
+    );
+    let count = |outcome: &str| {
+        metrics
+            .exchanges
+            .get_or_create(&OutcomeLabel {
+                outcome: outcome.into(),
+            })
+            .get()
+    };
+    assert_eq!((count("anonymous"), count("issued")), (1, 1));
+    let text = metrics.encode()?;
+    assert!(
+        text.contains(r#"tsong_exchanges_total{outcome="anonymous"} 1"#),
+        "{text}"
+    );
+    Ok(())
+}
+
 /// A config trusting `https://okta.test`, with keys that expire after
 /// `max_age`.
 fn okta_config(dir: &std::path::Path, max_age: &str) -> TestResult<Config> {

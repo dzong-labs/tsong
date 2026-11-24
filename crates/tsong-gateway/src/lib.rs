@@ -1,12 +1,14 @@
 //! The reverse proxy. For each request it looks up the route by host,
 //! checks the client's address against the allow lists, exchanges the
 //! bearer token for one Tsong signs, and streams the request to the
-//! route's downstream with the exchanged token in its place. The upstream
-//! is the caller; the downstream is where the request goes.
+//! route's downstream with the exchanged token in its place. A request
+//! with no `Authorization` header is passed through without an exchange.
+//! The upstream is the caller; the downstream is where the request goes.
 //!
-//! It fails closed: a request that can't be authenticated or exchanged is
-//! answered by the gateway and never forwarded, and the inbound token is
-//! never sent downstream.
+//! It fails closed: a request with a token that can't be authenticated or
+//! exchanged, or with any scheme other than `Bearer`, is answered by the
+//! gateway and never forwarded, and the inbound credential is never sent
+//! downstream.
 
 mod cache;
 mod correlate;
@@ -27,7 +29,7 @@ use axum::response::{IntoResponse, Response};
 use ipnet::IpNet;
 use tsong_clock::Clock;
 use tsong_config::{Config, RouteTable, allowed, client_ip};
-use tsong_issuer::{ExchangeContext, ExchangeError};
+use tsong_issuer::{ExchangeContext, ExchangeError, ExchangeObserver};
 
 pub use cache::{ExchangeCache, lifetime};
 pub use correlate::correlate;
@@ -54,6 +56,7 @@ pub struct Gateway {
     /// One downstream client per read timeout in the config.
     clients: HashMap<Duration, reqwest::Client>,
     metrics: Arc<GatewayMetrics>,
+    observer: Option<Arc<dyn ExchangeObserver>>,
 }
 
 impl Gateway {
@@ -88,7 +91,15 @@ impl Gateway {
             ),
             clients,
             metrics,
+            observer: None,
         })
+    }
+
+    /// This gateway, reporting each request it passes through without a
+    /// token to `observer`.
+    pub fn with_observer(mut self, observer: Arc<dyn ExchangeObserver>) -> Self {
+        self.observer = Some(observer);
+        self
     }
 
     /// Answers `request`, with its request ID on the response, and counts
@@ -138,13 +149,22 @@ impl Gateway {
         if !allowed(client, &self.allow, route.allow.as_deref()) {
             return refuse(StatusCode::FORBIDDEN, "client address not allowed");
         }
-        let Some(token) = bearer(request.headers()) else {
-            return unauthorized("a bearer token is required", None);
-        };
         let context = ExchangeContext::from_headers(request.headers());
-        let minted = match self.cache.token(token, &host, &context).await {
-            Ok(minted) => minted,
-            Err(error) => return exchange_failure(&error),
+        let minted = match credential(request.headers()) {
+            Credential::None => {
+                if let Some(observer) = &self.observer {
+                    observer.passed_anonymous(&host, &context);
+                }
+                None
+            }
+            Credential::Bearer(token) => match self.cache.token(token, &host, &context).await {
+                Ok(minted) => Some(minted),
+                Err(error) => return exchange_failure(&error),
+            },
+            Credential::Malformed => return unauthorized("a bearer token is required", None),
+            Credential::Unsupported => {
+                return unauthorized("only the Bearer scheme is accepted", None);
+            }
         };
         let timeout = route.read_timeout.unwrap_or(self.read_timeout);
         let Some(downstream) = self.clients.get(&timeout) else {
@@ -152,8 +172,15 @@ impl Gateway {
         };
         let trusted_peer = self.trusted_proxies.iter().any(|net| net.contains(&peer));
         let started = Instant::now();
-        let response =
-            forward::forward(downstream, route, request, &minted, peer, trusted_peer).await;
+        let response = forward::forward(
+            downstream,
+            route,
+            request,
+            minted.as_deref(),
+            peer,
+            trusted_peer,
+        )
+        .await;
         self.metrics
             .downstream_seconds
             .get_or_create(&RouteLabel {
@@ -189,17 +216,46 @@ async fn proxy(
     gateway.handle(peer, request).await
 }
 
-/// The token in the request's one `Authorization: Bearer` header.
-fn bearer(headers: &HeaderMap) -> Option<&str> {
+/// What a request's `Authorization` header carries.
+#[derive(Debug, PartialEq, Eq)]
+enum Credential<'a> {
+    /// No `Authorization` header: the request passes through anonymous.
+    None,
+    /// The token in the request's one `Authorization: Bearer` header.
+    Bearer(&'a str),
+    /// An empty or unreadable header, a `Bearer` header without exactly
+    /// one token, or more than one header.
+    Malformed,
+    /// One header with a scheme other than `Bearer`, which Tsong can't
+    /// vouch for and never forwards.
+    Unsupported,
+}
+
+/// The credential in `headers`. Scheme names compare case-insensitively
+/// (RFC 9110 section 11.1).
+fn credential(headers: &HeaderMap) -> Credential<'_> {
     let mut values = headers.get_all(header::AUTHORIZATION).iter();
-    let value = values.next()?;
+    let Some(value) = values.next() else {
+        return Credential::None;
+    };
     if values.next().is_some() {
-        return None;
+        return Credential::Malformed;
     }
-    let (scheme, token) = value.to_str().ok()?.split_once(' ')?;
+    let Ok(value) = value.to_str() else {
+        return Credential::Malformed;
+    };
+    let (scheme, token) = value.split_once(' ').unwrap_or((value, ""));
+    if scheme.is_empty() {
+        return Credential::Malformed;
+    }
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return Credential::Unsupported;
+    }
     let token = token.trim();
-    (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty() && !token.contains(' '))
-        .then_some(token)
+    if token.is_empty() || token.contains(' ') {
+        return Credential::Malformed;
+    }
+    Credential::Bearer(token)
 }
 
 /// The response to an exchange that failed.

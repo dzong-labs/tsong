@@ -1,5 +1,6 @@
 //! What an exchange is observed with: the request it belongs to, and the
-//! event an observer, such as an audit log, receives for each exchange.
+//! event an observer, such as an audit log, receives for each exchange and
+//! for each request passed through without a token.
 
 use std::time::Duration;
 
@@ -83,7 +84,12 @@ pub struct ExchangeEvent {
 }
 
 /// Receives every exchange the issuer makes, through the gateway or the
-/// token endpoint.
+/// token endpoint, and every request the gateway passes through without a
+/// token.
 pub trait ExchangeObserver: Send + Sync {
     fn exchanged(&self, event: &ExchangeEvent);
+
+    /// A request with no `Authorization` header, passed through to the
+    /// route whose host is `audience` without an exchange.
+    fn passed_anonymous(&self, audience: &str, context: &ExchangeContext);
 }
