@@ -152,6 +152,11 @@ mod tests {
             "Job.Token=x",
             "api_key=x",
             "API-KEY=x",
+            "pr%C4%B1vate_token=x",
+            "ap%C4%B1_key=x",
+            "%C4%B0%C4%B0=x&ap%C4%B0_key=1",
+            "acce%C3%9F_token=x",
+            "access_to%EF%AC%80=x&access_token=1",
         ] {
             assert!(refused(query), "{query}");
         }
@@ -173,6 +178,8 @@ mod tests {
             "access%2525255Ftoken=x",
             "token=x",
             "api=x",
+            "access_token%3Dx=1",
+            "x%26access_token=1",
         ] {
             assert!(!refused(query), "{query}");
         }

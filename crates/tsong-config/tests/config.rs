@@ -2229,6 +2229,15 @@ fn names_normalize_as_the_gateway_reads_them() {
         ("ACCESS.Token", "accesstoken"),
         ("acce\u{17F}s-to\u{212A}en", "accesstoken"),
         ("\u{FF21}ccess\u{FF3F}token", "accesstoken"),
+        ("pr\u{131}vate_token", "privatetoken"),
+        ("PR\u{130}VATE_TOKEN", "privatetoken"),
+        ("acce\u{DF}_token", "accesstoken"),
+        ("\u{FB01}le\u{FB00}", "fileff"),
+        ("\u{FB05}\u{FB06}", "stst"),
+        (
+            "\u{149}\u{1F0}\u{1E96}\u{1E97}\u{1E98}\u{1E99}\u{1E9A}",
+            "njhtwya",
+        ),
         ("api key 2", "apikey2"),
         ("__", ""),
     ] {

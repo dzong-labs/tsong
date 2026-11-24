@@ -20,7 +20,6 @@ pub const RESERVED_CLAIMS: [&str; 11] = [
 /// its `scope`, after the route's scope policy and narrowing.
 const SCOPE_CLAIMS: [&str; 2] = ["scope", "scp"];
 
-/// Whether `text` is an https URL.
 /// Whether `text` is an RFC 9110 token, as a header name must be.
 fn is_header_name(text: &str) -> bool {
     !text.is_empty()
@@ -29,6 +28,7 @@ fn is_header_name(text: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
 }
 
+/// Whether `text` is an https URL.
 fn is_https(text: &str) -> bool {
     Url::parse(text).is_ok_and(|url| url.scheme() == "https")
 }

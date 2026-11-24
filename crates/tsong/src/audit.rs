@@ -45,6 +45,12 @@ impl<W: Write + Send> Audit for Lines<W> {
 #[derive(Default)]
 struct Queue {
     lines: VecDeque<String>,
+    /// The lines of the batch being written, taken off `lines` but not yet
+    /// written. They count against the capacity.
+    writing: usize,
+    /// Set when `close` gave up on a stuck writer and counted its lines,
+    /// so the writer counts no more.
+    abandoned: bool,
     /// Set by `close`: no more lines are taken.
     closed: bool,
     /// Set when the writer thread ends.
@@ -118,8 +124,9 @@ impl Queued {
 
     /// Writes what is queued and stops the writer, waiting at most the
     /// shutdown deadline. A writer still stuck then is left behind. Either
-    /// way, lines still queued, such as those a writer that ended early
-    /// left, are discarded and counted as dropped. It blocks, so call it
+    /// way, lines still queued or being written, such as those a stuck
+    /// writer holds or one that ended early lost, are discarded and counted
+    /// as dropped. It blocks, so call it
     /// outside async code.
     pub fn close(&self) {
         let mut queue = self.signal_close();
@@ -134,8 +141,14 @@ impl Queued {
             .unwrap_or_else(PoisonError::into_inner);
         // Cleared under the lock, so a writer that comes unstuck can't write
         // lines counted here.
-        count(&self.dropped, queue.lines.len());
+        // A batch still being written counts too: a stuck writer holds it,
+        // and a writer that ended early lost it. A stuck writer counts
+        // nothing more if it ever finishes.
+        let unwritten = queue.lines.len().saturating_add(queue.writing);
         queue.lines.clear();
+        queue.writing = 0;
+        queue.abandoned = true;
+        count(&self.dropped, unwritten);
         drop(queue);
         if !waited.timed_out() {
             let _ = writer.join();
@@ -182,6 +195,7 @@ fn write_lines<W: Write>(shared: &Shared, mut writer: W, dropped: &Counter) {
                 return;
             }
             std::mem::swap(&mut queue.lines, &mut batch);
+            queue.writing = batch.len();
         }
         bytes.clear();
         ends.clear();
@@ -195,9 +209,16 @@ fn write_lines<W: Write>(shared: &Shared, mut writer: W, dropped: &Counter) {
             ends.push(bytes.len());
         }
         let (written, failed) = write_some(&mut writer, &bytes);
+        let abandoned = {
+            let mut queue = shared.queue();
+            queue.writing = 0;
+            queue.abandoned
+        };
         if failed {
-            let finished = ends.iter().filter(|&&end| end <= written).count();
-            count(dropped, ends.len().saturating_sub(finished));
+            if !abandoned {
+                let finished = ends.iter().filter(|&&end| end <= written).count();
+                count(dropped, ends.len().saturating_sub(finished));
+            }
             if written >= start {
                 mid_line = !ends.contains(&written) && written != start;
             }
@@ -226,7 +247,8 @@ fn write_some<W: Write>(writer: &mut W, bytes: &[u8]) -> (usize, bool) {
 impl Audit for Queued {
     fn record(&self, line: String) {
         let mut queue = self.shared.queue();
-        if queue.closed || queue.done || queue.lines.len() >= self.capacity {
+        let held = queue.lines.len().saturating_add(queue.writing);
+        if queue.closed || queue.done || held >= self.capacity {
             drop(queue);
             self.dropped.inc();
             return;

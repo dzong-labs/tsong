@@ -33,7 +33,8 @@ pub struct Bootstrap {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuditWriter {
-    /// The audit lines held for the writer before new ones are dropped.
+    /// The audit lines held for the writer, queued or being written,
+    /// before new ones are dropped.
     #[serde(default = "default_audit_queue")]
     pub queue: usize,
     /// How long shutdown waits for the writer before leaving it behind.
@@ -50,8 +51,10 @@ impl Default for AuditWriter {
     }
 }
 
-/// The most lines `audit.queue` may hold. Each line is a few hundred
-/// bytes, so a full queue stays in the hundreds of megabytes.
+/// The most lines `audit.queue` may hold, queued and being written
+/// together. Each line is a few hundred bytes, and the writer copies the
+/// batch it writes into one buffer, so a full queue stays within a few
+/// hundred megabytes.
 pub const MAX_AUDIT_QUEUE: usize = 1_048_576;
 
 /// The longest `audit.shutdown` may be, so a stuck writer can't hold up a

@@ -94,10 +94,11 @@ fn a_full_queue_drops_and_counts_without_blocking() -> TestResult {
     for n in 0..5 {
         queued.record(format!("{n}"));
     }
-    assert_eq!(dropped.get(), 3);
+    // The line being written counts against the capacity of two.
+    assert_eq!(dropped.get(), 4);
     writer.open();
     queued.close();
-    assert_eq!(writer.lines()?, ["first", "0", "1"]);
+    assert_eq!(writer.lines()?, ["first", "0"]);
     Ok(())
 }
 
@@ -118,20 +119,20 @@ fn shutdown_leaves_a_stuck_writer_behind_and_counts_what_it_never_wrote() -> Tes
     let started = Instant::now();
     queued.close();
     assert!(started.elapsed() < WAIT, "shutdown waited too long");
-    assert_eq!(dropped.get(), 2, "the queued lines, not the one mid-write");
+    assert_eq!(dropped.get(), 3, "the queued lines and the one mid-write");
     queued.record("late".into());
-    assert_eq!(dropped.get(), 3, "a line after closing is dropped");
+    assert_eq!(dropped.get(), 4, "a line after closing is dropped");
 
-    // Unstuck, the writer finishes its write but nothing counted as dropped.
+    // Unstuck, the writer finishes its write, but the queue was cleared and
+    // it counts nothing more.
     writer.open();
     let deadline = Instant::now() + WAIT;
     while writer.lines()?.is_empty() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(5));
     }
-    std::thread::sleep(Duration::from_millis(50));
     assert_eq!(writer.lines()?, ["first"]);
     drop(queued);
-    assert_eq!(dropped.get(), 3);
+    assert_eq!(dropped.get(), 4);
     Ok(())
 }
 
@@ -272,8 +273,9 @@ fn a_writer_that_dies_drops_later_lines_and_close_counts_the_rest() -> TestResul
     let started = Instant::now();
     queued.close();
     assert!(started.elapsed() < WAIT, "close waited for a dead writer");
-    // The two left queued and the late lines queued before it died.
-    assert_eq!(dropped.get(), 1 + 2 + (late - 1));
+    // The line it died writing, the two left queued, and the late lines
+    // queued before it was marked done.
+    assert_eq!(dropped.get(), 1 + 1 + 2 + (late - 1));
     assert_eq!(gated.lines()?, ["first"]);
     Ok(())
 }
