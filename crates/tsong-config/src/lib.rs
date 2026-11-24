@@ -9,6 +9,7 @@
 mod bootstrap;
 mod duration;
 mod lint;
+mod names;
 mod network;
 mod parse;
 mod secret;
@@ -31,6 +32,7 @@ pub use bootstrap::{
     Source,
 };
 pub use lint::Warnings;
+pub use names::{fold_name_char, normalize_name};
 pub use network::{allowed, client_ip};
 pub use parse::ParseError;
 pub use secret::{Scheme, SecretRef, SecretRefError};
@@ -165,11 +167,37 @@ pub struct Gateway {
     /// answering 504. A route may set its own.
     #[serde(default = "default_read_timeout", with = "duration")]
     pub read_timeout: Duration,
+    /// Query parameter names that carry a credential. A request whose
+    /// query has one, read as a downstream could read it, is refused,
+    /// bearer token or not. Unset, the defaults.
+    #[serde(default = "default_refused_query_params")]
+    pub refused_query_params: Vec<String>,
+    /// Headers that carry a credential Tsong doesn't exchange, matched
+    /// without regard to case. A request with one is refused, bearer token
+    /// or not. Unset, the defaults.
+    #[serde(default = "default_refused_headers")]
+    pub refused_headers: Vec<String>,
     pub cache: Cache,
 }
 
 fn default_read_timeout() -> Duration {
     Duration::from_secs(60)
+}
+
+/// The query parameters refused by default: RFC 6750's `access_token`,
+/// GitLab's `private_token` and `job_token`, and `api_key`.
+pub fn default_refused_query_params() -> Vec<String> {
+    ["access_token", "private_token", "job_token", "api_key"]
+        .map(String::from)
+        .into()
+}
+
+/// The headers refused by default: GitLab's `PRIVATE-TOKEN` and
+/// `JOB-TOKEN`, and `X-API-Key`.
+pub fn default_refused_headers() -> Vec<String> {
+    ["PRIVATE-TOKEN", "JOB-TOKEN", "X-API-Key"]
+        .map(String::from)
+        .into()
 }
 
 /// The exchanged-token cache.

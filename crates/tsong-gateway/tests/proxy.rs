@@ -324,6 +324,8 @@ async fn an_access_token_in_the_query_is_refused_as_a_downstream_reads_it() -> T
         "access%u005Ftoken=alice",
         "%U0061ccess_token=alice",
         "acce%u017Fs_token=alice",
+        "%uFF41ccess_token=alice",
+        "%EF%BC%A1ccess_token=alice",
     ];
     for query in refused {
         for token in [None, Some("alice")] {
@@ -347,6 +349,7 @@ async fn an_access_token_in_the_query_is_refused_as_a_downstream_reads_it() -> T
         "access%5token=x",
         "access_tokens=x",
         "xaccess_token=x",
+        "x=a%26access_token%3Dy",
         "access%u5Ftoken=x",
         "access%2525255Ftoken=x",
     ] {
@@ -702,5 +705,82 @@ async fn requests_are_counted_by_route_and_status_and_timed() -> TestResult {
             route: "orders".into(),
         })
         .observe(0.0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn each_default_credential_parameter_is_refused_in_the_query() -> TestResult {
+    let h = harness().await?;
+    for query in [
+        "access_token=x",
+        "private_token=x",
+        "PRIVATE_TOKEN=x",
+        "job_token=x",
+        "Job-Token=x",
+        "api_key=x",
+        "API.KEY=x",
+    ] {
+        for token in [None, Some("alice")] {
+            let answer = send(&h, get("orders.test", &format!("/?{query}"), token)?).await?;
+            assert_refused(
+                &answer,
+                "Bearer",
+                "a token in the query is not accepted\n",
+                &format!("{query} {token:?}"),
+            );
+        }
+    }
+    assert!(h.exchanger.calls().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn each_default_credential_header_is_refused_in_any_case() -> TestResult {
+    let h = harness().await?;
+    for (header, configured) in [
+        ("PRIVATE-TOKEN", "PRIVATE-TOKEN"),
+        ("private-token", "PRIVATE-TOKEN"),
+        ("JOB-TOKEN", "JOB-TOKEN"),
+        ("Job-Token", "JOB-TOKEN"),
+        ("X-API-Key", "X-API-Key"),
+        ("x-api-key", "X-API-Key"),
+    ] {
+        for token in [None, Some("alice")] {
+            let mut builder = Request::get("/")
+                .header("host", "orders.test")
+                .header(header, "glpat-secret");
+            if let Some(token) = token {
+                builder = builder.header("authorization", format!("Bearer {token}"));
+            }
+            let answer = send(&h, from(CLIENT, builder.body(Body::empty())?)?).await?;
+            assert_refused(
+                &answer,
+                "Bearer",
+                &format!("the {configured} header is not accepted\n"),
+                &format!("{header} {token:?}"),
+            );
+        }
+    }
+    assert!(h.exchanger.calls().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn configured_lists_replace_the_defaults() -> TestResult {
+    let address = downstream().await?;
+    let mut config = config_to(&format!("http://{address}"))?;
+    config.gateway.refused_query_params = vec!["sig".into()];
+    config.gateway.refused_headers = vec!["X-Session".into()];
+    let h = harness_with(&config, Arc::new(FakeExchanger::default()), address)?;
+    let answer = send(&h, get("orders.test", "/?SIG=1", None)?).await?;
+    assert_eq!(answer.status, StatusCode::UNAUTHORIZED);
+    let session = Request::get("/")
+        .header("host", "orders.test")
+        .header("x-session", "s")
+        .body(Body::empty())?;
+    let answer = send(&h, from(CLIENT, session)?).await?;
+    assert_eq!(answer.body, "the X-Session header is not accepted\n");
+    let answer = send(&h, get("orders.test", "/?api_key=1", None)?).await?;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
     Ok(())
 }

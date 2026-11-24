@@ -2142,3 +2142,77 @@ fn a_literal_star_in_a_token_is_never_admitted() -> TestResult {
     assert_eq!(Policy::default().refusal(&["a", ANY]), Some(Refusal::Any));
     Ok(())
 }
+
+#[test]
+fn credential_names_default_and_may_be_set() -> TestResult {
+    let config = Config::from_toml(&minimal())?;
+    assert_eq!(
+        config.gateway.refused_query_params,
+        ["access_token", "private_token", "job_token", "api_key"]
+    );
+    assert_eq!(
+        config.gateway.refused_headers,
+        ["PRIVATE-TOKEN", "JOB-TOKEN", "X-API-Key"]
+    );
+    let text = minimal().replace(
+        "[gateway.cache]",
+        "refused_query_params = [\"sig\"]\nrefused_headers = [\"X-Session\"]\n\n[gateway.cache]",
+    );
+    let config = Config::from_toml(&text)?;
+    assert_eq!(config.gateway.refused_query_params, ["sig"]);
+    assert_eq!(config.gateway.refused_headers, ["X-Session"]);
+    Ok(())
+}
+
+#[test]
+fn credential_names_that_would_turn_the_check_off_or_never_match_are_refused() -> TestResult {
+    for (lists, problem) in [
+        (
+            "refused_query_params = []",
+            "gateway.refused_query_params is empty; leave it unset for the defaults",
+        ),
+        (
+            "refused_query_params = [\"__\"]",
+            "gateway.refused_query_params has \"__\", which has no letters or digits",
+        ),
+        (
+            "refused_headers = []",
+            "gateway.refused_headers is empty; leave it unset for the defaults",
+        ),
+        (
+            "refused_headers = [\"X API Key\"]",
+            "gateway.refused_headers has \"X API Key\", which isn't a header name",
+        ),
+        (
+            "refused_headers = [\"\"]",
+            "gateway.refused_headers has \"\", which isn't a header name",
+        ),
+        (
+            "refused_headers = [\"Authorization\"]",
+            "gateway.refused_headers may not hold Authorization, which the gateway reads itself",
+        ),
+        (
+            "refused_headers = [\"proxy-authorization\"]",
+            "gateway.refused_headers may not hold proxy-authorization, which the gateway reads itself",
+        ),
+    ] {
+        let text = minimal().replace("[gateway.cache]", &format!("{lists}\n\n[gateway.cache]"));
+        assert_eq!(problems(&text)?, [problem], "{lists}");
+    }
+    Ok(())
+}
+
+#[test]
+fn names_normalize_as_the_gateway_reads_them() {
+    use tsong_config::normalize_name;
+    for (name, normalized) in [
+        ("access_token", "accesstoken"),
+        ("ACCESS.Token", "accesstoken"),
+        ("acce\u{17F}s-to\u{212A}en", "accesstoken"),
+        ("\u{FF21}ccess\u{FF3F}token", "accesstoken"),
+        ("api key 2", "apikey2"),
+        ("__", ""),
+    ] {
+        assert_eq!(normalize_name(name), normalized, "{name}");
+    }
+}

@@ -65,7 +65,7 @@ Each token exchange writes one JSON line to stdout. That covers every cache miss
 
 `iss` and `sub` are the subject token's, which identify the caller together. A refusal carries the OAuth error code as its `outcome` and its `error_description`. `iss` and `sub` are null when the token never validated. Tokens are never written.
 
-The audit log is for exchanges. A gateway request with no `Authorization` header, passed through without a token ([roadmap](../../ROADMAP.md) item 33), writes no line; `tsong_gateway_requests_total` counts it with `anonymous="true"`, by route and the status in its response head. Nor does a request refused for its `Authorization` header or an `access_token` query parameter; the request metrics count it as a 401.
+The audit log is for exchanges. A gateway request with no `Authorization` header, passed through without a token ([roadmap](../../ROADMAP.md) item 33), writes no line; `tsong_gateway_requests_total` counts it with `anonymous="true"`, by route and the status in its response head. Nor does a request refused for its `Authorization` header, a refused query parameter or a refused header; the request metrics count it as a 401.
 
 The issuer reports each exchange to an `ExchangeObserver` (`crates/tsong-issuer/src/context.rs`). `ExchangeAudit` in `crates/tsong/src/telemetry.rs` writes the line and counts the exchange.
 

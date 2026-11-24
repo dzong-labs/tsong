@@ -39,6 +39,11 @@ listen = "0.0.0.0:8443"
 trusted_proxies = ["10.0.0.0/8"]
 allow = ["10.0.0.0/8", "172.16.0.0/12"]  # empty denies all; ["0.0.0.0/0", "::/0"] allows all
 read_timeout = "00:01:00"       # longest wait on a downstream between reads; a route may override
+# Credentials refused in any request, bearer token or not. Unset, these are
+# the defaults; an empty list is an error. Query names match however a
+# framework could spell them; header names match without regard to case.
+refused_query_params = ["access_token", "private_token", "job_token", "api_key"]
+refused_headers = ["PRIVATE-TOKEN", "JOB-TOKEN", "X-API-Key"]
 
 [gateway.cache]
 max_entries = 100_000

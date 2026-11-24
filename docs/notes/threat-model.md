@@ -26,7 +26,7 @@ Every check on a caller is mandatory, and config sets the values but never turns
 - A bearer token is validated in full: signature, `alg` against the issuer's allowed list, `typ` against its token types, `kid`, `iss`, `aud`, `exp`, `nbf`, and the shape of `scope` and `scp`. A failure is a 401, or `invalid_request` at the token endpoint.
 - The route comes from the host header alone, and route policy bounds the audiences and scopes a minted token may carry.
 - `gateway.allow`, narrowed per route, admits callers by address. `X-Forwarded-For` counts only from a peer in `trusted_proxies`.
-- No token in the `Authorization` header or the `access_token` query parameter reaches a downstream: a request with an `access_token` query parameter is refused. Hop-by-hop headers, `Proxy-Authorization` among them, and `Forwarded` are stripped. Bodies and cookies are not inspected, so a token a caller puts there passes through, and a downstream must not accept it.
+- No token in the `Authorization` header, a refused query parameter such as `access_token`, or a refused header such as `PRIVATE-TOKEN` reaches a downstream: a request carrying one is refused ([gateway-plan](gateway-plan.md) lists the defaults). Hop-by-hop headers, `Proxy-Authorization` among them, and `Forwarded` are stripped. Bodies and cookies are not inspected, so a token a caller puts there passes through, and a downstream must not accept it.
 - The token endpoint has no client authentication. In its place are the subject token's validation, the allow lists and route policy.
 
 ## Trusted issuers

@@ -21,6 +21,14 @@ pub const RESERVED_CLAIMS: [&str; 11] = [
 const SCOPE_CLAIMS: [&str; 2] = ["scope", "scp"];
 
 /// Whether `text` is an https URL.
+/// Whether `text` is an RFC 9110 token, as a header name must be.
+fn is_header_name(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
+}
+
 fn is_https(text: &str) -> bool {
     Url::parse(text).is_ok_and(|url| url.scheme() == "https")
 }
@@ -62,10 +70,44 @@ impl Config {
         if self.gateway.cache.max_entries == 0 {
             problems.push("gateway.cache.max_entries must be above zero".into());
         }
+        self.check_refused(&mut problems);
         if problems.is_empty() {
             Ok(())
         } else {
             Err(Problems(problems))
+        }
+    }
+
+    fn check_refused(&self, problems: &mut Vec<String>) {
+        let gateway = &self.gateway;
+        if gateway.refused_query_params.is_empty() {
+            problems.push(
+                "gateway.refused_query_params is empty; leave it unset for the defaults".into(),
+            );
+        }
+        for name in &gateway.refused_query_params {
+            if crate::normalize_name(name).is_empty() {
+                problems.push(format!(
+                    "gateway.refused_query_params has \"{name}\", which has no letters or digits"
+                ));
+            }
+        }
+        if gateway.refused_headers.is_empty() {
+            problems
+                .push("gateway.refused_headers is empty; leave it unset for the defaults".into());
+        }
+        for name in &gateway.refused_headers {
+            if !is_header_name(name) {
+                problems.push(format!(
+                    "gateway.refused_headers has \"{name}\", which isn't a header name"
+                ));
+            } else if name.eq_ignore_ascii_case("authorization")
+                || name.eq_ignore_ascii_case("proxy-authorization")
+            {
+                problems.push(format!(
+                    "gateway.refused_headers may not hold {name}, which the gateway reads itself"
+                ));
+            }
         }
     }
 
