@@ -26,13 +26,16 @@ use tsong_keys::{KeyError, KeySet};
 use tsong_secrets::Secrets;
 use tsong_validate::{HttpFetcher, JwksFetcher};
 
-use crate::reload::{Audit, Lines, Reloader};
+use crate::reload::{Audit, Queued, Reloader};
 use crate::state::State;
 use crate::telemetry::{Metrics, ObservedFetcher};
 
 /// How to run the command.
 pub const USAGE: &str =
     "usage: tsong check [--deny-warnings] <config.toml> | tsong serve <bootstrap.toml>";
+
+/// The audit lines held for the writer thread before new ones are dropped.
+const AUDIT_QUEUE: usize = 65_536;
 
 /// The flag that makes `check` fail on warnings.
 pub const DENY_WARNINGS: &str = "--deny-warnings";
@@ -105,7 +108,11 @@ pub async fn serve_until(
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let store = store(&bootstrap.source);
     let metrics = Arc::new(Metrics::default());
-    let audit: Arc<dyn Audit> = Arc::new(Lines::new(std::io::stdout()));
+    let audit: Arc<dyn Audit> = Arc::new(Queued::spawn(
+        std::io::stdout(),
+        AUDIT_QUEUE,
+        metrics.audit_dropped.clone(),
+    )?);
     let fetcher: Arc<dyn JwksFetcher> = Arc::new(ObservedFetcher::new(
         HttpFetcher::default(),
         metrics.jwks_failures.clone(),

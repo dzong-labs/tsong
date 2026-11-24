@@ -148,14 +148,21 @@ impl Gateway {
         if has_access_token(request.uri().query()) {
             return unauthorized("a token in the query is not accepted", None);
         }
-        let (minted, anonymous) = match credential(request.headers()) {
-            Credential::None => (None, Some(ExchangeContext::from_headers(request.headers()))),
+        let (minted, mut anonymous) = match credential(request.headers()) {
+            Credential::None => {
+                let context = ExchangeContext::from_headers(request.headers());
+                let observed = Observed::new(&*self.observer, &host, client, context);
+                (None, Some(observed))
+            }
             Credential::Bearer(token) => {
                 let context = ExchangeContext::from_headers(request.headers());
                 match self.cache.token(token, &host, &context).await {
                     Ok(minted) => (Some(minted), None),
                     Err(error) => return exchange_failure(&error),
                 }
+            }
+            Credential::Repeated => {
+                return unauthorized("more than one Authorization header", None);
             }
             Credential::Malformed => return unauthorized("a bearer token is required", None),
             Credential::Unsupported => {
@@ -165,13 +172,8 @@ impl Gateway {
         let response = self
             .send_downstream(route, request, minted.as_deref(), peer)
             .await;
-        if let Some(context) = &anonymous {
-            self.observer.passed_anonymous(&AnonymousRequest {
-                audience: &host,
-                client,
-                status: response.status().as_u16(),
-                context,
-            });
+        if let Some(observed) = &mut anonymous {
+            observed.status = response.status().as_u16();
         }
         response
     }
@@ -200,6 +202,49 @@ impl Gateway {
             })
             .observe(started.elapsed().as_secs_f64());
         response
+    }
+}
+
+/// The status an anonymous request is reported with when the caller went
+/// away before it was answered, as nginx logs it.
+const CLIENT_CLOSED_REQUEST: u16 = 499;
+
+/// An anonymous request, reported to the observer when dropped, so a
+/// request the caller abandons mid-flight is still reported.
+struct Observed<'a> {
+    observer: &'a dyn RequestObserver,
+    audience: &'a str,
+    client: IpAddr,
+    context: ExchangeContext,
+    /// The answer's status, or 499 until there is one.
+    status: u16,
+}
+
+impl<'a> Observed<'a> {
+    fn new(
+        observer: &'a dyn RequestObserver,
+        audience: &'a str,
+        client: IpAddr,
+        context: ExchangeContext,
+    ) -> Self {
+        Self {
+            observer,
+            audience,
+            client,
+            context,
+            status: CLIENT_CLOSED_REQUEST,
+        }
+    }
+}
+
+impl Drop for Observed<'_> {
+    fn drop(&mut self) {
+        self.observer.passed_anonymous(&AnonymousRequest {
+            audience: self.audience,
+            client: self.client,
+            status: self.status,
+            context: &self.context,
+        });
     }
 }
 
@@ -235,9 +280,10 @@ enum Credential<'a> {
     None,
     /// The token in the request's one `Authorization: Bearer` header.
     Bearer(&'a str),
+    /// More than one `Authorization` header.
+    Repeated,
     /// An empty or unreadable header, a scheme that isn't an RFC 9110
-    /// token, a `Bearer` header without exactly one token, or more than
-    /// one header.
+    /// token, or a `Bearer` header without exactly one token.
     Malformed,
     /// One header with a scheme other than `Bearer`, which Tsong can't
     /// vouch for and never forwards.
@@ -252,7 +298,7 @@ fn credential(headers: &HeaderMap) -> Credential<'_> {
         return Credential::None;
     };
     if values.next().is_some() {
-        return Credential::Malformed;
+        return Credential::Repeated;
     }
     let Ok(value) = value.to_str() else {
         return Credential::Malformed;

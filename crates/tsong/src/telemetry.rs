@@ -49,6 +49,8 @@ pub struct Metrics {
     /// Gateway requests with no `Authorization` header answered after the
     /// allow lists, whatever the status.
     pub anonymous_requests: Counter,
+    /// Audit lines dropped because the writer had fallen behind.
+    pub audit_dropped: Counter,
     /// Failed JWKS fetches, by trusted issuer.
     pub jwks_failures: Family<IssuerLabel, Counter>,
     /// Seconds since each trusted issuer's keys were fetched, for the
@@ -103,6 +105,12 @@ impl Default for Metrics {
             "Gateway requests received with no Authorization header",
             anonymous_requests.clone(),
         );
+        let audit_dropped = Counter::default();
+        registry.register(
+            "tsong_audit_lines_dropped",
+            "Audit lines dropped because the writer had fallen behind",
+            audit_dropped.clone(),
+        );
         let config_fetched = Gauge::default();
         registry.register(
             "tsong_config_last_fetch_timestamp_seconds",
@@ -126,6 +134,7 @@ impl Default for Metrics {
             gateway,
             exchanges,
             anonymous_requests,
+            audit_dropped,
             jwks_failures,
             jwks_age,
             reloads,

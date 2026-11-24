@@ -13,8 +13,9 @@ pub struct AnonymousRequest<'a> {
     /// The client address the allow lists admitted: the only identity an
     /// anonymous caller has.
     pub client: IpAddr,
-    /// The status the gateway answered with: the downstream's, or the
-    /// gateway's own when forwarding failed.
+    /// The status the gateway answered with: the downstream's, the
+    /// gateway's own when forwarding failed, or 499 when the caller went
+    /// away first.
     pub status: u16,
     pub context: &'a ExchangeContext,
 }
@@ -22,6 +23,7 @@ pub struct AnonymousRequest<'a> {
 /// Receives the requests the gateway forwards without an exchange.
 pub trait RequestObserver: Send + Sync {
     /// A request with no `Authorization` header, passed through without a
-    /// token once it was answered.
+    /// token, once it was answered or abandoned. It runs on the request's
+    /// task, so it must not block.
     fn passed_anonymous(&self, request: &AnonymousRequest<'_>);
 }

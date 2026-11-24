@@ -238,6 +238,27 @@ pub async fn downstream() -> TestResult<SocketAddr> {
     Ok(address)
 }
 
+/// Starts a downstream that accepts each connection and closes it at once,
+/// so every request to it fails, and returns its address.
+pub async fn closing_downstream() -> TestResult<SocketAddr> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let address = listener.local_addr()?;
+    tokio::spawn(async move {
+        while let Ok((connection, _)) = listener.accept().await {
+            drop(connection);
+        }
+    });
+    Ok(address)
+}
+
+/// The harness with every route forwarding to a downstream that closes
+/// each connection.
+pub async fn closing_harness() -> TestResult<Harness> {
+    let address = closing_downstream().await?;
+    let config = config_to(&format!("http://{address}"))?;
+    harness_with(&config, Arc::new(FakeExchanger::default()), address)
+}
+
 pub struct Harness {
     pub router: Router,
     pub exchanger: Arc<FakeExchanger>,

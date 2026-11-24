@@ -220,6 +220,7 @@ fn assert_refused(answer: &Answer, challenge: &str, body: &str, case: &str) {
 async fn malformed_headers_and_other_schemes_are_refused() -> TestResult {
     const MALFORMED: &str = "a bearer token is required\n";
     const UNSUPPORTED: &str = "only the Bearer scheme is accepted\n";
+    const REPEATED: &str = "more than one Authorization header\n";
     let h = harness().await?;
     for (values, body) in [
         (&[""][..], MALFORMED),
@@ -235,8 +236,9 @@ async fn malformed_headers_and_other_schemes_are_refused() -> TestResult {
         (&["Bearer =alice"], MALFORMED),
         (&["Bearer alice=x"], MALFORMED),
         (&["Bearer ==="], MALFORMED),
-        (&["Bearer alice", "Bearer bob"], MALFORMED),
-        (&["Bearer alice", "Basic YWxpY2U="], MALFORMED),
+        (&["Bearer alice", "Bearer bob"], REPEATED),
+        (&["Bearer alice", "Basic YWxpY2U="], REPEATED),
+        (&["", ""], REPEATED),
         (&["Basic YWxpY2U6c2VjcmV0"], UNSUPPORTED),
         (&["basic YWxpY2U6c2VjcmV0"], UNSUPPORTED),
         (&["Basic"], UNSUPPORTED),
@@ -290,15 +292,26 @@ async fn a_request_without_a_token_passes_through_unexchanged() -> TestResult {
 
 #[tokio::test]
 async fn an_anonymous_request_is_observed_with_the_status_it_got() -> TestResult {
-    let closed = std::net::TcpListener::bind("127.0.0.1:0")?;
-    let address = closed.local_addr()?;
-    drop(closed);
-    let config = config_to(&format!("http://{address}"))?;
-    let h = harness_with(&config, Arc::new(FakeExchanger::default()), address)?;
+    let h = closing_harness().await?;
     let answer = send(&h, get("orders.test", "/", None)?).await?;
     assert_eq!(answer.status, StatusCode::BAD_GATEWAY);
     let statuses: Vec<u16> = h.anonymous.passed().iter().map(|p| p.status).collect();
     assert_eq!(statuses, [502]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_abandoned_anonymous_request_is_still_observed() -> TestResult {
+    let h = harness().await?;
+    let abandoned = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        send(&h, get("orders.test", "/stall", None)?),
+    )
+    .await;
+    assert!(abandoned.is_err(), "the downstream answered too soon");
+    let passed = h.anonymous.passed();
+    let statuses: Vec<u16> = passed.iter().map(|p| p.status).collect();
+    assert_eq!(statuses, [499]);
     Ok(())
 }
 
@@ -534,11 +547,7 @@ async fn a_trusted_proxy_with_a_malformed_chain_is_a_400() -> TestResult {
 
 #[tokio::test]
 async fn an_unreachable_downstream_is_a_502() -> TestResult {
-    let closed = std::net::TcpListener::bind("127.0.0.1:0")?;
-    let address = closed.local_addr()?;
-    drop(closed);
-    let config = config_to(&format!("http://{address}"))?;
-    let h = harness_with(&config, Arc::new(FakeExchanger::default()), address)?;
+    let h = closing_harness().await?;
     let answer = send(&h, get("orders.test", "/", Some("alice"))?).await?;
     assert_eq!(answer.status, StatusCode::BAD_GATEWAY);
     Ok(())

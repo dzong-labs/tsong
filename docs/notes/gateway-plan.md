@@ -110,7 +110,8 @@ The gateway fails closed:
 | A trusted proxy's `X-Forwarded-For` hop is not an IP address | 400 |
 | Client IP not allowed | 403 |
 | An `access_token` query parameter | 401 with `WWW-Authenticate: Bearer` |
-| Malformed `Authorization`: empty, `Bearer` without exactly one `b64token`, or more than one header | 401 with `WWW-Authenticate: Bearer` |
+| More than one `Authorization` header | 401 with `WWW-Authenticate: Bearer` |
+| Malformed `Authorization`: empty, or `Bearer` without exactly one `b64token` | 401 with `WWW-Authenticate: Bearer` |
 | A scheme other than `Bearer` | 401 with `WWW-Authenticate: Bearer` |
 | Inbound token invalid | 401 with `WWW-Authenticate: Bearer error="invalid_token"` |
 | Audience or scope not allowed for the route | 403 |

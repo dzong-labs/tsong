@@ -50,12 +50,13 @@ The list is deployed in the bootstrap file, never loaded from the config, and ch
 | `tsong_config_last_fetch_timestamp_seconds` | | When the config store was last read, new revision or not. The config is read only at start until roadmap item 32, so the value stays fixed after start |
 | `tsong_config_revision_info` | `revision` | The revision being served, set to 1: the newest revision read whose config is in use. Across replicas, more than one `revision` means they haven't converged |
 | `tsong_config_tip_rejected` | | 1 while the newest config read was invalid or failed to build, so an older one is still served |
+| `tsong_audit_lines_dropped_total` | | Audit lines dropped because the writer thread had fallen behind |
 
 Labelling by route costs one series per route and status, and one histogram per route. That cost grows with the route count.
 
 ## Audit
 
-Each token exchange writes one JSON line to stdout. That covers every cache miss in the gateway and every call to the token endpoint. A cache hit isn't an exchange, so it writes nothing, and the metrics count it instead. Collecting stdout belongs to the platform.
+Each token exchange writes one JSON line to stdout. That covers every cache miss in the gateway and every call to the token endpoint. A cache hit isn't an exchange, so it writes nothing, and the metrics count it instead. Collecting stdout belongs to the platform. A thread of its own writes the lines, so a request never waits on stdout. It holds up to 65,536 lines; past that a line is dropped and counted in `tsong_audit_lines_dropped_total`. Lines keep the order they were recorded in.
 
 ```json
 {"event":"token_exchange","at":1763251200,"outcome":"issued","request_id":"9f1c…","trace_id":"4bf92f35…",
@@ -65,7 +66,7 @@ Each token exchange writes one JSON line to stdout. That covers every cache miss
 
 `iss` and `sub` are the subject token's, which identify the caller together. A refusal carries the OAuth error code as its `outcome` and its `error_description`. `iss` and `sub` are null when the token never validated. Tokens are never written.
 
-A gateway request with no `Authorization` header is passed through without a token ([roadmap](../../ROADMAP.md) item 33). It isn't an exchange, so it writes a line of its own once it is answered, with the route's host as its `audience`, the client address the allow lists admitted, which is the only identity an anonymous caller has, and the status: the downstream's, or the gateway's own when forwarding failed.
+A gateway request with no `Authorization` header is passed through without a token ([roadmap](../../ROADMAP.md) item 33). It isn't an exchange, so it writes a line of its own once it is answered, with the route's host as its `audience`, the client address the allow lists admitted, which is the only identity an anonymous caller has, and the status: the downstream's, the gateway's own when forwarding failed, or 499 when the caller went away before the answer.
 
 ```json
 {"event":"anonymous_request","at":1763251200,"request_id":"9f1c…","trace_id":"4bf92f35…","audience":"orders.example.com","client":"10.20.1.7","status":200}
